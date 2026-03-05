@@ -1,6 +1,7 @@
 """Main desktop window for CodeRAG Studio."""
 
 import sys
+from typing import Any
 
 import requests
 from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget, QVBoxLayout, QWidget
@@ -39,26 +40,123 @@ class MainWindow(QMainWindow):
         self.ingestion_view.ingest_button.clicked.connect(self._on_ingest)
         self.query_view.query_button.clicked.connect(self._on_query)
 
+        self._active_job_id: str | None = None
+        self._job_poll_enabled = False
+        self._last_logs: list[str] = []
+        self._poll_timer_id = self.startTimer(1200)
+
+        self.ingestion_view.set_status("idle", "Idle")
+
     def _on_ingest(self) -> None:
         """Submit ingestion request and show initial job details."""
+        repo_url = self.ingestion_view.repo_url.text().strip()
+        if not repo_url:
+            self.ingestion_view.set_status("error", "Error")
+            self.ingestion_view.append_log("Repo URL es obligatorio")
+            return
+
         payload = {
             "provider": self.ingestion_view.provider.currentText(),
-            "repo_url": self.ingestion_view.repo_url.text().strip(),
+            "repo_url": repo_url,
             "token": self.ingestion_view.token.text().strip() or None,
             "branch": self.ingestion_view.branch.text().strip() or "main",
         }
+        self.ingestion_view.set_running(True)
+        self.ingestion_view.set_status("running", "En progreso")
+        self.ingestion_view.set_progress(5)
+        self.ingestion_view.set_job_id("")
+        self.ingestion_view.set_repo_id("")
+        self._last_logs = []
+
         try:
             response = requests.post(f"{API_BASE}/repos/ingest", json=payload, timeout=30)
             response.raise_for_status()
             data = response.json()
-            message = (
-                f"Job creado: {data['id']}\n"
-                f"Estado: {data['status']}\n"
-                f"Usa GET /jobs/{{id}} para ver progreso."
-            )
-            self.ingestion_view.logs.setPlainText(message)
+
+            job_id = str(data.get("job_id") or data.get("id") or "")
+            status = str(data.get("status") or "pending")
+            self.ingestion_view.set_running(False)
+            self.ingestion_view.set_job_id(job_id)
+            self.ingestion_view.append_log(f"Job creado: {job_id}")
+            self.ingestion_view.append_log(f"Estado inicial: {status}")
+
+            if job_id:
+                self._active_job_id = job_id
+                self._job_poll_enabled = True
+                self.ingestion_view.set_status("running", "En progreso")
+                self.ingestion_view.set_progress(15)
+                self.ingestion_view.append_log("Monitoreando estado del job...")
+            else:
+                self.ingestion_view.set_status("error", "Error")
+                self.ingestion_view.append_log("No se recibió job_id")
         except Exception as exc:
-            self.ingestion_view.logs.setPlainText(f"Error de ingesta: {exc}")
+            self.ingestion_view.set_running(False)
+            self.ingestion_view.set_status("error", "Error")
+            self.ingestion_view.set_progress(0)
+            self.ingestion_view.append_log(f"Error de ingesta: {exc}")
+
+    def timerEvent(self, event: Any) -> None:  # noqa: N802
+        """Poll ingestion job endpoint and update status widgets."""
+        if event.timerId() != self._poll_timer_id:
+            return
+        if not self._job_poll_enabled or not self._active_job_id:
+            return
+
+        endpoint = f"{API_BASE}/jobs/{self._active_job_id}"
+        try:
+            response = requests.get(endpoint, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            self.ingestion_view.append_log(f"Polling falló: {exc}")
+            return
+
+        self._sync_job_ui(data)
+
+    def _sync_job_ui(self, data: dict[str, Any]) -> None:
+        """Apply polled job state and logs to ingestion controls."""
+        status = str(data.get("status") or "pending").lower()
+        logs = data.get("logs")
+        if isinstance(logs, list):
+            text_logs = [str(line) for line in logs]
+            if text_logs != self._last_logs:
+                self._last_logs = text_logs
+                self.ingestion_view.set_logs(text_logs)
+
+        repo_id = str(data.get("repo_id") or "")
+        if repo_id:
+            self.ingestion_view.set_repo_id(repo_id)
+
+        if status in {"pending", "queued"}:
+            self.ingestion_view.set_status("running", "En progreso")
+            self.ingestion_view.set_progress(15)
+            return
+
+        if status in {"running", "in_progress"}:
+            self.ingestion_view.set_status("running", "En progreso")
+            self.ingestion_view.set_progress(55)
+            return
+
+        if status in {"completed", "done", "success"}:
+            self.ingestion_view.set_status("success", "Completado")
+            self.ingestion_view.set_progress(100)
+            self.ingestion_view.set_running(False)
+            self.ingestion_view.append_log("Job completado")
+            self._job_poll_enabled = False
+            self._active_job_id = None
+            return
+
+        if status in {"failed", "error"}:
+            self.ingestion_view.set_status("error", "Error")
+            self.ingestion_view.set_progress(100)
+            self.ingestion_view.set_running(False)
+            self.ingestion_view.append_log("Job falló")
+            self._job_poll_enabled = False
+            self._active_job_id = None
+            return
+
+        self.ingestion_view.set_status("running", "En progreso")
+        self.ingestion_view.set_progress(30)
 
     def _on_query(self) -> None:
         """Send query request and render answer with citations."""
