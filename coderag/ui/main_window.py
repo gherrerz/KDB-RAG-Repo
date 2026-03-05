@@ -19,7 +19,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         """Build widgets and connect UI events."""
         super().__init__()
-        self.setWindowTitle("CodeRAG Studio")
+        self.setWindowTitle("CodeRAG Studio · Desktop")
         self.resize(1100, 700)
 
         self.ingestion_view = IngestionView()
@@ -28,14 +28,23 @@ class MainWindow(QMainWindow):
 
         query_container = QWidget()
         query_layout = QVBoxLayout()
+        query_layout.setContentsMargins(0, 0, 0, 0)
+        query_layout.setSpacing(12)
         query_layout.addWidget(self.query_view)
         query_layout.addWidget(self.evidence_view)
         query_container.setLayout(query_layout)
 
-        tabs = QTabWidget()
-        tabs.addTab(self.ingestion_view, "Ingesta")
-        tabs.addTab(query_container, "Consulta")
-        self.setCentralWidget(tabs)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.ingestion_view, "Ingesta")
+        self.tabs.addTab(query_container, "Consulta")
+
+        container = QWidget()
+        container_layout = QVBoxLayout()
+        container_layout.setContentsMargins(16, 14, 16, 14)
+        container_layout.setSpacing(10)
+        container_layout.addWidget(self.tabs)
+        container.setLayout(container_layout)
+        self.setCentralWidget(container)
 
         self.ingestion_view.ingest_button.clicked.connect(self._on_ingest)
         self.query_view.query_button.clicked.connect(self._on_query)
@@ -46,6 +55,39 @@ class MainWindow(QMainWindow):
         self._poll_timer_id = self.startTimer(1200)
 
         self.ingestion_view.set_status("idle", "Idle")
+        self._apply_window_theme()
+
+    def _apply_window_theme(self) -> None:
+        """Set consistent dark style for shell widgets and tabs."""
+        self.setStyleSheet(
+            """
+            QMainWindow {
+                background-color: #0B1220;
+            }
+            QTabWidget::pane {
+                border: 1px solid #374151;
+                border-radius: 10px;
+                background-color: #111827;
+                top: -1px;
+            }
+            QTabBar::tab {
+                background-color: #1F2937;
+                color: #CBD5E1;
+                padding: 8px 14px;
+                margin-right: 6px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+            }
+            QTabBar::tab:selected {
+                background-color: #2563EB;
+                color: #F8FAFC;
+                font-weight: 700;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #334155;
+            }
+            """
+        )
 
     def _on_ingest(self) -> None:
         """Submit ingestion request and show initial job details."""
