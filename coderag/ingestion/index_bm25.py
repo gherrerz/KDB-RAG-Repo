@@ -1,0 +1,47 @@
+"""BM25 indexing and retrieval helpers for exact term matching."""
+
+from collections import defaultdict
+
+from rank_bm25 import BM25Okapi
+
+
+def tokenize(text: str) -> list[str]:
+    """Tokenize text with simple whitespace normalization."""
+    return text.lower().replace("\n", " ").split()
+
+
+class BM25Index:
+    """Repository-scoped in-memory BM25 indexes."""
+
+    def __init__(self) -> None:
+        """Initialize empty store for repository corpora."""
+        self._by_repo: dict[str, tuple[BM25Okapi, list[str], list[dict]]] = {}
+
+    def build(self, repo_id: str, docs: list[str], metadatas: list[dict]) -> None:
+        """Build BM25 index for one repository."""
+        corpus = [tokenize(doc) for doc in docs]
+        self._by_repo[repo_id] = (BM25Okapi(corpus), docs, metadatas)
+
+    def query(self, repo_id: str, text: str, top_n: int = 50) -> list[dict]:
+        """Return top BM25 matches for repository and query."""
+        if repo_id not in self._by_repo:
+            return []
+
+        bm25, docs, metadatas = self._by_repo[repo_id]
+        scores = bm25.get_scores(tokenize(text))
+        pairs = list(enumerate(scores))
+        pairs.sort(key=lambda item: item[1], reverse=True)
+        result: list[dict] = []
+        for index, score in pairs[:top_n]:
+            result.append(
+                {
+                    "id": metadatas[index].get("id"),
+                    "text": docs[index],
+                    "score": float(score),
+                    "metadata": metadatas[index],
+                }
+            )
+        return result
+
+
+GLOBAL_BM25 = BM25Index()
