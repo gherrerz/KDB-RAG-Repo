@@ -126,7 +126,7 @@ flowchart TB
 
 - Python 3.10+
 - Git
-- Docker (recomendado para Neo4j/Redis)
+- Docker (recomendado para Neo4j)
 
 ### Pasos
 
@@ -148,6 +148,9 @@ flowchart TB
     docker compose up -d
     ```
 
+> Redis no es requerido en la implementación actual. Se considera opcional/futuro
+> para escenarios de escalado de jobs con colas distribuidas.
+
 ## Configuración
 
 Variables relevantes en `.env`:
@@ -156,6 +159,7 @@ Variables relevantes en `.env`:
 - `OPENAI_EMBEDDING_MODEL`, `OPENAI_ANSWER_MODEL`, `OPENAI_VERIFIER_MODEL`.
 - `CHROMA_PATH`: ruta persistente de Chroma.
 - `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`.
+- `REDIS_URL` (opcional/futuro): endpoint para cola de jobs distribuida.
 - `WORKSPACE_PATH`: ruta de repos clonados.
 - `MAX_CONTEXT_TOKENS`, `GRAPH_HOPS`.
 
