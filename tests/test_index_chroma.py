@@ -1,4 +1,4 @@
-"""Tests for Chroma index batching behavior."""
+"""Pruebas de comportamiento de procesamiento por lotes del índice Chroma."""
 
 from typing import Any
 
@@ -9,10 +9,10 @@ from coderag.ingestion.index_chroma import ChromaIndex
 
 
 class _FakeCollection:
-    """Fake Chroma collection for unit testing upsert calls."""
+    """Colección Chroma falsa para pruebas unitarias de llamadas upsert."""
 
     def __init__(self, fail_once: bool = False) -> None:
-        """Initialize fake collection state."""
+        """Inicialice el estado de colección falsa."""
         self.calls: list[int] = []
         self.fail_once = fail_once
 
@@ -23,26 +23,26 @@ class _FakeCollection:
         embeddings: list[list[float]],
         metadatas: list[dict[str, Any]],
     ) -> None:
-        """Record call size and optionally simulate first-call failure."""
+        """Registre el tamaño de la llamada y, opcionalmente, simule el error de la primera llamada."""
         if self.fail_once:
             self.fail_once = False
             raise InvalidDimensionException("dim")
         self.calls.append(len(ids))
 
     def query(self, **kwargs: Any) -> dict[str, list[list[Any]]]:
-        """Provide minimal query response for completeness."""
+        """Proporcione una respuesta de consulta mínima para que esté completa."""
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
 
 class _FakeClient:
-    """Fake Chroma client with configurable batch size."""
+    """Cliente Chroma falso con tamaño de lote configurable."""
 
     def __init__(self) -> None:
-        """Initialize collections map for fake client."""
+        """Inicializar mapa de colecciones para cliente falso."""
         self.collections: dict[str, _FakeCollection] = {}
 
     def get_or_create_collection(self, name: str) -> _FakeCollection:
-        """Return or create fake collection by name."""
+        """Devuelve o crea una colección falsa por nombre."""
         collection = self.collections.get(name)
         if collection is None:
             collection = _FakeCollection()
@@ -50,17 +50,17 @@ class _FakeClient:
         return collection
 
     def delete_collection(self, name: str) -> None:
-        """Delete fake collection."""
+        """Elimina una colección falsa."""
         if name in self.collections:
             del self.collections[name]
 
     def get_max_batch_size(self) -> int:
-        """Return strict fake max batch size for test assertions."""
+        """Devuelve un tamaño de lote máximo falso estricto para afirmaciones de prueba."""
         return 3
 
 
 def test_upsert_is_split_by_chroma_max_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Splits upserts into multiple calls that respect max batch size."""
+    """Divide los upserts en múltiples llamadas que respetan el tamaño máximo de lote."""
     fake_client = _FakeClient()
 
     import coderag.ingestion.index_chroma as module

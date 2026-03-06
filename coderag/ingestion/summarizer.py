@@ -1,4 +1,4 @@
-"""Summarization utilities for files and modules."""
+"""Utilidades de resumen para archivos y módulos."""
 
 from collections import defaultdict
 
@@ -6,7 +6,7 @@ from coderag.core.models import ScannedFile
 
 
 def summarize_file(file_obj: ScannedFile) -> str:
-    """Produce a compact deterministic summary from file content."""
+    """Produzca un resumen determinista compacto a partir del contenido del archivo."""
     lines = file_obj.content.splitlines()
     head = "\n".join(lines[:20])
     return (
@@ -18,7 +18,7 @@ def summarize_file(file_obj: ScannedFile) -> str:
 
 
 def summarize_modules(scanned_files: list[ScannedFile]) -> dict[str, str]:
-    """Build module summaries grouped by top-level folder."""
+    """Cree resúmenes de módulos agrupados por carpeta de nivel superior."""
     grouped: dict[str, list[ScannedFile]] = defaultdict(list)
     for file_obj in scanned_files:
         root = file_obj.path.split("/", 1)[0] if "/" in file_obj.path else "."

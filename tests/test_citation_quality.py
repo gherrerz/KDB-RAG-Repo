@@ -1,4 +1,4 @@
-"""Tests for citation quality filtering and prioritization."""
+"""Pruebas para filtrado y priorización de la calidad de las citas."""
 
 from coderag.api.query_service import _citation_priority, _is_noisy_path
 from coderag.core.models import Citation
@@ -13,7 +13,7 @@ def test_is_noisy_path_filters_non_informative_paths() -> None:
 
 
 def test_citation_priority_prefers_code_files_and_structured_paths() -> None:
-    """Prioritizes file paths above module-only labels in a generic way."""
+    """Prioriza las rutas de los archivos por encima de las etiquetas de solo módulo de forma genérica."""
     file_path = Citation(
         path="services/api/index.ts",
         start_line=1,

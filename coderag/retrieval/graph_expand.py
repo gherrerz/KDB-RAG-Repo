@@ -1,4 +1,4 @@
-"""GraphRAG expansion module using Neo4j neighbors."""
+"""Módulo de expansión GraphRAG que utiliza vecinos Neo4j."""
 
 from coderag.core.models import RetrievalChunk
 from coderag.core.settings import get_settings
@@ -6,7 +6,7 @@ from coderag.ingestion.graph_builder import GraphBuilder
 
 
 def expand_with_graph(chunks: list[RetrievalChunk]) -> list[dict]:
-    """Expand context by traversing graph neighbors from retrieved symbols."""
+    """Amplíe el contexto atravesando los vecinos del gráfico desde los símbolos recuperados."""
     symbol_ids = [item.id for item in chunks]
     if not symbol_ids:
         return []

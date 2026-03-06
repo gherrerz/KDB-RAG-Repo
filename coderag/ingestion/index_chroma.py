@@ -1,4 +1,4 @@
-"""ChromaDB wrapper for vector indexing and lookup."""
+"""Contenedor ChromaDB para indexación y búsqueda de vectores."""
 
 from typing import Any
 
@@ -18,10 +18,10 @@ COLLECTIONS = [
 
 
 class ChromaIndex:
-    """Abstraction over Chroma persistent collections."""
+    """Abstracción sobre colecciones persistentes de Chroma."""
 
     def __init__(self) -> None:
-        """Initialize persistent Chroma client and collections."""
+        """Inicialice el cliente y las colecciones persistentes de Chroma."""
         settings = get_settings()
         self.client = chromadb.PersistentClient(
             path=str(settings.chroma_path),
@@ -40,7 +40,7 @@ class ChromaIndex:
         embeddings: list[list[float]],
         metadatas: list[dict[str, Any]],
     ) -> None:
-        """Insert or update vectors and metadata in collection."""
+        """Insertar o actualizar vectores y metadatos en la colección."""
         batch_size = self._max_batch_size()
         try:
             self._upsert_batched(
@@ -65,7 +65,7 @@ class ChromaIndex:
             )
 
     def _max_batch_size(self) -> int:
-        """Return safe maximum batch size supported by Chroma runtime."""
+        """Devuelve el tamaño de lote máximo seguro admitido por el tiempo de ejecución de Chroma."""
         getter = getattr(self.client, "get_max_batch_size", None)
         if callable(getter):
             value = getter()
@@ -82,7 +82,7 @@ class ChromaIndex:
         metadatas: list[dict[str, Any]],
         batch_size: int,
     ) -> None:
-        """Upsert records in chunks to avoid Chroma batch limits."""
+        """Realiza upsert por lotes para evitar límites de tamaño en Chroma."""
         for index in range(0, len(ids), batch_size):
             end = index + batch_size
             self.collections[collection_name].upsert(
@@ -99,7 +99,7 @@ class ChromaIndex:
         top_n: int,
         where: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Search vectors by similarity and optional metadata filter."""
+        """Busque vectores por similitud y filtro de metadatos opcional."""
         try:
             return self.collections[collection_name].query(
                 query_embeddings=[query_embedding],

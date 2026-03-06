@@ -1,4 +1,4 @@
-"""Embedding generation helpers using OpenAI Responses stack."""
+"""Utilidades de generación de embeddings con OpenAI Responses."""
 
 import hashlib
 
@@ -8,17 +8,17 @@ from coderag.core.settings import get_settings
 
 
 def _fallback_embedding(text: str, dimension: int = 256) -> list[float]:
-    """Generate deterministic fallback vectors for offline operation."""
+    """Genere vectores de respaldo deterministas para operaciones fuera de línea."""
     digest = hashlib.sha256(text.encode("utf-8")).digest()
     values = list(digest) * (dimension // len(digest) + 1)
     return [float(item) / 255.0 for item in values[:dimension]]
 
 
 class EmbeddingClient:
-    """Client abstraction to produce vectors for indexing and search."""
+    """Abstracción del cliente para producir vectores para indexación y búsqueda."""
 
     def __init__(self) -> None:
-        """Initialize client from environment settings."""
+        """Inicialice el cliente desde la configuración del entorno."""
         settings = get_settings()
         self.model = settings.openai_embedding_model
         self.api_key = settings.openai_api_key
@@ -27,13 +27,13 @@ class EmbeddingClient:
         self.batch_size = 64
 
     def _sanitize_text(self, text: str) -> str:
-        """Trim long input strings to keep embedding requests within limits."""
+        """Recorta cadenas de entrada largas para mantener las solicitudes de embeddings dentro de los límites."""
         if len(text) <= self.max_chars_per_text:
             return text
         return text[: self.max_chars_per_text]
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Embed list of strings using OpenAI API or deterministic fallback."""
+        """Incruste una lista de cadenas utilizando la API OpenAI o un respaldo determinista."""
         if not texts:
             return []
 

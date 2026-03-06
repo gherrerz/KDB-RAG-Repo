@@ -1,1 +1,1 @@
-"""Desktop UI package built with PySide6."""
+"""Paquete de interfaz de usuario de escritorio creado con PySide6."""

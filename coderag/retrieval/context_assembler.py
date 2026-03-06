@@ -1,4 +1,4 @@
-"""Context assembly for final LLM prompt input."""
+"""Ensamblado de contexto para la entrada del mensaje final de LLM."""
 
 from coderag.core.models import RetrievalChunk
 
@@ -8,7 +8,7 @@ def assemble_context(
     graph_records: list[dict],
     max_tokens: int,
 ) -> str:
-    """Build bounded context payload with snippets and graph evidence."""
+    """Cree una carga útil de contexto limitada con fragmentos y evidencia gráfica."""
     sections: list[str] = []
     for chunk in chunks:
         metadata = chunk.metadata

@@ -1,1 +1,1 @@
-"""Retrieval and context assembly modules."""
+"""Módulos de recuperación y ensamblaje de contexto."""

@@ -1,4 +1,4 @@
-"""API tests for primary endpoints."""
+"""Pruebas API para puntos finales primarios."""
 
 from fastapi.testclient import TestClient
 
@@ -8,14 +8,14 @@ app = server.app
 
 
 def test_get_missing_job_returns_404() -> None:
-    """Returns not found for unknown ingestion job id."""
+    """No se encontraron devoluciones para una identificación de trabajo de ingesta desconocida."""
     client = TestClient(app)
     response = client.get("/jobs/non-existent")
     assert response.status_code == 404
 
 
 def test_admin_reset_returns_summary(monkeypatch) -> None:
-    """Returns clear summary payload when reset operation succeeds."""
+    """Devuelve una carga útil resumida clara cuando la operación de reinicio se realiza correctamente."""
 
     def fake_reset_all_data() -> tuple[list[str], list[str]]:
         return ["BM25 en memoria", "Grafo Neo4j"], ["warning de prueba"]
@@ -33,7 +33,7 @@ def test_admin_reset_returns_summary(monkeypatch) -> None:
 
 
 def test_list_repos_returns_repo_id_catalog(monkeypatch) -> None:
-    """Returns known repository identifiers for query dropdown."""
+    """Devuelve identificadores de repositorio conocidos para el menú desplegable de consultas."""
 
     def fake_list_repo_ids() -> list[str]:
         return ["mall", "api-service"]
@@ -47,7 +47,7 @@ def test_list_repos_returns_repo_id_catalog(monkeypatch) -> None:
 
 
 def test_inventory_query_endpoint_returns_paginated_payload(monkeypatch) -> None:
-    """Returns structured inventory response through dedicated endpoint."""
+    """Devuelve una respuesta de inventario estructurada a través de un punto final dedicado."""
     from coderag.api import query_service
 
     def fake_run_inventory_query(

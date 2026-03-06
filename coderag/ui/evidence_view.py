@@ -1,4 +1,4 @@
-"""Evidence table view for citations returned by query pipeline."""
+"""Vista de tabla de evidencia para citas devueltas por canal de consulta."""
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -12,10 +12,10 @@ from PySide6.QtWidgets import (
 
 
 class EvidenceView(QWidget):
-    """Displays retrieved evidence rows in a read-only table."""
+    """Muestra filas de pruebas recuperadas en una tabla de solo lectura."""
 
     def __init__(self) -> None:
-        """Initialize evidence table widget."""
+        """Inicializa el componente de tabla de evidencia."""
         super().__init__()
         self.title_label = QLabel("Evidencia")
 
@@ -73,7 +73,7 @@ class EvidenceView(QWidget):
         )
 
     def set_citations(self, citations: list[object]) -> None:
-        """Render citations in table rows."""
+        """Representar citas en filas de tabla."""
         self.table.setRowCount(len(citations))
         for index, citation in enumerate(citations):
             path = citation["path"] if isinstance(citation, dict) else citation.path

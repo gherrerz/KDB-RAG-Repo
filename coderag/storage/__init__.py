@@ -1,1 +1,1 @@
-"""Storage modules for metadata persistence."""
+"""Módulos de almacenamiento para persistencia de metadatos."""

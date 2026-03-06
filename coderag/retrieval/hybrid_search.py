@@ -1,4 +1,4 @@
-"""Hybrid retrieval combining vector similarity and BM25 scores."""
+"""Recuperación híbrida que combina similitud de vectores y puntuaciones de BM25."""
 
 from collections import defaultdict
 
@@ -9,7 +9,7 @@ from coderag.ingestion.index_chroma import ChromaIndex
 
 
 def hybrid_search(repo_id: str, query: str, top_n: int = 50) -> list[RetrievalChunk]:
-    """Search indexed repository data with vector and BM25 fusion."""
+    """Busque datos de repositorios indexados con vector y fusión BM25."""
     embedder = EmbeddingClient()
     vector_results: list[dict] = []
     if embedder.client is not None:

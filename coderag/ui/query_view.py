@@ -1,4 +1,4 @@
-"""Query view widgets for asking repository questions."""
+"""Widgets de vista de consultas para hacer preguntas sobre el repositorio."""
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
@@ -17,10 +17,10 @@ from PySide6.QtWidgets import (
 
 
 class QueryView(QWidget):
-    """UI panel that handles natural language queries."""
+    """Panel de interfaz que gestiona consultas en lenguaje natural."""
 
     def __init__(self) -> None:
-        """Initialize query form and answer output widgets."""
+        """Inicialice el formulario de consulta y responda los widgets de salida."""
         super().__init__()
 
         self.title_label = QLabel("Consulta")
@@ -157,7 +157,7 @@ class QueryView(QWidget):
         )
 
     def set_status(self, state: str, text: str) -> None:
-        """Update query status chip state and text."""
+        """Actualice el estado y el texto del chip de estado de la consulta."""
         valid_states = {"idle", "running", "success", "error"}
         selected_state = state if state in valid_states else "idle"
         self.status_chip.setProperty("state", selected_state)
@@ -172,7 +172,7 @@ class QueryView(QWidget):
             self._set_input_bar_state("idle")
 
     def set_running(self, running: bool) -> None:
-        """Enable and disable controls while query request is in progress."""
+        """Habilite y deshabilite los controles mientras la solicitud de consulta está en curso."""
         self.repo_id.setDisabled(running)
         self.refresh_repo_ids_button.setDisabled(running)
         self.query_input.setDisabled(running)
@@ -181,15 +181,15 @@ class QueryView(QWidget):
         self._set_input_bar_state("running" if running else "idle")
 
     def get_repo_id_text(self) -> str:
-        """Return current repository id entered or selected by user."""
+        """Devuelve la identificación del repositorio actual ingresada o seleccionada por el usuario."""
         return self.repo_id.currentText().strip()
 
     def clear_repo_id(self) -> None:
-        """Clear repository id combo editable text."""
+        """Borrar texto editable combinado de identificación del repositorio."""
         self.repo_id.setCurrentIndex(-1)
 
     def set_repo_ids(self, repo_ids: list[str]) -> None:
-        """Load available repository ids in dropdown, preserving current value."""
+        """Cargue los identificadores de repositorio disponibles en el menú desplegable, preservando el valor actual."""
         current = self.repo_id.currentText().strip()
         self._repo_ids = [item for item in repo_ids if item.strip()]
         self.repo_id.blockSignals(True)
@@ -205,33 +205,33 @@ class QueryView(QWidget):
         self.repo_id.blockSignals(False)
 
     def has_repo_id(self, repo_id: str) -> bool:
-        """Return whether a repository id exists in the loaded catalog."""
+        """Devuelve si existe una identificación de repositorio en el catálogo cargado."""
         return repo_id in self._repo_ids
 
     def _set_input_bar_state(self, state: str) -> None:
-        """Apply visual state to query input bar."""
+        """Aplicar estado visual a la barra de entrada de consulta."""
         self.input_bar.setProperty("state", state)
         self.input_bar.style().unpolish(self.input_bar)
         self.input_bar.style().polish(self.input_bar)
 
     def get_question_text(self) -> str:
-        """Return trimmed question input text."""
+        """Devuelve el texto de entrada de pregunta recortado."""
         return self.query_input.text().strip()
 
     def clear_question(self) -> None:
-        """Clear query input after successful submission."""
+        """Borre la entrada de la consulta después de un envío exitoso."""
         self.query_input.clear()
 
     def append_user_message(self, text: str) -> None:
-        """Append user question to chat history."""
+        """Agregue la pregunta del usuario al historial de chat."""
         self._append_message(text=text, role="user", error=False)
 
     def append_assistant_message(self, text: str, error: bool = False) -> None:
-        """Append assistant response or error to chat history."""
+        """Agregue la respuesta o el error del asistente al historial de chat."""
         self._append_message(text=text, role="assistant", error=error)
 
     def _append_message(self, text: str, role: str, error: bool) -> None:
-        """Append a full-width, selectable chat transcript entry."""
+        """Agregue una entrada de transcripción de chat seleccionable y de ancho completo."""
         icon = "👤" if role == "user" else "🤖"
         title = "Pregunta" if role == "user" else "Respuesta"
         if error:
@@ -244,15 +244,15 @@ class QueryView(QWidget):
         QTimer.singleShot(0, self._scroll_to_bottom)
 
     def _scroll_to_bottom(self) -> None:
-        """Scroll chat view to latest message."""
+        """Desplácese por la vista de chat hasta el último mensaje."""
         scrollbar = self.history_output.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
     def copy_all_history(self) -> None:
-        """Copy entire conversation history to clipboard."""
+        """Copie todo el historial de conversaciones al portapapeles."""
         QApplication.clipboard().setText(self.history_output.toPlainText())
 
     def _trigger_submit(self) -> None:
-        """Trigger query button click from keyboard Enter key."""
+        """Haga clic en el botón de consulta desde el teclado. Tecla Intro."""
         if self.query_button.isEnabled():
             self.query_button.click()

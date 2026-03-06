@@ -1,4 +1,4 @@
-"""Neo4j integration for code knowledge graph construction."""
+"""Integración de Neo4j para la construcción de gráficos de conocimiento de código."""
 
 from typing import Any
 
@@ -9,10 +9,10 @@ from coderag.core.settings import get_settings
 
 
 class GraphBuilder:
-    """Graph builder to store files, symbols, and relationships."""
+    """Generador de gráficos para almacenar archivos, símbolos y relaciones."""
 
     def __init__(self) -> None:
-        """Create Neo4j driver from settings."""
+        """Cree el controlador Neo4j desde la configuración."""
         settings = get_settings()
         self.driver = GraphDatabase.driver(
             settings.neo4j_uri,
@@ -20,7 +20,7 @@ class GraphBuilder:
         )
 
     def close(self) -> None:
-        """Close Neo4j driver."""
+        """Cierra el controlador de Neo4j."""
         self.driver.close()
 
     def upsert_repo_graph(
@@ -29,7 +29,7 @@ class GraphBuilder:
         scanned_files: list[ScannedFile],
         symbols: list[SymbolChunk],
     ) -> None:
-        """Insert repository graph nodes, files, modules, and symbols."""
+        """Inserte nodos, archivos, módulos y símbolos del gráfico del repositorio."""
         file_query = """
         MERGE (r:Repo {id: $repo_id})
         MERGE (m:Module {repo_id: $repo_id, path: $module_path})
@@ -79,7 +79,7 @@ class GraphBuilder:
         limit: int = 500,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Query graph for entities matching target term within optional module."""
+        """Gráfico de consulta para entidades que coincidan con el término objetivo dentro del módulo opcional."""
         query = """
         MATCH (f:File {repo_id: $repo_id})
         WHERE (
@@ -137,7 +137,7 @@ class GraphBuilder:
         target_term: str,
         module_name: str | None = None,
     ) -> int:
-        """Count graph inventory entities matching target term and module filter."""
+        """Cuente las entidades del inventario del gráfico que coincidan con el término objetivo y el filtro del módulo."""
         query = """
         MATCH (f:File {repo_id: $repo_id})
         WHERE (
@@ -188,7 +188,7 @@ class GraphBuilder:
         limit: int = 500,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """List files within a module path for broad inventory requests."""
+        """Enumere archivos dentro de una ruta de módulo para solicitudes de inventario amplias."""
         query = """
         MATCH (f:File {repo_id: $repo_id})
         WHERE (
@@ -218,7 +218,7 @@ class GraphBuilder:
             return [record.data() for record in records]
 
     def expand_symbols(self, symbol_ids: list[str], hops: int = 2) -> list[dict[str, Any]]:
-        """Expand graph neighborhood for symbols using variable-length path."""
+        """Expanda la vecindad del gráfico para símbolos usando una ruta de longitud variable."""
         query = """
         MATCH (s:Symbol)
         WHERE s.id IN $symbol_ids

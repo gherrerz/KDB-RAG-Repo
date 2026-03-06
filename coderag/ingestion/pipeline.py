@@ -1,4 +1,4 @@
-"""High-level ingestion pipeline orchestrator."""
+"""Orquestador de canalización de ingesta de alto nivel."""
 
 from typing import Callable
 
@@ -22,7 +22,7 @@ def ingest_repository(
     commit: str | None,
     logger: LoggerFn,
 ) -> str:
-    """Run full repository ingestion and return repository identifier."""
+    """Ejecute la ingesta completa del repositorio y devuelva el identificador del repositorio."""
     settings = get_settings()
     logger("Clonando repositorio...")
     repo_id, repo_path = clone_repository(
@@ -59,7 +59,7 @@ def _index_vectors(
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
 ) -> None:
-    """Generate and persist vectors for symbols/files/modules."""
+    """Generar y conservar vectores para símbolos/archivos/módulos."""
     chroma = ChromaIndex()
     embedder = EmbeddingClient()
 
@@ -138,7 +138,7 @@ def _index_bm25(
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
 ) -> None:
-    """Build BM25 index from symbols, files, and module summaries."""
+    """Cree un índice BM25 a partir de símbolos, archivos y resúmenes de módulos."""
     docs: list[str] = [chunk.snippet for chunk in symbols]
     metadatas: list[dict] = [
         {
@@ -195,7 +195,7 @@ def _index_graph(
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
 ) -> None:
-    """Populate Neo4j graph store with file-symbol relationships."""
+    """Llene el almacén de gráficos Neo4j con relaciones archivo-símbolo."""
     graph = GraphBuilder()
     try:
         graph.upsert_repo_graph(

@@ -1,4 +1,4 @@
-"""Job management for ingestion with optional Redis/RQ integration."""
+"""Gestión de trabajos para ingesta con integración opcional de Redis/RQ."""
 
 from datetime import datetime
 from threading import Thread
@@ -10,10 +10,10 @@ from coderag.storage.metadata_store import MetadataStore
 
 
 class JobManager:
-    """Tracks ingestion jobs and executes them in background threads."""
+    """Realiza un seguimiento de los trabajos de ingesta y los ejecuta en subprocesos en segundo plano."""
 
     def __init__(self) -> None:
-        """Initialize manager with metadata storage."""
+        """Inicialice el administrador con almacenamiento de metadatos."""
         settings = get_settings()
         self._metadata_path = settings.workspace_path.parent / "metadata.db"
         self._workspace_path = settings.workspace_path
@@ -21,7 +21,7 @@ class JobManager:
         self._jobs: dict[str, JobInfo] = {}
 
     def list_repo_ids(self) -> list[str]:
-        """Return known repository ids from metadata and local workspace."""
+        """Devuelve identificadores de repositorio conocidos de metadatos y espacio de trabajo local."""
         repo_ids = set(self.store.list_repo_ids())
         if self._workspace_path.exists() and self._workspace_path.is_dir():
             for child in self._workspace_path.iterdir():
@@ -30,7 +30,7 @@ class JobManager:
         return sorted(repo_ids)
 
     def reset_all_data(self) -> tuple[list[str], list[str]]:
-        """Reset all persisted indexes and in-memory job/cache state."""
+        """Restablezca todos los índices persistentes y el estado del trabajo/caché en memoria."""
         running_jobs = [
             job_id
             for job_id, job in self._jobs.items()
@@ -51,7 +51,7 @@ class JobManager:
         return cleared, warnings
 
     def create_ingest_job(self, request: RepoIngestRequest) -> JobInfo:
-        """Create and start an asynchronous ingestion job."""
+        """Cree e inicie un trabajo de ingesta asincrónica."""
         job_id = str(uuid4())
         job = JobInfo(id=job_id, status=JobStatus.queued)
         self._jobs[job_id] = job
@@ -62,14 +62,14 @@ class JobManager:
         return job
 
     def get_job(self, job_id: str) -> JobInfo | None:
-        """Get job state from memory or persisted storage."""
+        """Obtenga el estado del trabajo desde la memoria o el almacenamiento persistente."""
         job = self._jobs.get(job_id)
         if job is not None:
             return job
         return self.store.get_job(job_id)
 
     def _run_ingest_job(self, job_id: str, request: RepoIngestRequest) -> None:
-        """Execute ingestion workflow and update status transitions."""
+        """Ejecute el flujo de trabajo de ingesta y actualice las transiciones de estado."""
         job = self._jobs[job_id]
         job.status = JobStatus.running
         job.updated_at = datetime.utcnow()

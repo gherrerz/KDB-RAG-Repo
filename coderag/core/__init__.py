@@ -1,1 +1,1 @@
-"""Core shared modules for CodeRAG."""
+"""Módulos principales compartidos para CodeRAG."""

@@ -1,4 +1,4 @@
-"""Tests for ingestion pipeline orchestration behavior."""
+"""Pruebas para el comportamiento de orquestación de la canalización de ingesta."""
 
 from pathlib import Path
 
@@ -12,7 +12,7 @@ def test_ingest_repository_continues_on_graph_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Pipeline logs warning and completes even when Neo4j indexing fails."""
+    """La canalización registra una advertencia y se completa incluso cuando falla la indexación de Neo4j."""
     scanned = [ScannedFile(path="a.py", language="python", content="def a():\n pass")]
     symbols = [
         SymbolChunk(

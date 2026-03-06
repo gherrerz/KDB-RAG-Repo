@@ -1,4 +1,4 @@
-"""System reset utilities for clearing indexed and persisted data."""
+"""Utilidades de reinicio del sistema para borrar datos indexados y persistentes."""
 
 import gc
 import os
@@ -18,13 +18,13 @@ from coderag.ingestion.index_chroma import COLLECTIONS
 
 
 def _on_remove_error(func, path: str, exc_info) -> None:
-    """Handle read-only files during directory cleanup on Windows."""
+    """Gestiona archivos de solo lectura durante limpieza de directorios en Windows."""
     os.chmod(path, stat.S_IWRITE)
     func(path)
 
 
 def _remove_path(path: Path, retries: int = 3) -> None:
-    """Delete file or directory with retries for transient file locks."""
+    """Elimine un archivo o directorio con reintentos para bloqueos de archivos transitorios."""
     if not path.exists():
         return
 
@@ -45,7 +45,7 @@ def _remove_path(path: Path, retries: int = 3) -> None:
 
 
 def _compact_chroma_sqlite(chroma_path: Path) -> None:
-    """Force SQLite file compaction after logical collection deletion."""
+    """Fuerza la compactación del archivo SQLite tras borrar colecciones lógicamente."""
     db_file = chroma_path / "chroma.sqlite3"
     if not db_file.exists():
         return
@@ -61,7 +61,7 @@ def _compact_chroma_sqlite(chroma_path: Path) -> None:
 
 
 def reset_all_storage() -> tuple[list[str], list[str]]:
-    """Clear vector, lexical, graph, workspace, and metadata persistence."""
+    """Persistencia clara de vectores, léxicos, gráficos, espacios de trabajo y metadatos."""
     settings = get_settings()
     cleared: list[str] = []
     warnings: list[str] = []

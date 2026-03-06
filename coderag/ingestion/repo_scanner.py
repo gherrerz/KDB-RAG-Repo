@@ -1,4 +1,4 @@
-"""Repository scanner for selecting files relevant for indexing."""
+"""Escáner de repositorio para seleccionar archivos relevantes para la indexación."""
 
 from pathlib import Path
 
@@ -29,12 +29,12 @@ EXCLUDED_DIRS = {
 
 
 def detect_language(path: Path) -> str:
-    """Detect a logical language label from file extension."""
+    """Detecta una etiqueta de lenguaje lógico a partir de una extensión de archivo."""
     return LANG_MAP.get(path.suffix.lower(), "text")
 
 
 def scan_repository(repo_path: Path, max_file_size: int = 200_000) -> list[ScannedFile]:
-    """Collect source and documentation files from repository."""
+    """Recopile archivos fuente y de documentación del repositorio."""
     scanned: list[ScannedFile] = []
     for file_path in repo_path.rglob("*"):
         if not file_path.is_file():

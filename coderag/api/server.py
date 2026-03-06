@@ -1,4 +1,4 @@
-"""FastAPI server for ingestion and query operations."""
+"""Servidor FastAPI para operaciones de ingesta y consulta."""
 
 from fastapi import FastAPI, HTTPException
 
@@ -22,13 +22,13 @@ jobs = JobManager()
 
 @app.post("/repos/ingest", response_model=JobInfo)
 def ingest_repo(request: RepoIngestRequest) -> JobInfo:
-    """Create ingestion job and return initial job state."""
+    """Cree un trabajo de ingesta y devuelva el estado inicial del trabajo."""
     return jobs.create_ingest_job(request)
 
 
 @app.get("/jobs/{job_id}", response_model=JobInfo)
 def get_job(job_id: str) -> JobInfo:
-    """Return current status of ingestion job."""
+    """Devuelve el estado actual del trabajo de ingesta."""
     job = jobs.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job no encontrado")
@@ -37,7 +37,7 @@ def get_job(job_id: str) -> JobInfo:
 
 @app.post("/query", response_model=QueryResponse)
 def query_repo(request: QueryRequest) -> QueryResponse:
-    """Run hybrid query pipeline for one indexed repository."""
+    """Ejecute una canalización de consultas híbrida para un repositorio indexado."""
     from coderag.api.query_service import run_query
 
     return run_query(
@@ -50,7 +50,7 @@ def query_repo(request: QueryRequest) -> QueryResponse:
 
 @app.post("/inventory/query", response_model=InventoryQueryResponse)
 def query_inventory(request: InventoryQueryRequest) -> InventoryQueryResponse:
-    """Run graph-first paginated inventory query for broad list intents."""
+    """Ejecute una consulta de inventario paginado primero en el gráfico para obtener intenciones de lista amplia."""
     from coderag.api.query_service import run_inventory_query
 
     return run_inventory_query(
@@ -63,13 +63,13 @@ def query_inventory(request: InventoryQueryRequest) -> InventoryQueryResponse:
 
 @app.get("/repos", response_model=RepoCatalogResponse)
 def list_repos() -> RepoCatalogResponse:
-    """Return repository identifiers currently available for querying."""
+    """Devuelve los identificadores del repositorio actualmente disponibles para consultas."""
     return RepoCatalogResponse(repo_ids=jobs.list_repo_ids())
 
 
 @app.post("/admin/reset", response_model=ResetResponse)
 def reset_all_data() -> ResetResponse:
-    """Reset all indexed data stores and local ingestion workspace."""
+    """Restablezca todos los almacenes de datos indexados y el espacio de trabajo de ingesta local."""
     try:
         cleared, warnings = jobs.reset_all_data()
     except RuntimeError as exc:

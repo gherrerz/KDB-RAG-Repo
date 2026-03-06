@@ -1,4 +1,4 @@
-"""Git client utilities for cloning and preparing repositories."""
+"""Utilidades del cliente Git para clonar y preparar repositorios."""
 
 import hashlib
 import os
@@ -13,7 +13,7 @@ from uuid import uuid4
 
 
 def build_repo_id(repo_url: str, branch: str) -> str:
-    """Create repository identifier from URL tail with deterministic fallback."""
+    """Cree un identificador de repositorio desde la cola de la URL con respaldo determinista."""
     del branch  # Branch no longer contributes to public repo identifier.
 
     normalized = repo_url.strip()
@@ -50,7 +50,7 @@ def _on_remove_error(func, path: str, exc_info) -> None:
 
 
 def _safe_remove_tree(path: Path, retries: int = 3) -> bool:
-    """Remove directory recursively with retries and read-only handling."""
+    """Elimine el directorio de forma recursiva con reintentos y manejo de solo lectura."""
     for _ in range(retries):
         try:
             shutil.rmtree(path, onerror=_on_remove_error)
@@ -66,7 +66,7 @@ def clone_repository(
     branch: str = "main",
     commit: str | None = None,
 ) -> tuple[str, Path]:
-    """Clone repository into workspace and return repo_id and local path."""
+    """Clona el repositorio en el espacio de trabajo y devuelve repo_id y la ruta local."""
     repo_id = build_repo_id(repo_url, branch)
     destination = destination_root / repo_id
     if destination.exists():

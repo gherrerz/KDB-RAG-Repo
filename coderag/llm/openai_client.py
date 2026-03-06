@@ -1,4 +1,4 @@
-"""OpenAI client wrapper for answer generation and validation."""
+"""Envoltorio de cliente OpenAI para generación y validación de respuestas."""
 
 import re
 import unicodedata
@@ -14,7 +14,7 @@ from coderag.llm.prompts import (
 
 
 def _normalize_verifier_result(value: str) -> str:
-    """Normalize verifier text for robust verdict parsing."""
+    """Normalice el texto del verificador para un análisis sólido del veredicto."""
     lowered = value.strip().lower()
     decomposed = unicodedata.normalize("NFD", lowered)
     without_marks = "".join(
@@ -24,7 +24,7 @@ def _normalize_verifier_result(value: str) -> str:
 
 
 def _is_verifier_result_valid(value: str) -> bool:
-    """Interpret verifier verdict from normalized free-text output."""
+    """Interprete el veredicto del verificador a partir de la salida de texto libre normalizada."""
     normalized = _normalize_verifier_result(value)
     if not normalized:
         return False
@@ -39,10 +39,10 @@ def _is_verifier_result_valid(value: str) -> bool:
 
 
 class AnswerClient:
-    """Service that calls OpenAI Responses API with safe fallbacks."""
+    """Servicio que llama a la API OpenAI Responses con respaldos seguros."""
 
     def __init__(self) -> None:
-        """Initialize OpenAI client from environment."""
+        """Inicialice el cliente OpenAI desde el entorno."""
         settings = get_settings()
         self.api_key = settings.openai_api_key
         self.answer_model = settings.openai_answer_model
@@ -55,7 +55,7 @@ class AnswerClient:
         prompt: str,
         timeout_seconds: float | None = None,
     ) -> str:
-        """Execute Responses API call and return plain text output."""
+        """Ejecute la llamada API de Responses y devuelva resultados de texto sin formato."""
         if self.client is None:
             return "No se encontró información en el repositorio."
 
@@ -91,7 +91,7 @@ class AnswerClient:
         context: str,
         timeout_seconds: float | None = None,
     ) -> str:
-        """Generate context-grounded answer for a user question."""
+        """Genere una respuesta basada en el contexto para una pregunta de un usuario."""
         prompt = build_answer_prompt(query=query, context=context)
         return self._call(
             self.answer_model,
@@ -101,7 +101,7 @@ class AnswerClient:
 
     @property
     def enabled(self) -> bool:
-        """Return whether OpenAI-backed generation is enabled."""
+        """Devuelve si la generación respaldada por OpenAI está habilitada."""
         return self.client is not None
 
     def verify(
@@ -110,7 +110,7 @@ class AnswerClient:
         context: str,
         timeout_seconds: float | None = None,
     ) -> bool:
-        """Validate whether answer is grounded in provided context."""
+        """Valida si la respuesta está sustentada en el contexto proporcionado."""
         if self.client is None:
             return True
 

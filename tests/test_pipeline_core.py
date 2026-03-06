@@ -1,4 +1,4 @@
-"""Core tests for ingestion and retrieval components."""
+"""Pruebas básicas para componentes de ingestión y recuperación."""
 
 from coderag.core.models import RetrievalChunk, ScannedFile
 from coderag.ingestion.chunker import extract_symbol_chunks
@@ -7,7 +7,7 @@ from coderag.retrieval.context_assembler import assemble_context
 
 
 def test_extract_symbol_chunks_java_class_method_constructor() -> None:
-    """Extracts Java class, constructor, and method symbols."""
+    """Extrae símbolos de clases, constructores y métodos de Java."""
     scanned = [
         ScannedFile(
             path="src/AuthService.java",
@@ -28,7 +28,7 @@ def test_extract_symbol_chunks_java_class_method_constructor() -> None:
 
 
 def test_extract_symbol_chunks_python_def_and_class() -> None:
-    """Extracts class and function symbols from Python content."""
+    """Extrae símbolos de clases y funciones del contenido de Python."""
     scanned = [
         ScannedFile(
             path="app/main.py",
@@ -43,7 +43,7 @@ def test_extract_symbol_chunks_python_def_and_class() -> None:
 
 
 def test_bm25_returns_ranked_documents() -> None:
-    """Returns top document matching exact query terms."""
+    """Devuelve el documento principal que coincide exactamente con los términos de la consulta."""
     index = BM25Index()
     index.build(
         repo_id="r1",
@@ -56,7 +56,7 @@ def test_bm25_returns_ranked_documents() -> None:
 
 
 def test_assemble_context_applies_token_limit() -> None:
-    """Truncates assembled context to configured token budget."""
+    """Trunca el contexto ensamblado al presupuesto de tokens configurado."""
     chunks = [
         RetrievalChunk(
             id="1",

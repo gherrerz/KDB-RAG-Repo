@@ -1,4 +1,4 @@
-"""Chunk builders for symbols, files, and modules."""
+"""Constructores de fragmentos para símbolos, archivos y módulos."""
 
 import hashlib
 import re
@@ -7,13 +7,13 @@ from coderag.core.models import ScannedFile, SymbolChunk
 
 
 def _chunk_id(repo_id: str, path: str, name: str, start_line: int) -> str:
-    """Build deterministic chunk ID for symbol snippets."""
+    """Cree una ID de fragmento determinista para fragmentos de símbolos."""
     value = f"{repo_id}:{path}:{name}:{start_line}".encode("utf-8")
     return hashlib.sha1(value).hexdigest()
 
 
 def extract_symbol_chunks(repo_id: str, scanned_files: list[ScannedFile]) -> list[SymbolChunk]:
-    """Extract approximate symbol-level chunks using regex heuristics."""
+    """Extraiga fragmentos aproximados a nivel de símbolo utilizando heurísticas de expresiones regulares."""
     chunks: list[SymbolChunk] = []
     for file_obj in scanned_files:
         lines = file_obj.content.splitlines()

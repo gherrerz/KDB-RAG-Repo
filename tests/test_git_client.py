@@ -1,4 +1,4 @@
-"""Tests for repository cloning resilience."""
+"""Pruebas de resiliencia a la clonación de repositorios."""
 
 import subprocess
 from pathlib import Path
@@ -9,13 +9,13 @@ from coderag.ingestion.git_client import build_repo_id, clone_repository
 
 
 def test_build_repo_id_uses_url_tail_for_https_url() -> None:
-    """Derives public repo identifier from final URL path segment."""
+    """Deriva el identificador de repositorio público del segmento de ruta URL final."""
     repo_id = build_repo_id("https://github.com/macrozheng/mall.git", "main")
     assert repo_id == "mall"
 
 
 def test_build_repo_id_uses_url_tail_for_ssh_url() -> None:
-    """Supports git@ SSH style repository URLs as repo_id source."""
+    """Admite URL de repositorio de estilo git@ SSH como fuente repo_id."""
     repo_id = build_repo_id("git@github.com:macrozheng/mall.git", "develop")
     assert repo_id == "mall"
 
@@ -24,7 +24,7 @@ def test_clone_repository_fallbacks_when_branch_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Falls back to default remote branch when requested branch fails."""
+    """Usa una alternativa con la rama remota por defecto cuando falla la rama solicitada."""
     calls: list[list[str]] = []
 
     def fake_run(*args, **kwargs):
@@ -61,7 +61,7 @@ def test_clone_repository_raises_descriptive_error_on_total_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Raises helpful error with stderr and stdout details on clone failure."""
+    """Genera un error útil con detalles de stderr y stdout sobre falla de clonación."""
 
     def fake_run(*args, **kwargs):
         command = args[0]

@@ -1,4 +1,4 @@
-"""Ingestion view widgets for repository setup and execution."""
+"""Widgets de vista de ingesta para la configuración y ejecución del repositorio."""
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -18,10 +18,10 @@ from PySide6.QtWidgets import (
 
 
 class IngestionView(QWidget):
-    """UI panel that captures ingestion parameters and logs."""
+    """Panel de interfaz de usuario que captura parámetros y registros de ingesta."""
 
     def __init__(self) -> None:
-        """Initialize form controls for repository ingestion."""
+        """Inicialice los controles de formulario para la ingesta del repositorio."""
         super().__init__()
         self.title_label = QLabel("Ingesta de Repositorio")
         self.subtitle_label = QLabel(
@@ -162,7 +162,7 @@ class IngestionView(QWidget):
         )
 
     def set_status(self, state: str, text: str) -> None:
-        """Update status chip state and text."""
+        """Actualiza el estado del chip y el texto."""
         valid_states = {"idle", "running", "success", "error"}
         selected_state = state if state in valid_states else "idle"
         self.status_chip.setProperty("state", selected_state)
@@ -175,15 +175,15 @@ class IngestionView(QWidget):
         self.progress_bar.setValue(max(0, min(100, value)))
 
     def set_job_id(self, value: str) -> None:
-        """Display current ingestion job ID."""
+        """Muestra el ID del trabajo de ingesta actual."""
         self.job_id.setText(value)
 
     def set_repo_id(self, value: str) -> None:
-        """Display resulting repository ID."""
+        """Muestra el ID del repositorio resultante."""
         self.repo_id.setText(value)
 
     def set_running(self, running: bool) -> None:
-        """Enable or disable form controls based on ingestion execution."""
+        """Habilite o deshabilite los controles de formulario según la ejecución de la ingesta."""
         self.provider.setDisabled(running)
         self.repo_url.setDisabled(running)
         self.token.setDisabled(running)
@@ -193,7 +193,7 @@ class IngestionView(QWidget):
         self.ingest_button.setText("Ingestando..." if running else "Ingestar")
 
     def set_reset_running(self, running: bool) -> None:
-        """Update UI while full reset operation is executing."""
+        """Actualice la interfaz de usuario mientras se ejecuta la operación de reinicio completo."""
         self.provider.setDisabled(running)
         self.repo_url.setDisabled(running)
         self.token.setDisabled(running)
@@ -203,11 +203,11 @@ class IngestionView(QWidget):
         self.reset_button.setText("Limpiando..." if running else "Limpiar Todo")
 
     def set_logs(self, lines: list[str]) -> None:
-        """Render all ingestion log lines in console panel."""
+        """Renderiza todas las líneas de log de ingesta en el panel de consola."""
         self.logs.setPlainText("\n".join(lines))
 
     def append_log(self, text: str) -> None:
-        """Append a single log line to the ingestion console."""
+        """Agregue una única línea de registro a la consola de ingesta."""
         if not text:
             return
         current = self.logs.toPlainText()

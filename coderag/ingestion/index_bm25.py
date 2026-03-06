@@ -1,4 +1,4 @@
-"""BM25 indexing and retrieval helpers for exact term matching."""
+"""Ayudantes de indexación y recuperación BM25 para una coincidencia exacta de términos."""
 
 from collections import defaultdict
 
@@ -6,24 +6,24 @@ from rank_bm25 import BM25Okapi
 
 
 def tokenize(text: str) -> list[str]:
-    """Tokenize text with simple whitespace normalization."""
+    """Tokenice el texto con una simple normalización de espacios en blanco."""
     return text.lower().replace("\n", " ").split()
 
 
 class BM25Index:
-    """Repository-scoped in-memory BM25 indexes."""
+    """Índices BM25 en memoria con ámbito de repositorio."""
 
     def __init__(self) -> None:
-        """Initialize empty store for repository corpora."""
+        """Inicialice el almacén vacío para los corpus del repositorio."""
         self._by_repo: dict[str, tuple[BM25Okapi, list[str], list[dict]]] = {}
 
     def build(self, repo_id: str, docs: list[str], metadatas: list[dict]) -> None:
-        """Build BM25 index for one repository."""
+        """Cree el índice BM25 para un repositorio."""
         corpus = [tokenize(doc) for doc in docs]
         self._by_repo[repo_id] = (BM25Okapi(corpus), docs, metadatas)
 
     def query(self, repo_id: str, text: str, top_n: int = 50) -> list[dict]:
-        """Return top BM25 matches for repository and query."""
+        """Devuelve las principales coincidencias de BM25 para el repositorio y la consulta."""
         if repo_id not in self._by_repo:
             return []
 
@@ -44,7 +44,7 @@ class BM25Index:
         return result
 
     def clear(self) -> None:
-        """Remove all repository BM25 corpora from memory."""
+        """Elimine todos los corpus BM25 del repositorio de la memoria."""
         self._by_repo.clear()
 
 

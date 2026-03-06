@@ -1,4 +1,4 @@
-"""Pydantic data models for requests, jobs, and retrieval objects."""
+"""Modelos de datos de Pydantic para solicitudes, trabajos y objetos de recuperación."""
 
 from datetime import datetime
 from enum import Enum
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class JobStatus(str, Enum):
-    """Supported lifecycle states for ingestion jobs."""
+    """Estados del ciclo de vida admitidos para trabajos de ingesta."""
 
     queued = "queued"
     running = "running"
@@ -17,7 +17,7 @@ class JobStatus(str, Enum):
 
 
 class RepoIngestRequest(BaseModel):
-    """Input model for repository ingestion requests."""
+    """Modelo de entrada para solicitudes de ingesta de repositorio."""
 
     provider: str = Field(default="github")
     repo_url: str
@@ -27,7 +27,7 @@ class RepoIngestRequest(BaseModel):
 
 
 class JobInfo(BaseModel):
-    """Current state snapshot for an ingestion job."""
+    """Instantánea del estado actual de un trabajo de ingesta."""
 
     id: str
     status: JobStatus
@@ -40,7 +40,7 @@ class JobInfo(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    """Input model for user natural language questions."""
+    """Modelo de entrada para preguntas de usuario en lenguaje natural."""
 
     repo_id: str
     query: str
@@ -49,7 +49,7 @@ class QueryRequest(BaseModel):
 
 
 class InventoryQueryRequest(BaseModel):
-    """Input model for graph-first inventory queries."""
+    """Modelo de entrada para consultas de inventario basadas en gráficos."""
 
     repo_id: str
     query: str
@@ -58,7 +58,7 @@ class InventoryQueryRequest(BaseModel):
 
 
 class Citation(BaseModel):
-    """Evidence metadata for each supported claim in an answer."""
+    """Metadatos de evidencia para cada afirmación respaldada en una respuesta."""
 
     path: str
     start_line: int
@@ -68,7 +68,7 @@ class Citation(BaseModel):
 
 
 class QueryResponse(BaseModel):
-    """Output model returned by query endpoint."""
+    """Modelo de salida devuelto por el punto final de la consulta."""
 
     answer: str
     citations: list[Citation]
@@ -76,7 +76,7 @@ class QueryResponse(BaseModel):
 
 
 class InventoryItem(BaseModel):
-    """Structured inventory item discovered in repository graph."""
+    """Artículo de inventario estructurado descubierto en el gráfico del repositorio."""
 
     label: str
     path: str
@@ -86,7 +86,7 @@ class InventoryItem(BaseModel):
 
 
 class InventoryQueryResponse(BaseModel):
-    """Output model returned by paginated inventory endpoint."""
+    """Modelo de salida devuelto por el punto final del inventario paginado."""
 
     answer: str
     target: str | None = None
@@ -100,7 +100,7 @@ class InventoryQueryResponse(BaseModel):
 
 
 class ResetResponse(BaseModel):
-    """Output model returned by full reset endpoint."""
+    """Modelo de salida devuelto por el endpoint de reinicio completo."""
 
     message: str
     cleared: list[str] = Field(default_factory=list)
@@ -108,13 +108,13 @@ class ResetResponse(BaseModel):
 
 
 class RepoCatalogResponse(BaseModel):
-    """Output model for repository identifiers available for querying."""
+    """Modelo de salida para identificadores de repositorio disponibles para consultas."""
 
     repo_ids: list[str] = Field(default_factory=list)
 
 
 class ScannedFile(BaseModel):
-    """Represents a source file discovered in a repository scan."""
+    """Representa un archivo fuente descubierto en un análisis del repositorio."""
 
     path: str
     language: str
@@ -122,7 +122,7 @@ class ScannedFile(BaseModel):
 
 
 class SymbolChunk(BaseModel):
-    """Symbol-level chunk extracted from a source file."""
+    """Fragmento a nivel de símbolo extraído de un archivo fuente."""
 
     id: str
     repo_id: str
@@ -136,7 +136,7 @@ class SymbolChunk(BaseModel):
 
 
 class RetrievalChunk(BaseModel):
-    """Chunk returned from vector/BM25/graph retrieval."""
+    """Fragmento devuelto de la recuperación de vector/BM25/gráfico."""
 
     id: str
     text: str

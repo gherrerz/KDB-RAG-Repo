@@ -1,4 +1,4 @@
-"""Main desktop window for RAG Hybrid Response Validator."""
+"""Ventana principal del escritorio para el Validador Híbrido de Respuestas RAG."""
 
 import sys
 from typing import Any
@@ -16,10 +16,10 @@ UI_REQUEST_TIMEOUT_SECONDS = get_settings().ui_request_timeout_seconds
 
 
 class MainWindow(QMainWindow):
-    """Main application window containing ingestion and query tabs."""
+    """Ventana principal de la aplicación que contiene pestañas de ingesta y consulta."""
 
     def __init__(self) -> None:
-        """Build widgets and connect UI events."""
+        """Cree widgets y conecte eventos de UI."""
         super().__init__()
         self.setWindowTitle("RAG Hybrid Response Validator · Desktop")
         self.resize(1100, 700)
@@ -57,7 +57,7 @@ class MainWindow(QMainWindow):
         self._refresh_repo_ids(log_on_error=False)
 
     def _apply_window_theme(self) -> None:
-        """Set consistent dark style for shell widgets and tabs."""
+        """Establezca un estilo oscuro consistente para pestañas y widgets de shell."""
         self.setStyleSheet(
             """
             QMainWindow {
@@ -89,7 +89,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_ingest(self) -> None:
-        """Submit ingestion request and show initial job details."""
+        """Envíe la solicitud de ingesta y muestre los detalles iniciales del trabajo."""
         repo_url = self.ingestion_view.repo_url.text().strip()
         if not repo_url:
             self.ingestion_view.set_status("error", "Error")
@@ -137,7 +137,7 @@ class MainWindow(QMainWindow):
             self.ingestion_view.append_log(f"Error de ingesta: {exc}")
 
     def _on_reset_all(self) -> None:
-        """Request full reset of indexes, graph, metadata and workspace."""
+        """Solicite un restablecimiento completo de índices, gráficos, metadatos y espacio de trabajo."""
         if self._job_poll_enabled:
             self.ingestion_view.set_status("error", "Error")
             self.ingestion_view.append_log(
@@ -188,7 +188,7 @@ class MainWindow(QMainWindow):
             self.ingestion_view.set_reset_running(False)
 
     def timerEvent(self, event: Any) -> None:  # noqa: N802
-        """Poll ingestion job endpoint and update status widgets."""
+        """Sondear el punto final del trabajo de ingesta y actualizar los widgets de estado."""
         if event.timerId() != self._poll_timer_id:
             return
         if not self._job_poll_enabled or not self._active_job_id:
@@ -206,7 +206,7 @@ class MainWindow(QMainWindow):
         self._sync_job_ui(data)
 
     def _sync_job_ui(self, data: dict[str, Any]) -> None:
-        """Apply polled job state and logs to ingestion controls."""
+        """Aplique el estado del trabajo sondeado y los registros a los controles de ingesta."""
         status = str(data.get("status") or "pending").lower()
         logs = data.get("logs")
         if isinstance(logs, list):
@@ -252,7 +252,7 @@ class MainWindow(QMainWindow):
         self.ingestion_view.set_progress(30)
 
     def _on_query(self) -> None:
-        """Send query request and render answer with citations."""
+        """Enviar solicitud de consulta y dar respuesta con citas."""
         repo_id = self.query_view.get_repo_id_text()
         question = self.query_view.get_question_text()
 
@@ -330,7 +330,7 @@ class MainWindow(QMainWindow):
         selected_repo_id: str | None = None,
         log_on_error: bool = False,
     ) -> None:
-        """Refresh query repo-id dropdown from API catalog endpoint."""
+        """Actualice el menú desplegable de ID de repositorio de consulta desde el punto final del catálogo de API."""
         try:
             response = requests.get(f"{API_BASE}/repos", timeout=10)
             response.raise_for_status()
@@ -348,7 +348,7 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
-    """Run desktop application loop."""
+    """Ejecute el bucle de la aplicación de escritorio."""
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

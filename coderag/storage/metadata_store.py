@@ -1,4 +1,4 @@
-"""SQLite metadata store for repositories and jobs."""
+"""Almacén de metadatos en SQLite para repositorios y trabajos."""
 
 import sqlite3
 from pathlib import Path
@@ -7,22 +7,22 @@ from coderag.core.models import JobInfo, JobStatus
 
 
 class MetadataStore:
-    """Simple SQLite-backed store for job status and repositories."""
+    """Almacén simple en SQLite para estado de trabajos y repositorios."""
 
     def __init__(self, db_path: Path) -> None:
-        """Create storage and initialize schema if needed."""
+        """Crea el almacenamiento e inicializa el esquema si es necesario."""
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        """Open sqlite connection with row factory enabled."""
+        """Abre conexión sqlite con fábrica de filas habilitada."""
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         return connection
 
     def _init_schema(self) -> None:
-        """Initialize required tables for repository metadata."""
+        """Inicializa las tablas requeridas para metadatos del repositorio."""
         with self._connect() as connection:
             connection.execute(
                 """
@@ -51,7 +51,7 @@ class MetadataStore:
             )
 
     def upsert_job(self, job: JobInfo) -> None:
-        """Insert or replace job snapshot."""
+        """Inserta o reemplaza la instantánea del trabajo."""
         with self._connect() as connection:
             connection.execute(
                 """
@@ -73,7 +73,7 @@ class MetadataStore:
             )
 
     def get_job(self, job_id: str) -> JobInfo | None:
-        """Read job snapshot by identifier."""
+        """Lee la instantánea del trabajo por identificador."""
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT * FROM jobs WHERE id = ?",
@@ -95,7 +95,7 @@ class MetadataStore:
         )
 
     def list_repo_ids(self) -> list[str]:
-        """List known repository ids from jobs and repos metadata tables."""
+        """Lista ids de repositorio conocidos desde tablas de metadatos de trabajos y repos."""
         with self._connect() as connection:
             rows = connection.execute(
                 """

@@ -1,4 +1,4 @@
-"""Application settings loaded from environment variables."""
+"""Configuración de la aplicación cargada desde variables de entorno."""
 
 from functools import lru_cache
 from pathlib import Path
@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Centralized settings for runtime configuration."""
+    """Configuraciones centralizadas para la configuración del tiempo de ejecución."""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Return singleton settings instance."""
+    """Devuelve la instancia de configuración singleton."""
     settings = Settings()
     settings.chroma_path.mkdir(parents=True, exist_ok=True)
     settings.workspace_path.mkdir(parents=True, exist_ok=True)

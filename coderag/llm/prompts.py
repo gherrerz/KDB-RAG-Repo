@@ -1,4 +1,4 @@
-"""Prompt templates for answer generation and verification."""
+"""Plantillas rápidas para la generación y verificación de respuestas."""
 
 SYSTEM_PROMPT = """
 Eres un asistente de análisis de código con política anti-alucinación.
@@ -12,7 +12,7 @@ Reglas obligatorias:
 
 
 def build_answer_prompt(query: str, context: str) -> str:
-    """Create final answer prompt from user query and retrieved context."""
+    """Cree una respuesta final a partir de la consulta del usuario y el contexto recuperado."""
     return (
         f"Consulta del usuario:\n{query}\n\n"
         "Contexto recuperado:\n"
@@ -27,7 +27,7 @@ def build_answer_prompt(query: str, context: str) -> str:
 
 
 def build_verify_prompt(answer: str, context: str) -> str:
-    """Create verifier prompt to check unsupported claims."""
+    """Cree un mensaje de verificación para verificar las reclamaciones no respaldadas."""
     return (
         "Valida si la respuesta contiene afirmaciones no soportadas por el "
         "contexto. Si detectas alucinación, responde con: INVALIDO. "

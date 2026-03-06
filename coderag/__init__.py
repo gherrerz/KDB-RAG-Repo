@@ -1,1 +1,1 @@
-"""RAG Hybrid Response Validator package."""
+"""Paquete de validador de respuesta híbrida RAG."""

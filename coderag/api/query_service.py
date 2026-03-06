@@ -1,4 +1,4 @@
-"""End-to-end query orchestration for Hybrid RAG + GraphRAG."""
+"""Orquestación de consultas de un extremo a otro para Hybrid RAG + GraphRAG."""
 
 import ast
 from collections import Counter
@@ -78,7 +78,7 @@ INVENTORY_TARGET_STOPWORDS = {
 
 
 def _fallback_header(fallback_reason: str) -> str:
-    """Return fallback header message based on root cause."""
+    """Devuelve un mensaje de encabezado alternativo según la causa raíz."""
     messages = {
         "not_configured": (
             "OpenAI no está configurado; respuesta extractiva basada en "
@@ -111,7 +111,7 @@ def _build_extractive_fallback(
     fallback_reason: str = "not_configured",
     component_purposes: list[tuple[str, str]] | None = None,
 ) -> str:
-    """Build a local evidence-only answer when LLM is unavailable."""
+    """Cree una respuesta local basada únicamente en evidencia cuando el LLM no esté disponible."""
     if not citations:
         return "No se encontró información en el repositorio."
 
@@ -199,7 +199,7 @@ def _build_extractive_fallback(
 
 
 def _is_module_query(query: str) -> bool:
-    """Return whether user asks about repository modules/services."""
+    """Devuelve si el usuario pregunta sobre los módulos/servicios del repositorio."""
     normalized = query.lower()
     return any(
         token in normalized
@@ -208,7 +208,7 @@ def _is_module_query(query: str) -> bool:
 
 
 def _discover_repo_modules(repo_id: str) -> list[str]:
-    """Discover top-level module folders from locally cloned repository."""
+    """Descubra las carpetas de módulos de nivel superior del repositorio clonado localmente."""
     settings = get_settings()
     repo_path = settings.workspace_path / repo_id
     if not repo_path.exists() or not repo_path.is_dir():
@@ -246,7 +246,7 @@ def _discover_repo_modules(repo_id: str) -> list[str]:
 
 
 def _is_inventory_query(query: str) -> bool:
-    """Return whether query asks for an exhaustive list of entities."""
+    """Devuelve si la consulta solicita una lista exhaustiva de entidades."""
     normalized = query.lower()
     has_all_word = any(
         token in normalized
@@ -256,7 +256,7 @@ def _is_inventory_query(query: str) -> bool:
 
 
 def _extract_module_name(query: str) -> str | None:
-    """Extract module or package token from natural language query."""
+    """Extraiga el token del módulo o del paquete de una consulta en lenguaje natural."""
     normalized = query.lower()
 
     quoted = re.search(r"['\"]([a-z0-9_./-]+)['\"]", normalized)
@@ -301,14 +301,14 @@ def _extract_module_name(query: str) -> str | None:
 
 
 def _normalize_inventory_token(token: str) -> str:
-    """Normalize inventory token by lowercasing and removing accents/punctuation."""
+    """Normalice el token de inventario poniendo minúsculas y eliminando acentos/puntuación."""
     lowered = token.lower().strip(".,;:!?()[]{}")
     decomposed = unicodedata.normalize("NFD", lowered)
     return "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
 
 
 def _inventory_base_forms(token: str) -> set[str]:
-    """Build candidate base forms from plural/singular variants."""
+    """Cree formularios base candidatos a partir de variantes plurales/singulares."""
     normalized = _normalize_inventory_token(token)
     forms = {normalized}
 
@@ -342,7 +342,7 @@ def _inventory_base_forms(token: str) -> set[str]:
 
 
 def _canonical_inventory_term(token: str) -> str:
-    """Return canonical inventory term from available base forms."""
+    """Devuelve el término de inventario canónico desde los formularios base disponibles."""
     forms = _inventory_base_forms(token)
     known_terms = {
         term
@@ -356,7 +356,7 @@ def _canonical_inventory_term(token: str) -> str:
 
 
 def _plural_variants(token: str) -> set[str]:
-    """Generate plural/surface variants for a normalized inventory term."""
+    """Genere variantes plurales/superficiales para un término de inventario normalizado."""
     variants = {token}
     if not token:
         return variants
@@ -371,7 +371,7 @@ def _plural_variants(token: str) -> set[str]:
 
 
 def _deduplicate_citations(citations: list[Citation]) -> list[Citation]:
-    """Deduplicate citations keeping first occurrence order."""
+    """Deduplicar citas manteniendo el orden de primera aparición."""
     seen: set[tuple[str, int, int]] = set()
     deduplicated: list[Citation] = []
     for citation in citations:
@@ -388,7 +388,7 @@ def _deduplicate_citations(citations: list[Citation]) -> list[Citation]:
 
 
 def _deduplicate_citations_by_path(citations: list[Citation]) -> list[Citation]:
-    """Deduplicate citations by path keeping first occurrence order."""
+    """Deduplica citas por ruta manteniendo el orden de primera aparición."""
     seen_paths: set[str] = set()
     deduplicated: list[Citation] = []
     for citation in citations:
@@ -401,7 +401,7 @@ def _deduplicate_citations_by_path(citations: list[Citation]) -> list[Citation]:
 
 
 def _extract_inventory_target(query: str) -> str | None:
-    """Extract target entity token from inventory-style natural language queries."""
+    """Extraiga el token de la entidad de destino de consultas en lenguaje natural estilo inventario."""
     normalized = query.lower()
 
     match_es = re.search(
@@ -444,7 +444,7 @@ def _extract_inventory_target(query: str) -> str | None:
 
 
 def _is_inventory_explain_query(query: str) -> bool:
-    """Return whether query asks to explain role/function per listed component."""
+    """Devuelve si la consulta solicita explicar el rol/función por componente listado."""
     normalized = _normalize_inventory_token(query)
     explanation_signals = [
         "que funcion",
@@ -466,7 +466,7 @@ def _is_inventory_explain_query(query: str) -> bool:
 
 
 def _resolve_repo_file_path(repo_id: str, relative_path: str) -> Path | None:
-    """Resolve and validate repository-relative path to an existing local file."""
+    """Resuelva y valide la ruta relativa al repositorio a un archivo local existente."""
     normalized = relative_path.strip().replace("\\", "/").strip("/")
     if not normalized:
         return None
@@ -485,13 +485,13 @@ def _resolve_repo_file_path(repo_id: str, relative_path: str) -> Path | None:
 
 
 def _first_sentence(text: str) -> str:
-    """Return first sentence-like fragment without trailing punctuation."""
+    """Devuelve el primer fragmento similar a una oración sin puntuación final."""
     first = re.split(r"[\.\n\r]", text, maxsplit=1)[0].strip()
     return first.rstrip(" \t\"'`.,;:!?¡¿")
 
 
 def _purpose_from_filename(file_path: Path) -> str | None:
-    """Infer purpose hint from filename stem using lightweight heuristics."""
+    """Inferir sugerencias de propósito a partir de la raíz del nombre de archivo utilizando heurísticas ligeras."""
     stem = file_path.stem.lower()
 
     if any(token in stem for token in ("settings", "config", "configuration")):
@@ -506,7 +506,7 @@ def _purpose_from_filename(file_path: Path) -> str | None:
 
 
 def _build_purpose_from_source(file_path: Path) -> str | None:
-    """Infer concise component purpose from first identifiable source declaration."""
+    """Inferir el propósito conciso del componente a partir de la primera declaración de fuente identificable."""
     try:
         content = file_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
@@ -664,7 +664,7 @@ def _describe_inventory_components(
     pipeline_started_at: float,
     budget_seconds: float,
 ) -> list[tuple[str, str]]:
-    """Build per-component purpose hints from local source files within budget."""
+    """Cree sugerencias de propósito por componente a partir de archivos fuente locales dentro del presupuesto."""
     descriptions: list[tuple[str, str]] = []
     seen_names: set[str] = set()
     for citation in citations:
@@ -686,7 +686,7 @@ def _describe_inventory_components(
 
 
 def _inventory_term_aliases(target_term: str) -> list[str]:
-    """Expand inventory target with plural and cross-language aliases."""
+    """Amplíe el objetivo del inventario con alias en plural y en varios idiomas."""
     base_forms = _inventory_base_forms(target_term)
     aliases: set[str] = set()
     for form in base_forms:
@@ -706,7 +706,7 @@ def _query_inventory_entities(
     target_term: str,
     module_name: str | None,
 ) -> list[dict]:
-    """Query inventory entities from graph using generic target term."""
+    """Consulta entidades de inventario desde un gráfico utilizando un término objetivo genérico."""
     settings = get_settings()
     graph = GraphBuilder()
     try:
@@ -743,7 +743,7 @@ def _query_inventory_entities(
 
 
 def _resolve_module_scope(repo_id: str, module_name: str | None) -> str | None:
-    """Resolve user module token to canonical repository-relative directory scope."""
+    """Resuelva el token del módulo de usuario en el alcance del directorio relativo al repositorio canónico."""
     if not module_name:
         return None
 
@@ -778,7 +778,7 @@ def _resolve_module_scope(repo_id: str, module_name: str | None) -> str | None:
 
 
 def _sanitize_inventory_pagination(page: int, page_size: int) -> tuple[int, int]:
-    """Normalize inventory pagination arguments against configured limits."""
+    """Normalice los argumentos de paginación de inventario frente a los límites configurados."""
     settings = get_settings()
     safe_page = max(1, int(page))
     default_size = max(1, settings.inventory_page_size)
@@ -788,18 +788,18 @@ def _sanitize_inventory_pagination(page: int, page_size: int) -> tuple[int, int]
 
 
 def _remaining_budget_seconds(started_at: float, budget_seconds: float) -> float:
-    """Return remaining budget (seconds) for a running query pipeline."""
+    """Devuelve el presupuesto restante (segundos) para una canalización de consultas en ejecución."""
     elapsed = monotonic() - started_at
     return max(0.0, budget_seconds - elapsed)
 
 
 def _elapsed_milliseconds(started_at: float) -> float:
-    """Return elapsed milliseconds rounded for diagnostics readability."""
+    """Devuelve los milisegundos transcurridos redondeados para facilitar la lectura del diagnóstico."""
     return round((monotonic() - started_at) * 1000, 2)
 
 
 def _is_noisy_path(path: str) -> bool:
-    """Return whether citation path is likely non-informative noise."""
+    """Indica si es probable que la ruta de la cita sea ruido no informativo."""
     normalized = path.strip().lower()
     if not normalized:
         return True
@@ -811,7 +811,7 @@ def _is_noisy_path(path: str) -> bool:
 
 
 def _citation_priority(citation: Citation) -> tuple[int, float]:
-    """Assign sorting priority using generic path quality signals."""
+    """Asigne prioridad de clasificación utilizando señales genéricas de calidad de ruta."""
     path = citation.path.strip().lower()
     suffix = Path(path).suffix
     code_like_suffixes = {
@@ -837,7 +837,7 @@ def run_inventory_query(
     page: int,
     page_size: int,
 ) -> InventoryQueryResponse:
-    """Run graph-first inventory query with pagination and time budget."""
+    """Ejecute una consulta de inventario basada en gráficos con paginación y presupuesto de tiempo."""
     settings = get_settings()
     budget_seconds = max(1.0, float(settings.query_max_seconds))
     pipeline_started_at = monotonic()
@@ -975,7 +975,7 @@ def run_inventory_query(
 
 
 def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse:
-    """Run full query pipeline and return answer with citations."""
+    """Ejecute el proceso de consulta completo y devuelva la respuesta con citas."""
     settings = get_settings()
     inventory_intent = _is_inventory_query(query)
     inventory_target = _extract_inventory_target(query) if inventory_intent else None

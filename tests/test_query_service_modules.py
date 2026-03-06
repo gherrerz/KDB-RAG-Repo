@@ -1,4 +1,4 @@
-"""Tests for module discovery support in query service."""
+"""Pruebas de soporte de descubrimiento de módulos en el servicio de consultas."""
 
 from pathlib import Path
 
@@ -9,7 +9,7 @@ from coderag.core.models import Citation, RetrievalChunk
 
 
 def test_is_module_query_detects_spanish_and_english_terms() -> None:
-    """Identifies module-related query intents in common variants."""
+    """Identifica intenciones de consulta relacionadas con módulos en variantes comunes."""
     assert query_service._is_module_query("Cuales son los modulos?")
     assert query_service._is_module_query("list repository modules")
     assert not query_service._is_module_query("donde se define auth")
@@ -19,7 +19,7 @@ def test_discover_repo_modules_reads_top_level_dirs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Returns generic top-level module folders from local repository."""
+    """Devuelve carpetas genéricas de módulos de nivel superior del repositorio local."""
     repo_id = "repo1"
     repo_dir = tmp_path / repo_id
     (repo_dir / "api-service").mkdir(parents=True)
@@ -40,7 +40,7 @@ def test_discover_repo_modules_reads_top_level_dirs(
 
 
 def test_is_inventory_query_detection() -> None:
-    """Detects generic inventory intents in natural language queries."""
+    """Detecta intenciones de inventario genéricas en consultas en lenguaje natural."""
     assert query_service._is_inventory_query(
         "cuales son todos los service del modulo api-service"
     )
@@ -49,7 +49,7 @@ def test_is_inventory_query_detection() -> None:
 
 
 def test_extract_inventory_target_for_es_and_en() -> None:
-    """Extracts normalized inventory target token from user query."""
+    """Extrae el token de destino de inventario normalizado de la consulta del usuario."""
     assert query_service._extract_inventory_target("todos los services del modulo") == "service"
     assert query_service._extract_inventory_target("all controllers in api-service") == "controller"
     assert (
@@ -73,7 +73,7 @@ def test_extract_inventory_target_for_es_and_en() -> None:
 
 
 def test_is_inventory_explain_query_detection() -> None:
-    """Detects compound inventory + explanation requests."""
+    """Detecta inventario compuesto + solicitudes de explicación."""
     assert query_service._is_inventory_explain_query(
         "cuales son los componentes de core y que funcion cumplen"
     )
@@ -86,7 +86,7 @@ def test_is_inventory_explain_query_detection() -> None:
 
 
 def test_inventory_term_aliases_expand_for_multilingual_queries() -> None:
-    """Expands inventory target to include plural and cross-language aliases."""
+    """Amplía el objetivo del inventario para incluir alias en plural y en varios idiomas."""
     aliases = query_service._inventory_term_aliases("servicios")
     assert "servicio" in aliases
     assert "service" in aliases
@@ -95,7 +95,7 @@ def test_inventory_term_aliases_expand_for_multilingual_queries() -> None:
 
 
 def test_inventory_term_aliases_expand_for_controllers() -> None:
-    """Expands spanish plural controllers to canonical english/spanish variants."""
+    """Expande controladores en plural (español) a variantes canónicas en español/inglés."""
     aliases = query_service._inventory_term_aliases("controladores")
     assert "controlador" in aliases
     assert "controladores" in aliases
@@ -104,7 +104,7 @@ def test_inventory_term_aliases_expand_for_controllers() -> None:
 
 
 def test_inventory_term_aliases_expand_for_classes() -> None:
-    """Expands spanish plural classes to canonical english/spanish variants."""
+    """Expande clases en plural (español) a variantes canónicas en español/inglés."""
     aliases = query_service._inventory_term_aliases("clases")
     assert "clase" in aliases
     assert "clases" in aliases
@@ -115,7 +115,7 @@ def test_inventory_term_aliases_expand_for_classes() -> None:
 def test_query_inventory_entities_merges_alias_matches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Merges and deduplicates inventory matches coming from alias terms."""
+    """Fusiona y deduplica coincidencias de inventario provenientes de términos de alias."""
 
     class _Graph:
         def __init__(self) -> None:
@@ -176,7 +176,7 @@ def test_query_inventory_entities_merges_alias_matches(
 def test_query_inventory_entities_uses_module_file_listing_for_components(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Uses direct module file listing for broad component inventory requests."""
+    """Utiliza un listado directo de archivos de módulos para solicitudes de inventario de componentes amplios."""
 
     class _Graph:
         def __init__(self) -> None:
@@ -221,7 +221,7 @@ def test_query_inventory_entities_uses_module_file_listing_for_components(
 
 
 def test_extract_module_name_is_generic() -> None:
-    """Extracts module names from generic spanish/english query phrasing."""
+    """Extrae nombres de módulos de frases de consulta genéricas en español/inglés."""
     assert query_service._extract_module_name("modulo api-service") == "api-service"
     assert query_service._extract_module_name("in web/client") == "web/client"
     assert (
@@ -239,7 +239,7 @@ def test_extract_module_name_is_generic() -> None:
 
 
 def test_build_purpose_from_source_uses_python_docstring(tmp_path: Path) -> None:
-    """Uses module docstring as component purpose when available."""
+    """Utiliza la cadena de documentación del módulo como propósito del componente cuando esté disponible."""
     file_path = tmp_path / "service.py"
     file_path.write_text(
         '"""Orquesta validaciones de consultas y enrutamiento."""\n\n'
@@ -255,7 +255,7 @@ def test_build_purpose_from_source_uses_python_docstring(tmp_path: Path) -> None
 
 
 def test_build_purpose_from_source_uses_filename_heuristic(tmp_path: Path) -> None:
-    """Falls back to filename heuristic when source lacks descriptive hints."""
+    """Usa una alternativa basada en heurística de nombre de archivo cuando el código fuente no aporta pistas descriptivas."""
     file_path = tmp_path / "logging.py"
     file_path.write_text("x = 1\n", encoding="utf-8")
 
@@ -269,7 +269,7 @@ def test_resolve_module_scope_prefers_nested_repo_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Resolves module token to a nested canonical path when uniquely found."""
+    """Resuelve el token del módulo en una ruta canónica anidada cuando se encuentra de forma única."""
     repo_id = "repo1"
     (tmp_path / repo_id / "coderag" / "core").mkdir(parents=True)
 
@@ -283,7 +283,7 @@ def test_resolve_module_scope_prefers_nested_repo_directory(
 
 
 def test_extractive_fallback_limits_non_inventory_results() -> None:
-    """Shows a compact extractive list for non-inventory queries."""
+    """Muestra una lista extractiva compacta para consultas que no son de inventario."""
     citations = [
         Citation(
             path=f"src/File{i}.java",
@@ -301,7 +301,7 @@ def test_extractive_fallback_limits_non_inventory_results() -> None:
 
 
 def test_extractive_fallback_lists_all_inventory_results() -> None:
-    """Builds structured full inventory answer in extractive mode."""
+    """Crea una respuesta estructurada de inventario completo en modo extractivo."""
     citations = [
         Citation(
             path=f"src/File{i}.java",
@@ -328,7 +328,7 @@ def test_extractive_fallback_lists_all_inventory_results() -> None:
 
 
 def test_extractive_fallback_verification_failed_message() -> None:
-    """Uses verification_failed message and avoids not_configured text."""
+    """Utiliza el mensaje de verificación_fallida y evita el texto no_configurado."""
     citations = [
         Citation(
             path="src/AuthService.java",
@@ -349,7 +349,7 @@ def test_extractive_fallback_verification_failed_message() -> None:
 def test_run_query_uses_inventory_short_circuit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Delegates inventory intents to graph-first inventory route."""
+    """Delega las intenciones del inventario para graficar primero la ruta del inventario."""
 
     def _fail_hybrid(*args, **kwargs):
         raise AssertionError("hybrid_search should not run for inventory query")
@@ -401,7 +401,7 @@ def test_run_query_uses_inventory_short_circuit(
 def test_run_query_inventory_without_target_falls_back_to_general(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keeps general QA path when inventory intent has no extractable target."""
+    """Mantiene la ruta general de control de calidad cuando la intención del inventario no tiene un objetivo extraíble."""
 
     def _fake_hybrid(repo_id: str, query: str, top_n: int) -> list[RetrievalChunk]:
         return [
@@ -444,7 +444,7 @@ def test_run_query_inventory_without_target_falls_back_to_general(
 def test_run_inventory_query_applies_pagination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Returns requested page slice for inventory entities."""
+    """Devuelve el segmento de página solicitado para entidades de inventario."""
 
     discovered = [
         {
@@ -477,7 +477,7 @@ def test_run_inventory_query_applies_pagination(
 def test_run_inventory_query_includes_component_purposes_when_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Adds per-component purpose section when query asks what each item does."""
+    """Agrega una sección de propósito por componente cuando la consulta pregunta qué hace cada elemento."""
 
     discovered = [
         {
