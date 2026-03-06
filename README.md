@@ -36,6 +36,8 @@ Se incluye API (FastAPI), UI de escritorio (PySide6), almacenamiento vectorial
 - Indexación híbrida: símbolos, archivos y módulos.
 - Recuperación robusta multi-stack con inventario estructural por grafo para
    consultas tipo “todos los X”.
+- Inventario con expansión léxica genérica (singular/plural y equivalentes
+   multi-idioma como `service/servicio`) para mejorar recall.
 - Soporte de expansión GraphRAG para enriquecer contexto.
 - Respuestas con citas y diagnósticos (`retrieved`, `reranked`, `graph_nodes`,
    etc.).
@@ -46,7 +48,7 @@ Se incluye API (FastAPI), UI de escritorio (PySide6), almacenamiento vectorial
 ### Componentes
 
 - UI: PySide6 (`ingesta`, `consulta`, `evidencias`).
-- API: FastAPI (`/repos/ingest`, `/jobs/{id}`, `/query`).
+- API: FastAPI (`/repos/ingest`, `/jobs/{id}`, `/query`, `/repos`, `/admin/reset`).
 - Ingesta: clonación, escaneo, chunking, embeddings, BM25, grafo.
 - Retrieval: fusión vectorial + BM25 + expansión de grafo + ensamblado de
    contexto.
@@ -171,7 +173,15 @@ $q = @{
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/query -ContentType 'application/json' -Body $q
 ```
 
-### 5) Limpieza total (reset)
+### 5) Listar repos disponibles para consulta
+
+```powershell
+Invoke-RestMethod -Method Get -Uri http://127.0.0.1:8000/repos
+```
+
+Usa este endpoint para poblar/validar el selector de `repo_id` en la UI.
+
+### 6) Limpieza total (reset)
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/admin/reset
@@ -256,7 +266,11 @@ Checklist sugerida antes de release (3 escenarios):
 
 - **Respuestas incompletas en consultas enumerativas**
    - Usa consultas explícitas tipo “todos los X del módulo Y”.
+    - El extractor de módulo reconoce patrones como `módulo Y`, `in Y`, `de Y`,
+       `del Y`, `of Y` y tokens tipo `foo-bar`.
    - Revisa `diagnostics.inventory_count` y `diagnostics.graph_nodes`.
+    - Revisa `diagnostics.inventory_terms` para confirmar las variantes
+       aplicadas en la búsqueda de inventario.
 
 - **Conflictos de puertos Docker**
    - Ajusta puertos host en `docker-compose.yml`.

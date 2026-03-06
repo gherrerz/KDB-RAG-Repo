@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+import unicodedata
 
 from coderag.core.models import Citation, QueryResponse
 from coderag.core.settings import get_settings
@@ -11,6 +12,25 @@ from coderag.retrieval.context_assembler import assemble_context
 from coderag.retrieval.graph_expand import expand_with_graph
 from coderag.retrieval.hybrid_search import hybrid_search
 from coderag.retrieval.reranker import rerank
+
+
+INVENTORY_EQUIVALENT_GROUPS = [
+    {"service", "servicio"},
+    {"controller", "controlador"},
+    {"repository", "repositorio", "repo"},
+    {"handler", "manejador"},
+    {"model", "modelo"},
+    {"entity", "entidad"},
+    {"client", "cliente"},
+    {"adapter", "adaptador"},
+    {"gateway", "pasarela"},
+    {"dao", "dataaccess", "data-access"},
+    {"config", "configuration", "configuracion", "configuración"},
+    {"implementation", "implementacion", "implementación", "impl"},
+    {"manager", "gestor"},
+    {"factory", "fabrica", "fábrica"},
+    {"helper", "util", "utils", "utilidad"},
+]
 
 
 def _build_extractive_fallback(citations: list[Citation]) -> str:
@@ -115,17 +135,103 @@ def _extract_module_name(query: str) -> str | None:
 
 
 def _normalize_inventory_token(token: str) -> str:
-    """Normalize inventory tokens to a singular-like form."""
-    normalized = token.lower().strip(".,;:!?()[]{}")
+    """Normalize inventory token by lowercasing and removing accents/punctuation."""
+    lowered = token.lower().strip(".,;:!?()[]{}")
+    decomposed = unicodedata.normalize("NFD", lowered)
+    return "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+
+
+def _inventory_base_forms(token: str) -> set[str]:
+    """Build candidate base forms from plural/singular variants."""
+    normalized = _normalize_inventory_token(token)
+    forms = {normalized}
+
     if normalized.endswith("ies") and len(normalized) > 3:
-        return normalized[:-3] + "y"
-    if normalized.endswith(("ches", "shes", "sses", "xes", "zes")):
-        return normalized[:-2]
+        forms.add(normalized[:-3] + "y")
+
     if normalized.endswith("es") and len(normalized) > 3:
-        return normalized[:-1]
+        es_root = normalized[:-2]
+        if normalized.endswith(
+            (
+                "ses",
+                "xes",
+                "zes",
+                "ches",
+                "shes",
+                "ores",
+                "dores",
+                "tores",
+                "ciones",
+                "siones",
+                "ades",
+                "udes",
+            )
+        ):
+            forms.add(es_root)
+
     if normalized.endswith("s") and len(normalized) > 2:
-        return normalized[:-1]
-    return normalized
+        forms.add(normalized[:-1])
+
+    return {form for form in forms if form}
+
+
+def _canonical_inventory_term(token: str) -> str:
+    """Return canonical inventory term from available base forms."""
+    forms = _inventory_base_forms(token)
+    known_terms = {
+        term
+        for group in INVENTORY_EQUIVALENT_GROUPS
+        for term in group
+    }
+    for form in sorted(forms, key=lambda item: (len(item), item)):
+        if form in known_terms:
+            return form
+    return _normalize_inventory_token(token)
+
+
+def _plural_variants(token: str) -> set[str]:
+    """Generate plural/surface variants for a normalized inventory term."""
+    variants = {token}
+    if not token:
+        return variants
+
+    if token.endswith(("s", "x", "z", "ch", "sh", "or", "ion", "dad", "dor")):
+        variants.add(f"{token}es")
+    else:
+        variants.add(f"{token}s")
+    if token.endswith("y") and len(token) > 1:
+        variants.add(f"{token[:-1]}ies")
+    return variants
+
+
+def _deduplicate_citations(citations: list[Citation]) -> list[Citation]:
+    """Deduplicate citations keeping first occurrence order."""
+    seen: set[tuple[str, int, int]] = set()
+    deduplicated: list[Citation] = []
+    for citation in citations:
+        key = (
+            citation.path,
+            citation.start_line,
+            citation.end_line,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduplicated.append(citation)
+    return deduplicated
+
+
+def _deduplicate_citations_by_path(citations: list[Citation]) -> list[Citation]:
+    """Deduplicate citations by path keeping first occurrence order."""
+    seen_paths: set[str] = set()
+    deduplicated: list[Citation] = []
+    for citation in citations:
+        key = citation.path.strip().lower()
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        deduplicated.append(citation)
+    return deduplicated
 
 
 def _extract_inventory_target(query: str) -> str | None:
@@ -134,47 +240,31 @@ def _extract_inventory_target(query: str) -> str | None:
 
     match_es = re.search(r"todos?\s+(?:los|las)?\s*([a-z0-9_-]+)", normalized)
     if match_es:
-        return _normalize_inventory_token(match_es.group(1))
+        return _canonical_inventory_term(match_es.group(1))
 
     match_en = re.search(r"all\s+([a-z0-9_-]+)", normalized)
     if match_en:
-        return _normalize_inventory_token(match_en.group(1))
+        return _canonical_inventory_term(match_en.group(1))
 
     match_which = re.search(r"which\s+([a-z0-9_-]+)", normalized)
     if match_which:
-        return _normalize_inventory_token(match_which.group(1))
+        return _canonical_inventory_term(match_which.group(1))
 
     return None
 
 
 def _inventory_term_aliases(target_term: str) -> list[str]:
     """Expand inventory target with plural and cross-language aliases."""
-    normalized = _normalize_inventory_token(target_term)
-    aliases = {normalized}
+    base_forms = _inventory_base_forms(target_term)
+    aliases: set[str] = set()
+    for form in base_forms:
+        aliases.update(_plural_variants(form))
 
-    if normalized.endswith("y") and len(normalized) > 1:
-        aliases.add(f"{normalized[:-1]}ies")
-    aliases.add(f"{normalized}s")
-    aliases.add(f"{normalized}es")
-
-    equivalent_groups = [
-        {"service", "servicio"},
-        {"controller", "controlador"},
-        {"repository", "repositorio"},
-        {"handler", "manejador"},
-        {"model", "modelo"},
-        {"entity", "entidad"},
-        {"client", "cliente"},
-        {"adapter", "adaptador"},
-        {"gateway", "pasarela"},
-    ]
-    for group in equivalent_groups:
-        if normalized in group:
+    for group in INVENTORY_EQUIVALENT_GROUPS:
+        if base_forms.intersection(group):
             for token in group:
-                aliases.add(token)
-                aliases.add(f"{token}s")
-                aliases.add(f"{token}es")
-            break
+                normalized = _normalize_inventory_token(token)
+                aliases.update(_plural_variants(normalized))
 
     return sorted(aliases)
 
@@ -251,6 +341,7 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
     discovered_modules = _discover_repo_modules(repo_id) if _is_module_query(query) else []
     module_name = _extract_module_name(query)
     inventory_target = _extract_inventory_target(query) if _is_inventory_query(query) else None
+    inventory_terms = _inventory_term_aliases(inventory_target) if inventory_target else []
     discovered_inventory: list[dict] = []
     if inventory_target:
         discovered_inventory = _query_inventory_entities(
@@ -301,6 +392,20 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
         item for item in raw_citations if not _is_noisy_path(item.path)
     ]
     citations = sorted(filtered_citations, key=_citation_priority)
+    if inventory_target and module_name:
+        module_prefix = f"{module_name.strip('/')}/"
+        module_scoped = [
+            item for item in citations
+            if item.path.strip().lower().startswith(module_prefix.lower())
+        ]
+        alias_scoped = [
+            item for item in module_scoped
+            if any(alias in item.path.strip().lower() for alias in inventory_terms)
+        ]
+        if alias_scoped:
+            citations = alias_scoped
+        elif module_scoped:
+            citations = module_scoped
     if discovered_inventory:
         inventory_citations = [
             Citation(
@@ -313,14 +418,15 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
             for item in discovered_inventory
             if not _is_noisy_path(str(item.get("path", "")))
         ]
-        citations = inventory_citations + citations
+        citations = _deduplicate_citations(inventory_citations + citations)
+        citations = _deduplicate_citations_by_path(citations)
 
     client = AnswerClient()
     if client.enabled:
         answer = client.answer(query=query, context=context)
         valid = client.verify(answer=answer, context=context)
         if not valid:
-            answer = "No se encontró información en el repositorio."
+            answer = _build_extractive_fallback(citations)
     else:
         answer = _build_extractive_fallback(citations)
 
@@ -331,9 +437,7 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
         "openai_enabled": client.enabled,
         "discovered_modules": discovered_modules,
         "inventory_target": inventory_target,
-        "inventory_terms": (
-            _inventory_term_aliases(inventory_target) if inventory_target else []
-        ),
+        "inventory_terms": inventory_terms,
         "inventory_count": len(discovered_inventory),
     }
     return QueryResponse(answer=answer, citations=citations, diagnostics=diagnostics)

@@ -51,6 +51,12 @@ def test_extract_inventory_target_for_es_and_en() -> None:
     """Extracts normalized inventory target token from user query."""
     assert query_service._extract_inventory_target("todos los services del modulo") == "service"
     assert query_service._extract_inventory_target("all controllers in api-service") == "controller"
+    assert (
+        query_service._extract_inventory_target(
+            "cuales son todos los controladores de mall-portal"
+        )
+        == "controlador"
+    )
 
 
 def test_inventory_term_aliases_expand_for_multilingual_queries() -> None:
@@ -59,6 +65,16 @@ def test_inventory_term_aliases_expand_for_multilingual_queries() -> None:
     assert "servicio" in aliases
     assert "service" in aliases
     assert "services" in aliases
+    assert "servicees" not in aliases
+
+
+def test_inventory_term_aliases_expand_for_controllers() -> None:
+    """Expands spanish plural controllers to canonical english/spanish variants."""
+    aliases = query_service._inventory_term_aliases("controladores")
+    assert "controlador" in aliases
+    assert "controladores" in aliases
+    assert "controller" in aliases
+    assert "controllers" in aliases
 
 
 def test_query_inventory_entities_merges_alias_matches(
