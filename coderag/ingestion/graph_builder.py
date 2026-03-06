@@ -82,7 +82,12 @@ class GraphBuilder:
         """Query graph for entities matching target term within optional module."""
         query = """
         MATCH (f:File {repo_id: $repo_id})
-        WHERE ($module_name IS NULL OR f.path STARTS WITH $module_name + '/')
+        WHERE (
+            $module_name IS NULL OR
+            f.path STARTS WITH $module_name + '/' OR
+            f.path CONTAINS '/' + $module_name + '/' OR
+            split(f.path, '/')[0] = $module_name
+        )
         OPTIONAL MATCH (f)-[:DECLARES]->(s:Symbol)
         WITH f,
              collect({
@@ -135,7 +140,12 @@ class GraphBuilder:
         """Count graph inventory entities matching target term and module filter."""
         query = """
         MATCH (f:File {repo_id: $repo_id})
-        WHERE ($module_name IS NULL OR f.path STARTS WITH $module_name + '/')
+        WHERE (
+            $module_name IS NULL OR
+            f.path STARTS WITH $module_name + '/' OR
+            f.path CONTAINS '/' + $module_name + '/' OR
+            split(f.path, '/')[0] = $module_name
+        )
         OPTIONAL MATCH (f)-[:DECLARES]->(s:Symbol)
         WITH f,
              collect({
@@ -170,6 +180,42 @@ class GraphBuilder:
             if record is None:
                 return 0
             return int(record.get("total", 0) or 0)
+
+    def query_module_files(
+        self,
+        repo_id: str,
+        module_name: str,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List files within a module path for broad inventory requests."""
+        query = """
+        MATCH (f:File {repo_id: $repo_id})
+        WHERE (
+            f.path STARTS WITH $module_name + '/' OR
+            f.path CONTAINS '/' + $module_name + '/' OR
+            split(f.path, '/')[0] = $module_name
+        )
+        WITH f, split(f.path, '/')[size(split(f.path, '/')) - 1] AS file_name
+        RETURN DISTINCT
+            file_name AS label,
+            f.path AS path,
+            'file' AS kind,
+            1 AS start_line,
+            1 AS end_line
+        ORDER BY path
+        SKIP $offset
+        LIMIT $limit
+        """
+        with self.driver.session() as session:
+            records = session.run(
+                query,
+                repo_id=repo_id,
+                module_name=module_name,
+                limit=limit,
+                offset=offset,
+            )
+            return [record.data() for record in records]
 
     def expand_symbols(self, symbol_ids: list[str], hops: int = 2) -> list[dict[str, Any]]:
         """Expand graph neighborhood for symbols using variable-length path."""

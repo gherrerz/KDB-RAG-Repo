@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import coderag.api.query_service as query_service
-from coderag.core.models import Citation
+from coderag.core.models import Citation, RetrievalChunk
 
 
 def test_is_module_query_detects_spanish_and_english_terms() -> None:
@@ -58,6 +58,31 @@ def test_extract_inventory_target_for_es_and_en() -> None:
         )
         == "controlador"
     )
+    assert (
+        query_service._extract_inventory_target(
+            "cuales son los componentes de la carpeta core"
+        )
+        == "componente"
+    )
+    assert (
+        query_service._extract_inventory_target(
+            "cuales son todas las clases de ingestion"
+        )
+        == "clase"
+    )
+
+
+def test_is_inventory_explain_query_detection() -> None:
+    """Detects compound inventory + explanation requests."""
+    assert query_service._is_inventory_explain_query(
+        "cuales son los componentes de core y que funcion cumplen"
+    )
+    assert query_service._is_inventory_explain_query(
+        "list all services and explain what each one does"
+    )
+    assert not query_service._is_inventory_explain_query(
+        "cuales son los componentes de core"
+    )
 
 
 def test_inventory_term_aliases_expand_for_multilingual_queries() -> None:
@@ -76,6 +101,15 @@ def test_inventory_term_aliases_expand_for_controllers() -> None:
     assert "controladores" in aliases
     assert "controller" in aliases
     assert "controllers" in aliases
+
+
+def test_inventory_term_aliases_expand_for_classes() -> None:
+    """Expands spanish plural classes to canonical english/spanish variants."""
+    aliases = query_service._inventory_term_aliases("clases")
+    assert "clase" in aliases
+    assert "clases" in aliases
+    assert "class" in aliases
+    assert "classes" in aliases
 
 
 def test_query_inventory_entities_merges_alias_matches(
@@ -139,16 +173,113 @@ def test_query_inventory_entities_merges_alias_matches(
     assert paths == ["src/HomeService.java", "src/OrderService.java"]
 
 
+def test_query_inventory_entities_uses_module_file_listing_for_components(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uses direct module file listing for broad component inventory requests."""
+
+    class _Graph:
+        def __init__(self) -> None:
+            self.called_module_files = False
+
+        def query_module_files(
+            self,
+            repo_id: str,
+            module_name: str,
+            limit: int,
+        ) -> list[dict]:
+            self.called_module_files = True
+            assert repo_id == "repo1"
+            assert module_name == "core"
+            return [
+                {
+                    "label": "settings.py",
+                    "path": "core/settings.py",
+                    "start_line": 1,
+                    "end_line": 1,
+                }
+            ]
+
+        def query_inventory(self, *args, **kwargs) -> list[dict]:
+            raise AssertionError("query_inventory should not run for broad components")
+
+        def close(self) -> None:
+            return None
+
+    graph = _Graph()
+    monkeypatch.setattr(query_service, "GraphBuilder", lambda: graph)
+
+    entities = query_service._query_inventory_entities(
+        repo_id="repo1",
+        target_term="componentes",
+        module_name="core",
+    )
+
+    assert graph.called_module_files
+    assert len(entities) == 1
+    assert entities[0]["path"] == "core/settings.py"
+
+
 def test_extract_module_name_is_generic() -> None:
     """Extracts module names from generic spanish/english query phrasing."""
     assert query_service._extract_module_name("modulo api-service") == "api-service"
     assert query_service._extract_module_name("in web/client") == "web/client"
     assert (
         query_service._extract_module_name(
+            "cuales son los componentes de la carpeta core y que funcion cumplen"
+        )
+        == "core"
+    )
+    assert (
+        query_service._extract_module_name(
             "traeme todos los servicios de mall-portal"
         )
         == "mall-portal"
     )
+
+
+def test_build_purpose_from_source_uses_python_docstring(tmp_path: Path) -> None:
+    """Uses module docstring as component purpose when available."""
+    file_path = tmp_path / "service.py"
+    file_path.write_text(
+        '"""Orquesta validaciones de consultas y enrutamiento."""\n\n'
+        "def run() -> None:\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+
+    purpose = query_service._build_purpose_from_source(file_path)
+
+    assert purpose is not None
+    assert "Orquesta validaciones" in purpose
+
+
+def test_build_purpose_from_source_uses_filename_heuristic(tmp_path: Path) -> None:
+    """Falls back to filename heuristic when source lacks descriptive hints."""
+    file_path = tmp_path / "logging.py"
+    file_path.write_text("x = 1\n", encoding="utf-8")
+
+    purpose = query_service._build_purpose_from_source(file_path)
+
+    assert purpose is not None
+    assert "logging" in purpose.lower()
+
+
+def test_resolve_module_scope_prefers_nested_repo_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Resolves module token to a nested canonical path when uniquely found."""
+    repo_id = "repo1"
+    (tmp_path / repo_id / "coderag" / "core").mkdir(parents=True)
+
+    class _Settings:
+        workspace_path = tmp_path
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+
+    scope = query_service._resolve_module_scope(repo_id=repo_id, module_name="core")
+    assert scope == "coderag/core"
 
 
 def test_extractive_fallback_limits_non_inventory_results() -> None:
@@ -267,6 +398,49 @@ def test_run_query_uses_inventory_short_circuit(
     assert result.diagnostics["inventory_total"] == 2
 
 
+def test_run_query_inventory_without_target_falls_back_to_general(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps general QA path when inventory intent has no extractable target."""
+
+    def _fake_hybrid(repo_id: str, query: str, top_n: int) -> list[RetrievalChunk]:
+        return [
+            RetrievalChunk(
+                id="c1",
+                text="Core package contains settings and models.",
+                score=0.9,
+                metadata={"path": "core/settings.py", "start_line": 1, "end_line": 20},
+            )
+        ]
+
+    monkeypatch.setattr(query_service, "hybrid_search", _fake_hybrid)
+    monkeypatch.setattr(query_service, "rerank", lambda chunks, top_k: chunks)
+    monkeypatch.setattr(query_service, "expand_with_graph", lambda chunks: [])
+    monkeypatch.setattr(query_service, "assemble_context", lambda chunks, graph_records, max_tokens: "ctx")
+
+    class _AnswerClient:
+        enabled = False
+
+    monkeypatch.setattr(query_service, "AnswerClient", _AnswerClient)
+
+    def _fail_inventory(*args, **kwargs):
+        raise AssertionError("run_inventory_query should not run without target")
+
+    monkeypatch.setattr(query_service, "run_inventory_query", _fail_inventory)
+    monkeypatch.setattr(query_service, "_is_inventory_query", lambda query: True)
+    monkeypatch.setattr(query_service, "_extract_inventory_target", lambda query: None)
+
+    result = query_service.run_query(
+        repo_id="repo1",
+        query="cuales son en core?",
+        top_n=20,
+        top_k=5,
+    )
+
+    assert result.diagnostics["inventory_intent"] is True
+    assert result.diagnostics["inventory_route"] == "fallback_to_general"
+
+
 def test_run_inventory_query_applies_pagination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -298,3 +472,49 @@ def test_run_inventory_query_applies_pagination(
     assert len(result.items) == 2
     assert result.items[0].label == "Model3.java"
     assert result.items[1].label == "Model4.java"
+
+
+def test_run_inventory_query_includes_component_purposes_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adds per-component purpose section when query asks what each item does."""
+
+    discovered = [
+        {
+            "label": "Settings",
+            "path": "coderag/core/settings.py",
+            "kind": "file",
+            "start_line": 1,
+            "end_line": 30,
+        },
+        {
+            "label": "Models",
+            "path": "coderag/core/models.py",
+            "kind": "file",
+            "start_line": 1,
+            "end_line": 30,
+        },
+    ]
+
+    monkeypatch.setattr(query_service, "_query_inventory_entities", lambda **_: discovered)
+    monkeypatch.setattr(
+        query_service,
+        "_describe_inventory_components",
+        lambda **_: [
+            ("settings.py", "centraliza configuración"),
+            ("models.py", "define modelos de datos"),
+        ],
+    )
+
+    result = query_service.run_inventory_query(
+        repo_id="repo1",
+        query="cuales son los componentes de core y que funcion cumple cada uno",
+        page=1,
+        page_size=10,
+    )
+
+    assert "3) Función probable de cada componente:" in result.answer
+    assert "settings.py" in result.answer
+    assert "modelos de datos" in result.answer
+    assert result.diagnostics["inventory_explain"] is True
+    assert result.diagnostics["inventory_purpose_count"] == 2

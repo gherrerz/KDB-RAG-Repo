@@ -1,5 +1,6 @@
 """End-to-end query orchestration for Hybrid RAG + GraphRAG."""
 
+import ast
 from collections import Counter
 from pathlib import Path, PurePosixPath
 import re
@@ -22,6 +23,7 @@ from coderag.retrieval.reranker import rerank
 
 
 INVENTORY_EQUIVALENT_GROUPS = [
+    {"class", "clase"},
     {"service", "servicio"},
     {"controller", "controlador"},
     {"repository", "repositorio", "repo"},
@@ -37,7 +39,42 @@ INVENTORY_EQUIVALENT_GROUPS = [
     {"manager", "gestor"},
     {"factory", "fabrica", "fábrica"},
     {"helper", "util", "utils", "utilidad"},
+    {"component", "componente", "element", "elemento"},
+    {"file", "archivo", "fichero"},
 ]
+
+BROAD_FILE_INVENTORY_TERMS = {
+    "component",
+    "componente",
+    "element",
+    "elemento",
+    "file",
+    "archivo",
+    "fichero",
+}
+
+MODULE_NAME_STOPWORDS = {
+    "el",
+    "la",
+    "los",
+    "las",
+    "the",
+    "a",
+    "an",
+    "de",
+    "del",
+}
+
+INVENTORY_TARGET_STOPWORDS = {
+    "todo",
+    "todos",
+    "toda",
+    "todas",
+    "los",
+    "las",
+    "all",
+    "the",
+}
 
 
 def _fallback_header(fallback_reason: str) -> str:
@@ -72,6 +109,7 @@ def _build_extractive_fallback(
     inventory_target: str | None = None,
     query: str = "",
     fallback_reason: str = "not_configured",
+    component_purposes: list[tuple[str, str]] | None = None,
 ) -> str:
     """Build a local evidence-only answer when LLM is unavailable."""
     if not citations:
@@ -81,6 +119,7 @@ def _build_extractive_fallback(
         unique_citations = _deduplicate_citations_by_path(citations)
         file_paths = [item.path for item in unique_citations]
         component_names = [PurePosixPath(path).name for path in file_paths]
+        purposes_by_name = dict(component_purposes or [])
 
         folders = [
             str(PurePosixPath(path).parent)
@@ -105,16 +144,28 @@ def _build_extractive_fallback(
         ]
         lines.extend(f"- {name}" for name in component_names)
 
-        if top_folders:
+        if purposes_by_name:
             lines.extend([
                 "",
-                "3) Organización observada en el contexto:",
+                "3) Función probable de cada componente:",
+            ])
+            for name in component_names:
+                purpose = purposes_by_name.get(name)
+                if purpose:
+                    lines.append(f"- {name}: {purpose}")
+
+        if top_folders:
+            section_number = "4" if purposes_by_name else "3"
+            lines.extend([
+                "",
+                f"{section_number}) Organización observada en el contexto:",
             ])
             lines.extend(f"- {folder}" for folder in top_folders)
 
+        citations_section_number = "5" if purposes_by_name else "4"
         lines.extend([
             "",
-            "4) Citas de archivos con líneas:",
+            f"{citations_section_number}) Citas de archivos con líneas:",
         ])
         lines.extend(
             (
@@ -212,15 +263,35 @@ def _extract_module_name(query: str) -> str | None:
     if quoted:
         return quoted.group(1)
 
+    anchored_patterns = [
+        (
+            r"(?:carpeta|folder|directorio|directory|"
+            r"modulo|módulo|module|package)\s+"
+            r"(?:del?\s+|de\s+la\s+|de\s+los\s+|de\s+las\s+)?"
+            r"([a-z0-9_./-]+)"
+        ),
+        (
+            r"(?:componentes?|elements?|archivos?|files?)\s+"
+            r"(?:de|en|in|from|of)\s+"
+            r"(?:la|el|los|las|the)?\s*"
+            r"(?:carpeta|folder|directorio|directory|modulo|módulo|module|package)?\s*"
+            r"([a-z0-9_./-]+)"
+        ),
+    ]
+    for pattern in anchored_patterns:
+        for match in re.finditer(pattern, normalized):
+            token = match.group(1).strip(".,;:!?()[]{}")
+            if token and token not in MODULE_NAME_STOPWORDS:
+                return token
+
     patterns = [
         r"(?:modulo|módulo|module|package|servicio|service)\s+([a-z0-9_./-]+)",
         r"(?:in|en|de|del|of|for)\s+([a-z0-9_./-]+)",
     ]
     for pattern in patterns:
-        match = re.search(pattern, normalized)
-        if match:
+        for match in re.finditer(pattern, normalized):
             token = match.group(1).strip(".,;:!?()[]{}")
-            if token and token not in {"el", "la", "los", "las", "the", "a", "an"}:
+            if token and token not in MODULE_NAME_STOPWORDS:
                 return token
 
     module_like = re.search(r"\b([a-z0-9]+(?:[-_/][a-z0-9]+)+)\b", normalized)
@@ -333,19 +404,285 @@ def _extract_inventory_target(query: str) -> str | None:
     """Extract target entity token from inventory-style natural language queries."""
     normalized = query.lower()
 
-    match_es = re.search(r"todos?\s+(?:los|las)?\s*([a-z0-9_-]+)", normalized)
+    match_es = re.search(
+        r"tod(?:os|as)?\s+(?:los|las)?\s*([a-z0-9_-]+)",
+        normalized,
+    )
     if match_es:
-        return _canonical_inventory_term(match_es.group(1))
+        token = match_es.group(1)
+        if token not in INVENTORY_TARGET_STOPWORDS:
+            return _canonical_inventory_term(token)
+
+    match_cuales = re.search(
+        r"cuales?\s+son\s+(?:tod(?:os|as)?\s+)?(?:los|las)?\s*([a-z0-9_-]+)",
+        normalized,
+    )
+    if match_cuales:
+        token = match_cuales.group(1)
+        if token not in INVENTORY_TARGET_STOPWORDS:
+            return _canonical_inventory_term(token)
+
+    match_lista = re.search(r"(?:lista|listar)\s+(?:los|las)?\s*([a-z0-9_-]+)", normalized)
+    if match_lista:
+        token = match_lista.group(1)
+        if token not in INVENTORY_TARGET_STOPWORDS:
+            return _canonical_inventory_term(token)
 
     match_en = re.search(r"all\s+([a-z0-9_-]+)", normalized)
     if match_en:
-        return _canonical_inventory_term(match_en.group(1))
+        token = match_en.group(1)
+        if token not in INVENTORY_TARGET_STOPWORDS:
+            return _canonical_inventory_term(token)
 
     match_which = re.search(r"which\s+([a-z0-9_-]+)", normalized)
     if match_which:
-        return _canonical_inventory_term(match_which.group(1))
+        token = match_which.group(1)
+        if token not in INVENTORY_TARGET_STOPWORDS:
+            return _canonical_inventory_term(token)
 
     return None
+
+
+def _is_inventory_explain_query(query: str) -> bool:
+    """Return whether query asks to explain role/function per listed component."""
+    normalized = _normalize_inventory_token(query)
+    explanation_signals = [
+        "que funcion",
+        "que hace",
+        "para que sirve",
+        "funcion cumplen",
+        "funcion de cada",
+        "explain",
+        "what each",
+        "each one does",
+        "what each one does",
+        "function of each",
+        "role of each",
+        "what does",
+        "what do",
+        "purpose",
+    ]
+    return any(signal in normalized for signal in explanation_signals)
+
+
+def _resolve_repo_file_path(repo_id: str, relative_path: str) -> Path | None:
+    """Resolve and validate repository-relative path to an existing local file."""
+    normalized = relative_path.strip().replace("\\", "/").strip("/")
+    if not normalized:
+        return None
+
+    settings = get_settings()
+    repo_root = (settings.workspace_path / repo_id).resolve()
+    candidate = (repo_root / normalized).resolve()
+    try:
+        candidate.relative_to(repo_root)
+    except ValueError:
+        return None
+
+    if not candidate.exists() or not candidate.is_file():
+        return None
+    return candidate
+
+
+def _first_sentence(text: str) -> str:
+    """Return first sentence-like fragment without trailing punctuation."""
+    first = re.split(r"[\.\n\r]", text, maxsplit=1)[0].strip()
+    return first.rstrip(" \t\"'`.,;:!?¡¿")
+
+
+def _purpose_from_filename(file_path: Path) -> str | None:
+    """Infer purpose hint from filename stem using lightweight heuristics."""
+    stem = file_path.stem.lower()
+
+    if any(token in stem for token in ("settings", "config", "configuration")):
+        return "Centraliza configuración y parámetros del módulo."
+    if any(token in stem for token in ("model", "entity", "schema", "dto")):
+        return "Define estructuras de datos y contratos del dominio."
+    if any(token in stem for token in ("log", "logger", "logging")):
+        return "Configura y encapsula el comportamiento de logging."
+    if stem in {"__init__", "index"}:
+        return "Define inicialización/exportaciones del módulo."
+    return None
+
+
+def _build_purpose_from_source(file_path: Path) -> str | None:
+    """Infer concise component purpose from first identifiable source declaration."""
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+
+    fallback_hint = _purpose_from_filename(file_path)
+    lines = content.splitlines()[:240]
+    suffix = file_path.suffix.lower()
+
+    if suffix == ".py":
+        try:
+            module_ast = ast.parse(content)
+        except (SyntaxError, ValueError):
+            module_ast = None
+
+        if module_ast is not None:
+            module_doc = ast.get_docstring(module_ast)
+            if module_doc:
+                summary = _first_sentence(module_doc)
+                if len(summary) >= 20:
+                    return f"{summary}."
+
+            for node in module_ast.body:
+                if isinstance(node, ast.ClassDef):
+                    name = node.name
+                    normalized = name.lower()
+                    if any(token in normalized for token in ("settings", "config")):
+                        return (
+                            f"Declara la clase `{name}` para centralizar "
+                            f"configuración del componente."
+                        )
+                    if "service" in normalized:
+                        return (
+                            f"Declara la clase `{name}` para implementar "
+                            f"lógica de servicio del componente."
+                        )
+                    return (
+                        f"Declara la clase `{name}` y centraliza "
+                        f"responsabilidades del componente."
+                    )
+
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    name = node.name
+                    normalized = name.lower()
+                    has_setup = any(
+                        token in normalized
+                        for token in ("configure", "setup", "init")
+                    )
+                    has_logging = any(
+                        token in normalized
+                        for token in ("logging", "log")
+                    )
+                    if has_setup and has_logging:
+                        return (
+                            f"Define `{name}` para configurar el logging "
+                            f"del componente."
+                        )
+                    return (
+                        f"Define la función `{name}` y encapsula "
+                        f"comportamiento reutilizable."
+                    )
+
+    patterns_by_suffix: dict[str, list[tuple[re.Pattern[str], str]]] = {
+        ".java": [
+            (
+                re.compile(
+                    r"^\s*(?:public\s+|private\s+|protected\s+)?"
+                    r"(?:abstract\s+|final\s+)?"
+                    r"(class|interface|enum|record)\s+([A-Za-z_][A-Za-z0-9_]*)"
+                ),
+                "java_type",
+            ),
+        ],
+        ".js": [
+            (re.compile(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)"), "class"),
+            (
+                re.compile(
+                    r"^\s*(?:export\s+)?(?:async\s+)?function\s+"
+                    r"([A-Za-z_][A-Za-z0-9_]*)"
+                ),
+                "function",
+            ),
+        ],
+        ".ts": [
+            (re.compile(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)"), "class"),
+            (
+                re.compile(
+                    r"^\s*(?:export\s+)?(?:async\s+)?function\s+"
+                    r"([A-Za-z_][A-Za-z0-9_]*)"
+                ),
+                "function",
+            ),
+        ],
+    }
+
+    patterns = patterns_by_suffix.get(suffix, [])
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "//", "/*", "*")):
+            continue
+        for pattern, kind in patterns:
+            match = pattern.match(line)
+            if not match:
+                continue
+            if kind == "java_type":
+                java_kind = match.group(1)
+                name = match.group(2)
+                lowered = name.lower()
+                if "controller" in lowered:
+                    return (
+                        f"Declara el {java_kind} `{name}` para gestionar "
+                        f"entradas y coordinación del componente."
+                    )
+                if "service" in lowered:
+                    return (
+                        f"Declara el {java_kind} `{name}` para implementar "
+                        f"lógica de negocio del componente."
+                    )
+                if "repository" in lowered:
+                    return (
+                        f"Declara el {java_kind} `{name}` para encapsular "
+                        f"acceso a datos del componente."
+                    )
+                return f"Declara el {java_kind} `{name}` y concentra lógica principal del componente."
+            name = match.group(1)
+            if kind == "class":
+                lowered = name.lower()
+                if "controller" in lowered:
+                    return (
+                        f"Declara la clase `{name}` para gestionar entradas "
+                        f"y coordinación del componente."
+                    )
+                if "service" in lowered:
+                    return (
+                        f"Declara la clase `{name}` para implementar lógica "
+                        f"de servicio del componente."
+                    )
+                if "repository" in lowered:
+                    return (
+                        f"Declara la clase `{name}` para encapsular acceso "
+                        f"a datos del componente."
+                    )
+                return f"Declara la clase `{name}` y centraliza responsabilidades del componente."
+            if kind == "function":
+                return f"Define la función `{name}` y encapsula comportamiento reutilizable."
+
+    if fallback_hint:
+        return fallback_hint
+    return "Contiene implementación de soporte del componente en este módulo."
+
+
+def _describe_inventory_components(
+    repo_id: str,
+    citations: list[Citation],
+    pipeline_started_at: float,
+    budget_seconds: float,
+) -> list[tuple[str, str]]:
+    """Build per-component purpose hints from local source files within budget."""
+    descriptions: list[tuple[str, str]] = []
+    seen_names: set[str] = set()
+    for citation in citations:
+        if _remaining_budget_seconds(pipeline_started_at, budget_seconds) <= 0:
+            break
+        path = citation.path.strip()
+        component_name = PurePosixPath(path).name
+        if not component_name or component_name in seen_names:
+            continue
+        file_path = _resolve_repo_file_path(repo_id=repo_id, relative_path=path)
+        if file_path is None:
+            continue
+        purpose = _build_purpose_from_source(file_path)
+        if purpose is None:
+            continue
+        seen_names.add(component_name)
+        descriptions.append((component_name, purpose))
+    return descriptions
 
 
 def _inventory_term_aliases(target_term: str) -> list[str]:
@@ -373,6 +710,15 @@ def _query_inventory_entities(
     settings = get_settings()
     graph = GraphBuilder()
     try:
+        canonical_target = _canonical_inventory_term(target_term)
+        if module_name and canonical_target in BROAD_FILE_INVENTORY_TERMS:
+            module_files = graph.query_module_files(
+                repo_id=repo_id,
+                module_name=module_name,
+                limit=settings.inventory_entity_limit,
+            )
+            return sorted(module_files, key=lambda item: item.get("path", ""))
+
         entities_by_key: dict[tuple[str, int, int], dict] = {}
         aliases = _inventory_term_aliases(target_term)[: settings.inventory_alias_limit]
         for alias in aliases:
@@ -394,6 +740,41 @@ def _query_inventory_entities(
         return []
     finally:
         graph.close()
+
+
+def _resolve_module_scope(repo_id: str, module_name: str | None) -> str | None:
+    """Resolve user module token to canonical repository-relative directory scope."""
+    if not module_name:
+        return None
+
+    cleaned = module_name.strip().strip("/\\").replace("\\", "/")
+    if not cleaned:
+        return None
+
+    settings = get_settings()
+    repo_path = settings.workspace_path / repo_id
+    if not repo_path.exists() or not repo_path.is_dir():
+        return cleaned
+
+    direct = (repo_path / cleaned)
+    if direct.exists() and direct.is_dir():
+        return cleaned
+
+    lowered = cleaned.lower()
+    matches: list[str] = []
+    for directory in repo_path.rglob("*"):
+        if not directory.is_dir():
+            continue
+        relative = directory.relative_to(repo_path).as_posix()
+        rel_lower = relative.lower()
+        if directory.name.lower() == lowered or rel_lower.endswith(f"/{lowered}"):
+            matches.append(relative)
+
+    if not matches:
+        return cleaned
+
+    matches.sort(key=lambda item: (item.count("/"), len(item), item))
+    return matches[0]
 
 
 def _sanitize_inventory_pagination(page: int, page_size: int) -> tuple[int, int]:
@@ -464,7 +845,9 @@ def run_inventory_query(
 
     parse_started_at = monotonic()
     inventory_target = _extract_inventory_target(query) if _is_inventory_query(query) else None
-    module_name = _extract_module_name(query)
+    explain_inventory = _is_inventory_explain_query(query)
+    module_name_raw = _extract_module_name(query)
+    module_name = _resolve_module_scope(repo_id=repo_id, module_name=module_name_raw)
     inventory_terms = _inventory_term_aliases(inventory_target) if inventory_target else []
     safe_page, safe_page_size = _sanitize_inventory_pagination(page, page_size)
     stage_timings["parse_ms"] = _elapsed_milliseconds(parse_started_at)
@@ -474,6 +857,9 @@ def run_inventory_query(
             "inventory_target": None,
             "inventory_terms": [],
             "inventory_count": 0,
+            "inventory_explain": explain_inventory,
+            "module_name_raw": module_name_raw,
+            "module_name_resolved": module_name,
             "query_budget_seconds": budget_seconds,
             "budget_exhausted": False,
             "stage_timings_ms": stage_timings,
@@ -540,12 +926,24 @@ def run_inventory_query(
     ):
         fallback_reason = "time_budget_exhausted"
 
+    purpose_started_at = monotonic()
+    component_purposes: list[tuple[str, str]] = []
+    if explain_inventory and citations:
+        component_purposes = _describe_inventory_components(
+            repo_id=repo_id,
+            citations=citations,
+            pipeline_started_at=pipeline_started_at,
+            budget_seconds=budget_seconds,
+        )
+    stage_timings["component_purpose_ms"] = _elapsed_milliseconds(purpose_started_at)
+
     answer = _build_extractive_fallback(
         citations,
         inventory_mode=True,
         inventory_target=inventory_target,
         query=query,
         fallback_reason=fallback_reason or "inventory_structured",
+        component_purposes=component_purposes,
     )
 
     stage_timings["total_ms"] = _elapsed_milliseconds(pipeline_started_at)
@@ -553,6 +951,10 @@ def run_inventory_query(
         "inventory_target": inventory_target,
         "inventory_terms": inventory_terms,
         "inventory_count": total_items,
+        "inventory_explain": explain_inventory,
+        "inventory_purpose_count": len(component_purposes),
+        "module_name_raw": module_name_raw,
+        "module_name_resolved": module_name,
         "query_budget_seconds": budget_seconds,
         "budget_exhausted": _remaining_budget_seconds(pipeline_started_at, budget_seconds) <= 0,
         "stage_timings_ms": stage_timings,
@@ -575,7 +977,9 @@ def run_inventory_query(
 def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse:
     """Run full query pipeline and return answer with citations."""
     settings = get_settings()
-    if _is_inventory_query(query):
+    inventory_intent = _is_inventory_query(query)
+    inventory_target = _extract_inventory_target(query) if inventory_intent else None
+    if inventory_intent and inventory_target:
         inventory_response = run_inventory_query(
             repo_id=repo_id,
             query=query,
@@ -733,6 +1137,12 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
         "query_budget_seconds": budget_seconds,
         "budget_exhausted": _remaining_budget_seconds(pipeline_started_at, budget_seconds) <= 0,
         "stage_timings_ms": stage_timings,
+        "inventory_intent": inventory_intent,
+        "inventory_route": (
+            "fallback_to_general"
+            if inventory_intent and not inventory_target
+            else None
+        ),
     }
     if llm_error is not None:
         diagnostics["llm_error"] = llm_error
