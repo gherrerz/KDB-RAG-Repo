@@ -1,4 +1,4 @@
-"""Main desktop window for CodeRAG Studio."""
+"""Main desktop window for RAG Hybrid Response Validator."""
 
 import sys
 from typing import Any
@@ -19,7 +19,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         """Build widgets and connect UI events."""
         super().__init__()
-        self.setWindowTitle("CodeRAG Studio · Desktop")
+        self.setWindowTitle("RAG Hybrid Response Validator · Desktop")
         self.resize(1100, 700)
 
         self.ingestion_view = IngestionView()

@@ -14,7 +14,7 @@ from coderag.core.models import (
 from coderag.jobs.worker import JobManager
 
 configure_logging()
-app = FastAPI(title="CodeRAG Studio API", version="0.1.0")
+app = FastAPI(title="RAG Hybrid Response Validator API", version="0.1.0")
 jobs = JobManager()
 
 

@@ -1,1 +1,1 @@
-"""CodeRAG Studio package."""
+"""RAG Hybrid Response Validator package."""

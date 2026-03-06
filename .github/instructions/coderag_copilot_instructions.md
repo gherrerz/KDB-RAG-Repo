@@ -1,4 +1,4 @@
-# CodeRAG Studio -- GitHub Copilot Instructions
+# RAG Hybrid Response Validator -- GitHub Copilot Instructions
 
 ## Prompt Maestro para Agente de IA Constructor
 
@@ -15,7 +15,7 @@ Consultar el conocimiento del repositorio mediante **LLM** 4. Mostrar
 
 # 1. Objetivo del sistema
 
-Construir una aplicación llamada **CodeRAG Studio** con interfaz gráfica
+Construir una aplicación llamada **RAG Hybrid Response Validator** con interfaz gráfica
 que permita:
 
 ### Ingesta

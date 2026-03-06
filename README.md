@@ -1,6 +1,6 @@
-# CodeRAG Studio
+# RAG Hybrid Response Validator
 
-CodeRAG Studio es una solución de análisis de repositorios basada en Hybrid RAG
+RAG Hybrid Response Validator es una solución de análisis de repositorios basada en Hybrid RAG
 (Vector + BM25 + Grafo) para responder preguntas sobre código con evidencia
 verificable (archivos y líneas).
 
