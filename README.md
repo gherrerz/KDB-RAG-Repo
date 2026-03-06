@@ -60,40 +60,65 @@ Se incluye API (FastAPI), UI de escritorio (PySide6), almacenamiento vectorial
 ### Diagrama (Mermaid)
 
 ```mermaid
-flowchart LR
-   U[Usuario UI PySide6] --> API[FastAPI API]
+flowchart TB
+   USER[Usuario]
+   UI[UI Desktop\nPySide6]
+   API[API\nFastAPI]
+   JOBS[Job Manager\nThreaded jobs + metadata]
 
    subgraph ING[Pipeline Ingesta]
-      GIT[Git Clone y Scan]
-      CHK[Chunking Simbolos Archivos Modulos]
-      EMB[Embeddings]
-      IDX1[ChromaDB]
-      IDX2[BM25]
-      GRF[Neo4j Graph]
-      GIT --> CHK --> EMB --> IDX1
-      CHK --> IDX2
-      CHK --> GRF
+      GIT[Git Client\nclone/fetch]
+      SCAN[Repo Scanner\nlectura archivos]
+      CHUNK[Chunker\nsímbolos/archivos/módulos]
+      EMB[Embedding Client\nOpenAI embeddings]
+      IDXV[Indexación Vectorial\nChroma collections]
+      IDXB[Indexación Léxica\nBM25 in-memory]
+      GRAPHI[Graph Builder\nNeo4j upsert]
    end
 
-   API --> ING
-   API --> JOBS[Job State]
-
-   subgraph QRY[Pipeline Consulta]
-      QN[Normalizacion]
-      HYB[Hybrid Search Vector BM25 Modules]
-      RER[Reranking]
-      EXP[Graph Expand]
-      ASM[Context Assembly]
-      LLM[OpenAI Answer Verify]
-      QN --> HYB --> RER --> EXP --> ASM --> LLM
+   subgraph RET[Pipeline Retrieval + Respuesta]
+      NORM[Normalización de consulta\nintención + target inventario]
+      HYB[Hybrid Search\nVector + BM25]
+      RER[Reranker\nTop-K]
+      GEXP[Graph Expand\nvecindad de símbolos]
+      CTX[Context Assembler\ncontexto acotado]
+      LLM[Answer + Verify\nOpenAI]
+      FALLBACK[Fallback extractivo\ncon citas y diagnóstico]
    end
 
-   API --> QRY
-   IDX1 --> HYB
-   IDX2 --> HYB
-   GRF --> EXP
-   LLM --> API --> U
+   subgraph STORES[Persistencia y estado]
+      CHROMA[(ChromaDB)]
+      NEO[(Neo4j)]
+      META[(SQLite metadata.db)]
+      WS[(Workspace clones)]
+   end
+
+   USER --> UI --> API
+   API --> JOBS
+   JOBS --> GIT --> SCAN --> CHUNK
+   CHUNK --> EMB --> IDXV --> CHROMA
+   CHUNK --> IDXB
+   CHUNK --> GRAPHI --> NEO
+   GIT --> WS
+   JOBS --> META
+
+   API --> NORM --> HYB --> RER --> GEXP --> CTX
+   CHROMA --> HYB
+   IDXB --> HYB
+   NEO --> GEXP
+   CTX --> LLM
+   LLM --> API
+   CTX --> FALLBACK --> API
+   API --> UI --> USER
 ```
+
+### Relaciones clave
+
+- **UI (PySide6)** consume la **API (FastAPI)** para ingesta, polling de jobs y consultas.
+- **Ingesta** construye tres vistas complementarias del código: vectorial (**Chroma**), léxica (**BM25**) y relacional (**Neo4j**).
+- **Retrieval híbrido** combina esas fuentes, rerankea, expande grafo y arma contexto antes de responder.
+- **LLM** genera y verifica; si falla configuración/verificación/generación, entra **fallback extractivo** con citas y `diagnostics`.
+- **SQLite + workspace** guardan estado operativo (jobs, repos y clones locales).
 
 ## Instalación
 
