@@ -41,6 +41,9 @@ Se incluye API (FastAPI), UI de escritorio (PySide6), almacenamiento vectorial
 - Soporte de expansión GraphRAG para enriquecer contexto.
 - Respuestas con citas y diagnósticos (`retrieved`, `reranked`, `graph_nodes`,
    etc.).
+- Diagnóstico explícito de fallback (`fallback_reason`, `verify_valid`,
+   `llm_error`) para diferenciar configuración, verificación y errores de
+   generación.
 - Fallback seguro cuando no hay configuración de LLM.
 
 ## Arquitectura del Sistema
@@ -173,6 +176,14 @@ $q = @{
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/query -ContentType 'application/json' -Body $q
 ```
 
+El `diagnostics` de la respuesta incluye, entre otros:
+
+- `retrieved`, `reranked`, `graph_nodes`.
+- `inventory_target`, `inventory_terms`, `inventory_count`.
+- `fallback_reason`: `not_configured`, `verification_failed` o `generation_error`.
+- `verify_valid`: resultado de verificación cuando OpenAI está habilitado.
+- `llm_error`: detalle de excepción (solo si hubo error de generación/verificación).
+
 ### 5) Listar repos disponibles para consulta
 
 ```powershell
@@ -255,6 +266,13 @@ Checklist sugerida antes de release (3 escenarios):
 - **`OPENAI no configurado`**
    - Verifica que la clave esté en `.env` (no en `.env.example`).
    - Reinicia la API después de cambios en entorno.
+
+- **Fallback por verificación (`fallback_reason=verification_failed`)**
+    - No implica falta de configuración; indica que la respuesta generada no
+       pasó validación de grounding.
+    - Revisa `diagnostics.verify_valid`, `diagnostics.fallback_reason` y
+       `diagnostics.inventory_count` para distinguir entre falta de evidencia vs
+       rechazo del verificador.
 
 - **Neo4j `Unauthorized` o `connection` error**
    - Valida `NEO4J_URI`, usuario y contraseña.
