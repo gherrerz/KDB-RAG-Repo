@@ -167,9 +167,22 @@ Variables relevantes en `.env`:
 - `UI_REQUEST_TIMEOUT_SECONDS`: timeout HTTP de la UI hacia API.
 - `INVENTORY_PAGE_SIZE`, `INVENTORY_MAX_PAGE_SIZE`: paginación para inventario.
 - `INVENTORY_ALIAS_LIMIT`, `INVENTORY_ENTITY_LIMIT`: límites de expansión de inventario.
-- `SCAN_MAX_FILE_SIZE_BYTES`: tamaño máximo por archivo durante escaneo de ingesta.
-- `SCAN_EXCLUDED_DIRS`: carpetas excluidas de la ingesta (CSV).
-- `SCAN_EXCLUDED_EXTENSIONS`: extensiones excluidas de la ingesta (CSV).
+- `SCAN_MAX_FILE_SIZE_BYTES` (obligatoria): tamaño máximo por archivo durante escaneo de ingesta.
+- `SCAN_EXCLUDED_DIRS` (obligatoria): carpetas excluidas de la ingesta (CSV).
+- `SCAN_EXCLUDED_EXTENSIONS` (obligatoria): extensiones excluidas de la ingesta (CSV).
+
+### Filtros de escaneo de ingesta (obligatorios)
+
+Desde esta versión, la ingesta no usa valores por defecto en código para filtros de escaneo.
+Debes definir explícitamente estas variables en `.env`:
+
+```dotenv
+SCAN_MAX_FILE_SIZE_BYTES=200000
+SCAN_EXCLUDED_DIRS=.git,node_modules,dist,build,venv,.venv,__pycache__,.idea,.vscode,target,out,bin,obj,.gradle,.m2,.pytest_cache,.mypy_cache
+SCAN_EXCLUDED_EXTENSIONS=.png,.jpg,.jpeg,.gif,.webp,.ico,.mp3,.mp4,.wav,.ogg,.pdf,.zip,.tar,.gz,.7z,.rar,.jar,.war,.ear,.class,.dll,.exe,.so,.dylib,.o,.a,.bin,.sqlite,.db
+```
+
+Si falta alguna, la ingesta falla al iniciar con error de configuración.
 
 > Nota: en esta configuración se recomienda `NEO4J_URI=bolt://127.0.0.1:17687`
 para evitar conflictos de puertos locales comunes.
