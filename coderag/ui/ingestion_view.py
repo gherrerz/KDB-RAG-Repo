@@ -1,12 +1,13 @@
 """Widgets de vista de ingesta para la configuración y ejecución del repositorio."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QFrame,
-    QHBoxLayout,
     QComboBox,
+    QFrame,
     QFormLayout,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QProgressBar,
@@ -20,16 +21,26 @@ from PySide6.QtWidgets import (
 class IngestionView(QWidget):
     """Panel de interfaz de usuario que captura parámetros y registros de ingesta."""
 
+    STATUS_PULSE_MS = 180
+    BUTTON_FLASH_MS = 140
+
     def __init__(self) -> None:
         """Inicialice los controles de formulario para la ingesta del repositorio."""
         super().__init__()
         self.title_label = QLabel("Ingesta de Repositorio")
+        self.title_label.setObjectName("ingestionTitle")
         self.subtitle_label = QLabel(
             "Conecta un repositorio y monitorea el pipeline de indexación en tiempo real."
         )
+        self.subtitle_label.setObjectName("ingestionSubtitle")
         self.status_chip = QLabel("Idle")
         self.status_chip.setObjectName("statusChip")
         self.status_chip.setProperty("state", "idle")
+
+        title_font = QFont("Segoe UI", 17, QFont.Weight.Bold)
+        subtitle_font = QFont("Segoe UI", 11, QFont.Weight.Medium)
+        self.title_label.setFont(title_font)
+        self.subtitle_label.setFont(subtitle_font)
 
         self.provider = QComboBox()
         self.provider.addItems(["github", "bitbucket"])
@@ -44,6 +55,8 @@ class IngestionView(QWidget):
         self.ingest_button = QPushButton("Ingestar")
         self.reset_button = QPushButton("Limpiar Todo")
         self.reset_button.setObjectName("dangerButton")
+        self.reset_button.setProperty("variant", "danger")
+        self.ingest_button.setObjectName("ingestPrimaryButton")
 
         self.job_id = QLineEdit()
         self.job_id.setReadOnly(True)
@@ -54,33 +67,54 @@ class IngestionView(QWidget):
         self.repo_id.setPlaceholderText("Disponible al completar")
 
         self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("ingestionProgress")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
 
         self.logs = QTextEdit()
+        self.logs.setObjectName("ingestionLogs")
         self.logs.setReadOnly(True)
         self.logs.setPlaceholderText("Logs de ingesta...")
 
+        self.top_card = QFrame()
+        self.top_card.setObjectName("ingestionTopCard")
+
+        self.form_card = QFrame()
+        self.form_card.setObjectName("ingestCard")
+
+        self.logs_card = QFrame()
+        self.logs_card.setObjectName("ingestionLogsCard")
+
         form = QFormLayout()
+        form.setContentsMargins(14, 12, 14, 12)
+        form.setVerticalSpacing(10)
         form.addRow("Provider", self.provider)
         form.addRow("Repo URL", self.repo_url)
         form.addRow("Token", self.token)
         form.addRow("Branch", self.branch)
         form.addRow("Job ID", self.job_id)
         form.addRow("Repo ID", self.repo_id)
-
-        card = QFrame()
-        card.setObjectName("ingestCard")
-        card.setLayout(form)
+        self.form_card.setLayout(form)
 
         top_bar = QGridLayout()
+        top_bar.setContentsMargins(14, 12, 14, 12)
+        top_bar.setVerticalSpacing(6)
         top_bar.addWidget(self.title_label, 0, 0)
         top_bar.addWidget(self.status_chip, 0, 1, alignment=Qt.AlignmentFlag.AlignRight)
         top_bar.addWidget(self.subtitle_label, 1, 0, 1, 2)
+        top_bar.setColumnStretch(0, 1)
+        self.top_card.setLayout(top_bar)
+
+        logs_layout = QVBoxLayout()
+        logs_layout.setContentsMargins(12, 12, 12, 12)
+        logs_layout.addWidget(self.logs)
+        self.logs_card.setLayout(logs_layout)
 
         layout = QVBoxLayout()
-        layout.addLayout(top_bar)
-        layout.addWidget(card)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(10)
+        layout.addWidget(self.top_card)
+        layout.addWidget(self.form_card)
         layout.addWidget(self.progress_bar)
 
         actions = QHBoxLayout()
@@ -89,74 +123,125 @@ class IngestionView(QWidget):
         actions.addWidget(self.reset_button)
 
         layout.addLayout(actions)
-        layout.addWidget(self.logs)
+        layout.addWidget(self.logs_card)
         self.setLayout(layout)
+
+        self.ingest_button.clicked.connect(lambda: self._flash_button(self.ingest_button))
+        self.reset_button.clicked.connect(lambda: self._flash_button(self.reset_button))
 
         self.setStyleSheet(
             """
             QWidget {
                 font-size: 13px;
-            }
-            QLabel {
-                color: #E5E7EB;
+                color: #EAF1FF;
             }
             IngestionView {
-                background-color: #111827;
+                background-color: #0A1324;
             }
+            QFrame#ingestionTopCard,
             QFrame#ingestCard {
-                background-color: #1F2937;
-                border: 1px solid #374151;
-                border-radius: 10px;
-                padding: 10px;
+                background-color: #111C32;
+                border: 1px solid #2A3A5A;
+                border-radius: 12px;
+            }
+            QFrame#ingestionTopCard {
+                background-color: #15243E;
+            }
+            QFrame#ingestionLogsCard {
+                background-color: #111C32;
+                border: 1px solid #2A3A5A;
+                border-radius: 12px;
+            }
+            QLabel#ingestionTitle {
+                color: #EAF1FF;
+                letter-spacing: 0.4px;
+            }
+            QLabel#ingestionSubtitle {
+                color: #A8B7D6;
             }
             QLabel#statusChip {
                 padding: 4px 10px;
                 border-radius: 10px;
                 font-weight: 600;
-                color: #F3F4F6;
-                background-color: #4B5563;
+                color: #F8FBFF;
+                background-color: #41577D;
+            }
+            QLabel#statusChip[pulse="true"] {
+                border: 1px solid #8FB9FF;
+                padding: 3px 9px;
             }
             QLabel#statusChip[state="running"] {
-                background-color: #1D4ED8;
+                background-color: #D98F2B;
             }
             QLabel#statusChip[state="success"] {
-                background-color: #15803D;
+                background-color: #1FA971;
             }
             QLabel#statusChip[state="error"] {
-                background-color: #B91C1C;
+                background-color: #C93A4B;
             }
             QLineEdit, QComboBox, QTextEdit {
-                background-color: #0F172A;
-                color: #E5E7EB;
-                border: 1px solid #374151;
+                background-color: #0E1A2F;
+                color: #EAF1FF;
+                border: 1px solid #2A3A5A;
                 border-radius: 8px;
-                padding: 6px;
+                padding: 7px;
+            }
+            QLineEdit:focus, QComboBox:focus, QTextEdit:focus {
+                border: 1px solid #5EA0FF;
+                background-color: #10213B;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                width: 0;
+                height: 0;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid #A8B7D6;
+                margin-right: 8px;
             }
             QProgressBar {
-                border: 1px solid #374151;
+                border: 1px solid #2A3A5A;
                 border-radius: 8px;
                 text-align: center;
-                color: #E5E7EB;
-                background-color: #0F172A;
+                color: #EAF1FF;
+                background-color: #0E1A2F;
             }
             QProgressBar::chunk {
-                background-color: #2563EB;
+                background-color: #2F7BFF;
                 border-radius: 6px;
             }
             QPushButton {
-                background-color: #2563EB;
-                color: white;
+                background-color: #2F7BFF;
+                color: #F8FBFF;
                 border: none;
                 border-radius: 8px;
                 padding: 9px;
                 font-weight: 700;
             }
-            QPushButton:disabled {
-                background-color: #334155;
-                color: #CBD5E1;
+            QPushButton:hover {
+                background-color: #4A91FF;
             }
-            QPushButton#dangerButton {
-                background-color: #B91C1C;
+            QPushButton[flash="true"] {
+                background-color: #6AA7FF;
+            }
+            QPushButton:disabled {
+                background-color: #344561;
+                color: #90A2C3;
+            }
+            QPushButton#dangerButton,
+            QPushButton[variant="danger"] {
+                background-color: #B53343;
+            }
+            QPushButton#dangerButton:hover,
+            QPushButton[variant="danger"]:hover {
+                background-color: #C93A4B;
+            }
+            QPushButton#dangerButton[flash="true"],
+            QPushButton[variant="danger"][flash="true"] {
+                background-color: #D45563;
             }
             """
         )
@@ -169,6 +254,34 @@ class IngestionView(QWidget):
         self.status_chip.setText(text)
         self.status_chip.style().unpolish(self.status_chip)
         self.status_chip.style().polish(self.status_chip)
+        self._pulse_status_chip()
+
+    def _pulse_status_chip(self) -> None:
+        """Aplique un pulso visual breve al chip cuando cambia estado."""
+        self.status_chip.setProperty("pulse", "true")
+        self.status_chip.style().unpolish(self.status_chip)
+        self.status_chip.style().polish(self.status_chip)
+        QTimer.singleShot(self.STATUS_PULSE_MS, self._clear_status_chip_pulse)
+
+    def _clear_status_chip_pulse(self) -> None:
+        """Restablezca estilo base del chip tras el pulso."""
+        self.status_chip.setProperty("pulse", "false")
+        self.status_chip.style().unpolish(self.status_chip)
+        self.status_chip.style().polish(self.status_chip)
+
+    def _flash_button(self, button: QPushButton) -> None:
+        """Aplique feedback corto al botón para reforzar interacción."""
+        button.setProperty("flash", "true")
+        button.style().unpolish(button)
+        button.style().polish(button)
+        QTimer.singleShot(self.BUTTON_FLASH_MS, lambda b=button: self._clear_button_flash(b))
+
+    @staticmethod
+    def _clear_button_flash(button: QPushButton) -> None:
+        """Limpie estado temporal de animación de botón."""
+        button.setProperty("flash", "false")
+        button.style().unpolish(button)
+        button.style().polish(button)
 
     def set_progress(self, value: int) -> None:
         """Set ingestion progress percentage."""

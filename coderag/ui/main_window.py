@@ -55,35 +55,37 @@ class MainWindow(QMainWindow):
         self.ingestion_view.set_status("idle", "Idle")
         self._apply_window_theme()
         self._refresh_repo_ids(log_on_error=False)
+        self._selected_query_repo_id = self.query_view.get_repo_id_text()
+        self.query_view.repo_id.currentTextChanged.connect(self._on_query_repo_changed)
 
     def _apply_window_theme(self) -> None:
         """Establezca un estilo oscuro consistente para pestañas y widgets de shell."""
         self.setStyleSheet(
             """
             QMainWindow {
-                background-color: #0B1220;
+                background-color: #081326;
             }
             QTabWidget::pane {
-                border: 1px solid #374151;
-                border-radius: 10px;
-                background-color: #111827;
+                border: 1px solid #2A3A5A;
+                border-radius: 12px;
+                background-color: #0F1D34;
                 top: -1px;
             }
             QTabBar::tab {
-                background-color: #1F2937;
-                color: #CBD5E1;
-                padding: 8px 14px;
+                background-color: #162A47;
+                color: #B5C6E4;
+                padding: 9px 16px;
                 margin-right: 6px;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
             }
             QTabBar::tab:selected {
-                background-color: #2563EB;
+                background-color: #2F7BFF;
                 color: #F8FAFC;
                 font-weight: 700;
             }
             QTabBar::tab:hover:!selected {
-                background-color: #334155;
+                background-color: #203965;
             }
             """
         )
@@ -325,6 +327,19 @@ class MainWindow(QMainWindow):
         finally:
             self.query_view.set_running(False)
 
+    def _on_query_repo_changed(self, repo_id: str) -> None:
+        """Limpie la conversación y evidencias cuando cambia el repositorio activo."""
+        selected_repo = repo_id.strip()
+        previous_repo = getattr(self, "_selected_query_repo_id", "")
+        if selected_repo == previous_repo:
+            return
+
+        self._selected_query_repo_id = selected_repo
+        self.query_view.clear_history()
+        self.query_view.clear_question()
+        self.query_view.set_status("idle", "Lista")
+        self.evidence_view.set_citations([])
+
     def _refresh_repo_ids(
         self,
         selected_repo_id: str | None = None,
@@ -332,6 +347,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         """Actualice el menú desplegable de ID de repositorio de consulta desde el punto final del catálogo de API."""
         try:
+            previous_repo = self.query_view.get_repo_id_text()
             response = requests.get(f"{API_BASE}/repos", timeout=10)
             response.raise_for_status()
             data = response.json()
@@ -340,6 +356,10 @@ class MainWindow(QMainWindow):
             self.query_view.set_repo_ids(repo_ids)
             if selected_repo_id and self.query_view.has_repo_id(selected_repo_id):
                 self.query_view.repo_id.setCurrentText(selected_repo_id)
+
+            current_repo = self.query_view.get_repo_id_text()
+            if current_repo != previous_repo:
+                self._on_query_repo_changed(current_repo)
         except Exception as exc:
             if log_on_error:
                 self.ingestion_view.append_log(
