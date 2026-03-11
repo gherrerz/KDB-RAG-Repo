@@ -58,59 +58,93 @@ Se incluye API (FastAPI), UI de escritorio (PySide6), almacenamiento vectorial
    contexto.
 - LLM: OpenAI para respuesta y verificación anti-alucinación.
 
-### Diagrama (Mermaid)
+### Diagramas (Mermaid)
+
+#### 1) Vista general
 
 ```mermaid
-flowchart TB
-   USER[Usuario]
-   UI[UI Desktop\nPySide6]
-   API[API\nFastAPI]
-   JOBS[Job Manager\nThreaded jobs + metadata]
+%%{init: {'flowchart': {'htmlLabels': true, 'curve': 'basis', 'nodeSpacing': 40, 'rankSpacing': 55}}}%%
+flowchart LR
+   U["Usuario"]
+   UI["UI<br/>PySide6"]
+   API["API<br/>FastAPI"]
 
-   subgraph ING[Pipeline Ingesta]
-      GIT[Git Client\nclone/fetch]
-      SCAN[Repo Scanner\nlectura archivos]
-      CHUNK[Chunker\nsímbolos/archivos/módulos]
-      EMB[Embedding Client\nOpenAI embeddings]
-      IDXV[Indexación Vectorial\nChroma collections]
-      IDXB[Indexación Léxica\nBM25 in-memory]
-      GRAPHI[Graph Builder\nNeo4j upsert]
+   subgraph ING["Ingesta"]
+      JOBS["Job Manager"]
+      PIPEI["Pipeline de<br/>Ingesta"]
    end
 
-   subgraph RET[Pipeline Retrieval + Respuesta]
-      NORM[Normalización de consulta\nintención + target inventario]
-      HYB[Hybrid Search\nVector + BM25]
-      RER[Reranker\nTop-K]
-      GEXP[Graph Expand\nvecindad de símbolos]
-      CTX[Context Assembler\ncontexto acotado]
-      LLM[Answer + Verify\nOpenAI]
-      FALLBACK[Fallback extractivo\ncon citas y diagnóstico]
+   subgraph RET["Consulta"]
+      PIPER["Pipeline de<br/>Retrieval"]
+      LLM["LLM<br/>OpenAI"]
+      FBACK["Fallback<br/>Extractivo"]
    end
 
-   subgraph STORES[Persistencia y estado]
-      CHROMA[(ChromaDB)]
+   subgraph STO["Persistencia"]
+      CH[(ChromaDB)]
+      BM[(BM25)]
       NEO[(Neo4j)]
       META[(SQLite metadata.db)]
       WS[(Workspace clones)]
    end
 
-   USER --> UI --> API
-   API --> JOBS
-   JOBS --> GIT --> SCAN --> CHUNK
-   CHUNK --> EMB --> IDXV --> CHROMA
-   CHUNK --> IDXB
-   CHUNK --> GRAPHI --> NEO
-   GIT --> WS
+   U --> UI --> API
+   API --> JOBS --> PIPEI
+   PIPEI --> CH
+   PIPEI --> BM
+   PIPEI --> NEO
+   PIPEI --> WS
    JOBS --> META
 
-   API --> NORM --> HYB --> RER --> GEXP --> CTX
-   CHROMA --> HYB
-   IDXB --> HYB
-   NEO --> GEXP
-   CTX --> LLM
-   LLM --> API
-   CTX --> FALLBACK --> API
-   API --> UI --> USER
+   API --> PIPER
+   CH --> PIPER
+   BM --> PIPER
+   NEO --> PIPER
+   PIPER --> LLM --> API
+   PIPER --> FBACK --> API
+   API --> UI --> U
+```
+
+#### 2) Pipeline de ingesta (detalle)
+
+```mermaid
+%%{init: {'flowchart': {'htmlLabels': true, 'curve': 'linear', 'nodeSpacing': 35, 'rankSpacing': 50}}}%%
+flowchart TB
+   JOBS["Job Manager"] --> GIT["Git Client<br/>clone/fetch"]
+   GIT --> SCAN["Repo Scanner<br/>lectura de archivos"]
+   SCAN --> CHUNK["Chunker<br/>símbolos/archivos/módulos"]
+
+   CHUNK --> EMB["Embedding Client<br/>OpenAI embeddings"]
+   EMB --> IDXV["Indexación Vectorial"]
+   IDXV --> CH[(ChromaDB)]
+
+   CHUNK --> IDXB["Indexación Léxica"]
+   IDXB --> BM[(BM25 in-memory)]
+
+   CHUNK --> GRAPHI["Graph Builder<br/>upsert en Neo4j"]
+   GRAPHI --> NEO[(Neo4j)]
+
+   GIT --> WS[(Workspace clones)]
+   JOBS --> META[(SQLite metadata.db)]
+```
+
+#### 3) Pipeline de retrieval + respuesta (detalle)
+
+```mermaid
+%%{init: {'flowchart': {'htmlLabels': true, 'curve': 'linear', 'nodeSpacing': 35, 'rankSpacing': 50}}}%%
+flowchart TB
+   API["API /query<br/>y /inventory/query"] --> NORM["Normalización de consulta<br/>intención + target inventario"]
+   NORM --> HYB["Hybrid Search<br/>Vector + BM25"]
+   HYB --> RER["Reranker<br/>Top-K"]
+   RER --> GEXP["Graph Expand<br/>vecindad de símbolos"]
+   GEXP --> CTX["Context Assembler<br/>contexto acotado"]
+
+   CH[(ChromaDB)] --> HYB
+   BM[(BM25)] --> HYB
+   NEO[(Neo4j)] --> GEXP
+
+   CTX --> LLM["Answer + Verify<br/>OpenAI"] --> RESP["Response con<br/>citas + diagnostics"]
+   CTX --> FBACK["Fallback extractivo<br/>con diagnóstico"] --> RESP
 ```
 
 ### Relaciones clave
