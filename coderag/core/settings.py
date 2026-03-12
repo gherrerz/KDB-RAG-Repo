@@ -62,6 +62,17 @@ class Settings(BaseSettings):
         default="",
         alias="SCAN_EXCLUDED_FILES",
     )
+    health_check_strict: bool = Field(default=True, alias="HEALTH_CHECK_STRICT")
+    health_check_timeout_seconds: float = Field(
+        default=5.0,
+        alias="HEALTH_CHECK_TIMEOUT_SECONDS",
+    )
+    health_check_ttl_seconds: float = Field(
+        default=10.0,
+        alias="HEALTH_CHECK_TTL_SECONDS",
+    )
+    health_check_openai: bool = Field(default=True, alias="HEALTH_CHECK_OPENAI")
+    health_check_redis: bool = Field(default=False, alias="HEALTH_CHECK_REDIS")
 
 
 @lru_cache(maxsize=1)

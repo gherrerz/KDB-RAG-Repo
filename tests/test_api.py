@@ -1,10 +1,49 @@
 """Pruebas API para puntos finales primarios."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from coderag.api import server
+from coderag.core.storage_health import StoragePreflightError
 
 app = server.app
+
+
+@pytest.fixture(autouse=True)
+def bypass_storage_preflight(monkeypatch):
+    """Evita dependencia de infraestructura real durante pruebas de API."""
+
+    def fake_ensure_storage_ready(
+        *,
+        context: str,
+        repo_id: str | None = None,
+        force: bool = False,
+    ) -> dict:
+        return {
+            "ok": True,
+            "strict": True,
+            "checked_at": "2026-01-01T00:00:00+00:00",
+            "context": context,
+            "repo_id": repo_id,
+            "failed_components": [],
+            "items": [],
+            "cached": force,
+        }
+
+    def fake_run_storage_preflight(
+        *,
+        context: str,
+        repo_id: str | None = None,
+        force: bool = False,
+    ) -> dict:
+        return fake_ensure_storage_ready(
+            context=context,
+            repo_id=repo_id,
+            force=force,
+        )
+
+    monkeypatch.setattr(server, "ensure_storage_ready", fake_ensure_storage_ready)
+    monkeypatch.setattr(server, "run_storage_preflight", fake_run_storage_preflight)
 
 
 def test_get_missing_job_returns_404() -> None:
@@ -108,3 +147,146 @@ def test_inventory_query_endpoint_returns_paginated_payload(monkeypatch) -> None
     assert payload["page"] == 2
     assert payload["page_size"] == 5
     assert len(payload["items"]) == 1
+
+
+def test_storage_health_endpoint_returns_structured_payload() -> None:
+    """Retorna estado estructurado de salud de almacenamiento."""
+    client = TestClient(app)
+    response = client.get("/health/storage")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["strict"] is True
+    assert payload["context"] == "health"
+    assert payload["cached"] is True
+
+
+def test_query_endpoint_blocks_when_storage_preflight_fails(monkeypatch) -> None:
+    """Bloquea consulta con 503 cuando preflight estricto falla."""
+
+    def fail_preflight(
+        *,
+        context: str,
+        repo_id: str | None = None,
+        force: bool = False,
+    ) -> dict:
+        report = {
+            "ok": False,
+            "strict": True,
+            "checked_at": "2026-01-01T00:00:00+00:00",
+            "context": context,
+            "repo_id": repo_id,
+            "failed_components": ["neo4j"],
+            "items": [],
+            "cached": False,
+        }
+        raise StoragePreflightError(report)
+
+    monkeypatch.setattr(server, "ensure_storage_ready", fail_preflight)
+    client = TestClient(app)
+    response = client.post(
+        "/query",
+        json={
+            "repo_id": "mall",
+            "query": "hola",
+            "top_n": 5,
+            "top_k": 3,
+        },
+    )
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"]["health"]["failed_components"] == ["neo4j"]
+
+
+@pytest.mark.parametrize(
+    "health_code",
+    ["neo4j_auth_failed", "neo4j_unreachable"],
+)
+def test_query_endpoint_exposes_neo4j_failure_code(
+    monkeypatch,
+    health_code: str,
+) -> None:
+    """Expone código específico para diferenciar auth inválida vs conexión caída."""
+
+    def fail_preflight(
+        *,
+        context: str,
+        repo_id: str | None = None,
+        force: bool = False,
+    ) -> dict:
+        report = {
+            "ok": False,
+            "strict": True,
+            "checked_at": "2026-01-01T00:00:00+00:00",
+            "context": context,
+            "repo_id": repo_id,
+            "failed_components": ["neo4j"],
+            "items": [
+                {
+                    "name": "neo4j",
+                    "ok": False,
+                    "critical": True,
+                    "code": health_code,
+                    "message": "neo4j failed",
+                    "latency_ms": 1.0,
+                    "details": {},
+                }
+            ],
+            "cached": False,
+        }
+        raise StoragePreflightError(report)
+
+    monkeypatch.setattr(server, "ensure_storage_ready", fail_preflight)
+    client = TestClient(app)
+    response = client.post(
+        "/query",
+        json={
+            "repo_id": "mall",
+            "query": "hola",
+            "top_n": 5,
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"]["health"]["items"][0]["name"] == "neo4j"
+    assert payload["detail"]["health"]["items"][0]["code"] == health_code
+
+
+def test_ingest_endpoint_blocks_when_storage_preflight_fails(monkeypatch) -> None:
+    """Bloquea ingesta con 503 cuando preflight estricto falla."""
+
+    def fail_preflight(
+        *,
+        context: str,
+        repo_id: str | None = None,
+        force: bool = False,
+    ) -> dict:
+        report = {
+            "ok": False,
+            "strict": True,
+            "checked_at": "2026-01-01T00:00:00+00:00",
+            "context": context,
+            "repo_id": repo_id,
+            "failed_components": ["chroma"],
+            "items": [],
+            "cached": False,
+        }
+        raise StoragePreflightError(report)
+
+    monkeypatch.setattr(server, "ensure_storage_ready", fail_preflight)
+    client = TestClient(app)
+    response = client.post(
+        "/repos/ingest",
+        json={
+            "provider": "github",
+            "repo_url": "https://github.com/acme/mall",
+            "branch": "main",
+            "commit": None,
+            "token": None,
+        },
+    )
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"]["health"]["failed_components"] == ["chroma"]

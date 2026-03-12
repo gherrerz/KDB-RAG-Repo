@@ -72,6 +72,39 @@ def test_extract_inventory_target_for_es_and_en() -> None:
     )
 
 
+def test_extract_inventory_target_explicit_type_specification() -> None:
+    """Prioriza especificadores de tipo explícito ('de tipo X') sobre términos genéricos."""
+    # User's original query: "me puedes listar todos los componentes de tipo controller de mall-portal"
+    # Should extract "controller", not "componentes"
+    assert (
+        query_service._extract_inventory_target(
+            "me puedes listar todos los componentes de tipo controller de mall-portal"
+        )
+        == "controller"
+    )
+    # Direct type specification with "tipo"
+    assert (
+        query_service._extract_inventory_target(
+            "componentes tipo model en mall-portal"
+        )
+        == "model"
+    )
+    # Variant: "de tipo" with different component term
+    assert (
+        query_service._extract_inventory_target(
+            "elementos de tipo handler"
+        )
+        == "handler"
+    )
+    # Variant: just "tipo" (shorter form)
+    assert (
+        query_service._extract_inventory_target(
+            "dame los servicios tipo repository"
+        )
+        == "repository"
+    )
+
+
 def test_is_inventory_explain_query_detection() -> None:
     """Detecta inventario compuesto + solicitudes de explicación."""
     assert query_service._is_inventory_explain_query(

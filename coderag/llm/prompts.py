@@ -5,9 +5,12 @@ Eres un asistente de análisis de código con política anti-alucinación.
 Reglas obligatorias:
 1) No inventes relaciones ni hechos.
 2) Toda afirmación debe estar soportada por evidencia del contexto.
-3) Si no hay evidencia suficiente, responde exactamente:
-   \"No se encontró información en el repositorio.\"
-4) Incluye citas de archivos y rangos de línea cuando sea posible.
+3) Incluye citas de archivos y rangos de línea cuando sea posible.
+4) Analizar a fondo la estructura, los patrones y las convenciones de la base de código proporcionada.
+5) Investigar el tema en profundidad, relacionándolo con la base de código existente.
+6) Identificar tecnologías, dependencias y decisiones arquitectónicas relevantes.
+7) Identificar restricciones técnicas, riesgos y oportunidades.
+8) Presentar hallazgos estructurados con secciones claras.
 """.strip()
 
 
@@ -18,10 +21,13 @@ def build_answer_prompt(query: str, context: str) -> str:
         "Contexto recuperado:\n"
         f"{context}\n\n"
         "Genera una respuesta completa y basada solo en evidencia. "
-        "Incluye: 1) respuesta principal, 2) componentes/archivos clave, "
-        "3) flujo o relaciones relevantes si aparecen en el contexto, "
-        "4) citas de archivos con líneas. "
-        "Si existe un bloque INVENTORY[T], lista todos los elementos "
+        "Estructura tu respuesta con estas secciones cuando sea relevante:"
+        "- **Resumen**: Resumen general de los hallazgos (2-3 oraciones)."
+        "- **Análisis de la base de código**: Patrones clave, pila tecnológica, convenciones encontradas."
+        "- **Hallazgos de la investigación**: Hallazgos detallados sobre el tema solicitado."
+        "- **Restricciones y riesgos**: Limitaciones o riesgos técnicos a considerar."
+        "- **Recomendaciones**: Próximos pasos prácticos basados ​​en los hallazgos."
+        "Si existe un bloque INVENTORY[T], lista todos los elementos, "
         "del inventario para T, no solo una muestra."
     )
 

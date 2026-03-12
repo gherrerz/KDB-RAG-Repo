@@ -47,5 +47,13 @@ class BM25Index:
         """Elimine todos los corpus BM25 del repositorio de la memoria."""
         self._by_repo.clear()
 
+    def has_repo(self, repo_id: str) -> bool:
+        """Indica si el repositorio tiene un índice BM25 cargado en memoria."""
+        return repo_id in self._by_repo
+
+    def repo_count(self) -> int:
+        """Devuelve la cantidad de repositorios indexados en memoria."""
+        return len(self._by_repo)
+
 
 GLOBAL_BM25 = BM25Index()

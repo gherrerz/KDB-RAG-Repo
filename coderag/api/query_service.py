@@ -63,6 +63,10 @@ MODULE_NAME_STOPWORDS = {
     "an",
     "de",
     "del",
+    "tipo",
+    "type",
+    "clase",
+    "class",
 }
 
 INVENTORY_TARGET_STOPWORDS = {
@@ -404,6 +408,30 @@ def _extract_inventory_target(query: str) -> str | None:
     """Extraiga el token de la entidad de destino de consultas en lenguaje natural estilo inventario."""
     normalized = query.lower()
 
+    # Explicit type specifiers: "de tipo X", "tipo X" (highest priority)
+    # This catches queries like "componentes de tipo controller"
+    match_type_spec = re.search(
+        r"(?:de\s+)?tipo\s+(?:de\s+)?([a-z0-9_-]+)",
+        normalized,
+    )
+    if match_type_spec:
+        token = match_type_spec.group(1)
+        if token not in INVENTORY_TARGET_STOPWORDS:
+            return _canonical_inventory_term(token)
+
+    # Component/element + type combinations: "componentes X", "elementos X" (second priority)
+    # This catches queries like "componentes controller" or "elementos service"
+    match_component_type = re.search(
+        r"(?:componentes?|elements?|elementi?s)\s+([a-z0-9_-]+)",
+        normalized,
+    )
+    if match_component_type:
+        token = match_component_type.group(1)
+        # Exclude prepositions that might have been captured
+        if token not in INVENTORY_TARGET_STOPWORDS and token not in {"de", "del", "de la", "de los"}:
+            return _canonical_inventory_term(token)
+
+    # Generic patterns (lower priority)
     match_es = re.search(
         r"tod(?:os|as)?\s+(?:los|las)?\s*([a-z0-9_-]+)",
         normalized,

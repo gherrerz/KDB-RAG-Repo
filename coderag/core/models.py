@@ -113,6 +113,31 @@ class RepoCatalogResponse(BaseModel):
     repo_ids: list[str] = Field(default_factory=list)
 
 
+class StorageHealthItem(BaseModel):
+    """Resultado de salud para un componente de almacenamiento del sistema."""
+
+    name: str
+    ok: bool
+    critical: bool
+    code: str
+    message: str
+    latency_ms: float
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class StorageHealthResponse(BaseModel):
+    """Estado consolidado de salud para componentes de almacenamiento del RAG."""
+
+    ok: bool
+    strict: bool
+    checked_at: str
+    context: str
+    repo_id: str | None = None
+    cached: bool = False
+    failed_components: list[str] = Field(default_factory=list)
+    items: list[StorageHealthItem] = Field(default_factory=list)
+
+
 class ScannedFile(BaseModel):
     """Representa un archivo fuente descubierto en un análisis del repositorio."""
 
