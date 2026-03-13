@@ -25,6 +25,10 @@ class Settings(BaseSettings):
         default="gpt-4.1-mini",
         alias="OPENAI_VERIFIER_MODEL",
     )
+    openai_verify_enabled: bool = Field(
+        default=True,
+        alias="OPENAI_VERIFY_ENABLED",
+    )
     chroma_path: Path = Field(default=Path("./storage/chroma"), alias="CHROMA_PATH")
     neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")
     neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")

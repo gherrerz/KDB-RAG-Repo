@@ -3,6 +3,9 @@
 from coderag.core.models import RetrievalChunk
 
 
+SECTION_SEPARATOR = "\n\n---\n\n"
+
+
 def assemble_context(
     chunks: list[RetrievalChunk],
     graph_records: list[dict],
@@ -32,10 +35,30 @@ def assemble_context(
         for record in graph_records[:50]:
             sections.append(str(record))
 
-    context = "\n\n---\n\n".join(sections)
-    token_estimate = len(context) // 4
-    if token_estimate <= max_tokens:
+    context = SECTION_SEPARATOR.join(sections)
+    max_chars = max(0, int(max_tokens) * 4)
+    if len(context) <= max_chars:
         return context
 
-    max_chars = max_tokens * 4
-    return context[:max_chars]
+    if max_chars == 0:
+        return ""
+
+    kept_sections: list[str] = []
+    current_length = 0
+    for section in sections:
+        section_length = len(section)
+        projected = section_length
+        if kept_sections:
+            projected += len(SECTION_SEPARATOR)
+
+        if current_length + projected > max_chars:
+            break
+
+        kept_sections.append(section)
+        current_length += projected
+
+    if kept_sections:
+        return SECTION_SEPARATOR.join(kept_sections)
+
+    # Si el primer bloque excede el presupuesto, mantén solo su prefijo.
+    return sections[0][:max_chars]

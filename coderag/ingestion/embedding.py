@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+from threading import Lock
 
 from openai import OpenAI
 
@@ -26,14 +27,29 @@ def _fallback_embedding(text: str, dimension: int = 256) -> list[float]:
 class EmbeddingClient:
     """Abstracción del cliente para producir vectores para indexación y búsqueda."""
 
+    _shared_client: OpenAI | None = None
+    _shared_api_key: str | None = None
+    _client_lock: Lock = Lock()
+
     def __init__(self) -> None:
         """Inicialice el cliente desde la configuración del entorno."""
         settings = get_settings()
         self.model = settings.openai_embedding_model
         self.api_key = settings.openai_api_key
-        self.client = OpenAI(api_key=self.api_key) if self.api_key else None
+        self.client = self._resolve_client(api_key=self.api_key)
         self.max_chars_per_text = 12000
         self.batch_size = 64
+
+    @classmethod
+    def _resolve_client(cls, api_key: str) -> OpenAI | None:
+        """Reutiliza el cliente OpenAI mientras la API key no cambie."""
+        if not api_key:
+            return None
+        with cls._client_lock:
+            if cls._shared_client is None or cls._shared_api_key != api_key:
+                cls._shared_client = OpenAI(api_key=api_key)
+                cls._shared_api_key = api_key
+            return cls._shared_client
 
     def _default_dimension(self) -> int:
         """Devuelva una dimensión de respaldo estable para el modelo activo."""

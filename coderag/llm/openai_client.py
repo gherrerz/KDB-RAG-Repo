@@ -1,6 +1,7 @@
 """Envoltorio de cliente OpenAI para generación y validación de respuestas."""
 
 import re
+from threading import Lock
 import unicodedata
 
 from openai import OpenAI
@@ -41,13 +42,28 @@ def _is_verifier_result_valid(value: str) -> bool:
 class AnswerClient:
     """Servicio que llama a la API OpenAI Responses con respaldos seguros."""
 
+    _shared_client: OpenAI | None = None
+    _shared_api_key: str | None = None
+    _client_lock: Lock = Lock()
+
     def __init__(self) -> None:
         """Inicialice el cliente OpenAI desde el entorno."""
         settings = get_settings()
         self.api_key = settings.openai_api_key
         self.answer_model = settings.openai_answer_model
         self.verifier_model = settings.openai_verifier_model
-        self.client = OpenAI(api_key=self.api_key) if self.api_key else None
+        self.client = self._resolve_client(api_key=self.api_key)
+
+    @classmethod
+    def _resolve_client(cls, api_key: str) -> OpenAI | None:
+        """Reutiliza el cliente OpenAI mientras la API key no cambie."""
+        if not api_key:
+            return None
+        with cls._client_lock:
+            if cls._shared_client is None or cls._shared_api_key != api_key:
+                cls._shared_client = OpenAI(api_key=api_key)
+                cls._shared_api_key = api_key
+            return cls._shared_client
 
     def _call(
         self,

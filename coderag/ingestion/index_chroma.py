@@ -1,5 +1,6 @@
 """Contenedor ChromaDB para indexación y búsqueda de vectores."""
 
+from threading import Lock
 from typing import Any
 
 import chromadb
@@ -28,17 +29,35 @@ def _is_dimension_mismatch_error(exc: Exception) -> bool:
 class ChromaIndex:
     """Abstracción sobre colecciones persistentes de Chroma."""
 
+    _shared_client: Any | None = None
+    _shared_collections: dict[str, Any] | None = None
+    _shared_path: str | None = None
+    _shared_lock: Lock = Lock()
+
     def __init__(self) -> None:
         """Inicialice el cliente y las colecciones persistentes de Chroma."""
         settings = get_settings()
-        self.client = chromadb.PersistentClient(
-            path=str(settings.chroma_path),
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
-        self.collections = {
-            name: self.client.get_or_create_collection(name)
-            for name in COLLECTIONS
-        }
+        chroma_path = str(settings.chroma_path)
+        with self._shared_lock:
+            if (
+                self._shared_client is None
+                or self._shared_collections is None
+                or self._shared_path != chroma_path
+            ):
+                client = chromadb.PersistentClient(
+                    path=chroma_path,
+                    settings=ChromaSettings(anonymized_telemetry=False),
+                )
+                collections = {
+                    name: client.get_or_create_collection(name)
+                    for name in COLLECTIONS
+                }
+                self.__class__._shared_client = client
+                self.__class__._shared_collections = collections
+                self.__class__._shared_path = chroma_path
+
+            self.client = self._shared_client
+            self.collections = self._shared_collections
 
     def upsert(
         self,
@@ -65,6 +84,7 @@ class ChromaIndex:
             self.client.delete_collection(collection_name)
             recreated = self.client.get_or_create_collection(collection_name)
             self.collections[collection_name] = recreated
+            self.__class__._shared_collections = self.collections
             self._upsert_batched(
                 collection_name=collection_name,
                 ids=ids,

@@ -15,6 +15,7 @@ verificable (archivos y líneas).
 - [Referencia de Servicios API](#referencia-de-servicios-api)
 - [Estructura del Proyecto](#estructura-del-proyecto)
 - [Testing](#testing)
+- [Benchmark de Latencia](#benchmark-de-latencia)
 - [QA Manual (UI)](#qa-manual-ui)
 - [Notas de Versión](#notas-de-versión)
 - [Troubleshooting](#troubleshooting)
@@ -192,6 +193,7 @@ Variables relevantes en `.env`:
 
 - `OPENAI_API_KEY`: clave API de OpenAI.
 - `OPENAI_EMBEDDING_MODEL`, `OPENAI_ANSWER_MODEL`, `OPENAI_VERIFIER_MODEL`.
+- `OPENAI_VERIFY_ENABLED`: habilita/deshabilita la etapa de verificación LLM posterior a la respuesta.
 - `CHROMA_PATH`: ruta persistente de Chroma.
 - `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`.
 - `REDIS_URL` (opcional/futuro): endpoint para cola de jobs distribuida.
@@ -258,6 +260,7 @@ $q = @{
    query = 'cuales son todos los controller del modulo mall-admin?'
    top_n = 80
    top_k = 20
+
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/query -ContentType 'application/json' -Body $q
@@ -759,6 +762,26 @@ Cobertura validada en la implementación actual:
 - Parsing de símbolos.
 - Manejo de límites de batch/embeddings.
 - Detección de inventarios estructurados.
+
+## Benchmark de Latencia
+
+Se incluye benchmark live para medir p50/p95/p99 sobre endpoints reales de API.
+
+1. Levantar API y asegurar que el repositorio ya esté ingerido.
+2. Ejecutar benchmark:
+
+```powershell
+python scripts/benchmark_api_live.py --repo-id mall --base-url http://127.0.0.1:8000 --iterations 20 --warmup 2
+```
+
+3. Revisar artefactos en `benchmark_reports/`:
+- `benchmark_live_YYYYMMDD_HHMMSS.json`
+- `benchmark_live_YYYYMMDD_HHMMSS.csv`
+
+El reporte CSV contiene métricas agregadas por escenario (`query_general`,
+`query_module`, `inventory_query`, `inventory_explain`) y medias de etapas
+diagnósticas cuando están disponibles (`hybrid_search_ms`, `graph_expand_ms`,
+`context_assembly_ms`, etc.).
 
 ## QA Manual (UI)
 

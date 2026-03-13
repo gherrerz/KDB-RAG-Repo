@@ -51,3 +51,6 @@ storage/*.sqlite3
 
 # Docker local overrides
 docker-compose.override.yml
+
+# Benchmark Reports
+benchmark_reports/

@@ -2,8 +2,10 @@
 
 import ast
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 import re
+from threading import Lock
 from time import monotonic
 import unicodedata
 
@@ -12,6 +14,7 @@ from coderag.core.models import (
     InventoryItem,
     InventoryQueryResponse,
     QueryResponse,
+    RetrievalChunk,
 )
 from coderag.core.settings import get_settings
 from coderag.ingestion.graph_builder import GraphBuilder
@@ -79,6 +82,10 @@ INVENTORY_TARGET_STOPWORDS = {
     "all",
     "the",
 }
+
+
+_MODULE_SCOPE_CACHE: dict[tuple[str, str], str] = {}
+_MODULE_SCOPE_CACHE_LOCK = Lock()
 
 
 def _fallback_header(fallback_reason: str) -> str:
@@ -749,13 +756,38 @@ def _query_inventory_entities(
 
         entities_by_key: dict[tuple[str, int, int], dict] = {}
         aliases = _inventory_term_aliases(target_term)[: settings.inventory_alias_limit]
-        for alias in aliases:
-            entities = graph.query_inventory(
+        if not aliases:
+            return []
+
+        alias_results: dict[str, list[dict]] = {}
+        if len(aliases) == 1:
+            alias = aliases[0]
+            alias_results[alias] = graph.query_inventory(
                 repo_id=repo_id,
                 target_term=alias,
                 module_name=module_name,
                 limit=settings.inventory_entity_limit,
             )
+        else:
+            max_workers = min(4, len(aliases))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    alias: executor.submit(
+                        graph.query_inventory,
+                        repo_id,
+                        alias,
+                        module_name,
+                        settings.inventory_entity_limit,
+                    )
+                    for alias in aliases
+                }
+                alias_results = {
+                    alias: future.result()
+                    for alias, future in futures.items()
+                }
+
+        for alias in aliases:
+            entities = alias_results.get(alias, [])
             for item in entities:
                 path = str(item.get("path", ""))
                 start_line = int(item.get("start_line", 1))
@@ -784,8 +816,16 @@ def _resolve_module_scope(repo_id: str, module_name: str | None) -> str | None:
     if not repo_path.exists() or not repo_path.is_dir():
         return cleaned
 
+    cache_key = (str(repo_path.resolve()), cleaned.lower())
+    with _MODULE_SCOPE_CACHE_LOCK:
+        cached = _MODULE_SCOPE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     direct = (repo_path / cleaned)
     if direct.exists() and direct.is_dir():
+        with _MODULE_SCOPE_CACHE_LOCK:
+            _MODULE_SCOPE_CACHE[cache_key] = cleaned
         return cleaned
 
     lowered = cleaned.lower()
@@ -799,10 +839,15 @@ def _resolve_module_scope(repo_id: str, module_name: str | None) -> str | None:
             matches.append(relative)
 
     if not matches:
+        with _MODULE_SCOPE_CACHE_LOCK:
+            _MODULE_SCOPE_CACHE[cache_key] = cleaned
         return cleaned
 
     matches.sort(key=lambda item: (item.count("/"), len(item), item))
-    return matches[0]
+    resolved = matches[0]
+    with _MODULE_SCOPE_CACHE_LOCK:
+        _MODULE_SCOPE_CACHE[cache_key] = resolved
+    return resolved
 
 
 def _sanitize_inventory_pagination(page: int, page_size: int) -> tuple[int, int]:
@@ -857,6 +902,30 @@ def _citation_priority(citation: Citation) -> tuple[int, float]:
     else:
         rank = 3
     return (rank, -citation.score)
+
+
+def _safe_discover_repo_modules(repo_id: str, query: str) -> list[str]:
+    """Descubre módulos solo cuando la consulta contiene intención de módulo."""
+    if not _is_module_query(query):
+        return []
+    try:
+        return _discover_repo_modules(repo_id)
+    except Exception:
+        return []
+
+
+def _timed_graph_expand(chunks: list[RetrievalChunk]) -> tuple[list[dict], float]:
+    """Ejecuta expansión de grafo y devuelve resultado junto con latencia en ms."""
+    started_at = monotonic()
+    result = expand_with_graph(chunks=chunks)
+    return result, _elapsed_milliseconds(started_at)
+
+
+def _timed_module_discovery(repo_id: str, query: str) -> tuple[list[str], float]:
+    """Ejecuta descubrimiento de módulos y devuelve resultado junto con latencia en ms."""
+    started_at = monotonic()
+    result = _safe_discover_repo_modules(repo_id=repo_id, query=query)
+    return result, _elapsed_milliseconds(started_at)
 
 
 def run_inventory_query(
@@ -1041,13 +1110,15 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
     reranked = rerank(chunks=initial, top_k=top_k)
     stage_timings["rerank_ms"] = _elapsed_milliseconds(rerank_started_at)
 
-    graph_started_at = monotonic()
-    graph_context = expand_with_graph(chunks=reranked)
-    stage_timings["graph_expand_ms"] = _elapsed_milliseconds(graph_started_at)
-
-    module_started_at = monotonic()
-    discovered_modules = _discover_repo_modules(repo_id) if _is_module_query(query) else []
-    stage_timings["module_discovery_ms"] = _elapsed_milliseconds(module_started_at)
+    parallel_started_at = monotonic()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        graph_future = executor.submit(_timed_graph_expand, reranked)
+        modules_future = executor.submit(_timed_module_discovery, repo_id, query)
+        graph_context, graph_ms = graph_future.result()
+        discovered_modules, module_ms = modules_future.result()
+    stage_timings["graph_expand_ms"] = graph_ms
+    stage_timings["module_discovery_ms"] = module_ms
+    stage_timings["post_rerank_parallel_ms"] = _elapsed_milliseconds(parallel_started_at)
 
     context_started_at = monotonic()
     context = assemble_context(
@@ -1109,27 +1180,32 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
                 )
                 stage_timings["llm_answer_ms"] = _elapsed_milliseconds(answer_started_at)
 
-                verify_timeout = min(
-                    float(settings.openai_timeout_seconds),
-                    _remaining_budget_seconds(pipeline_started_at, budget_seconds),
-                )
-                if verify_timeout <= 0:
+                if not settings.openai_verify_enabled:
                     verify_skipped = True
+                    if fallback_reason is None:
+                        fallback_reason = "verification_disabled"
                 else:
-                    verify_started_at = monotonic()
-                    verify_valid = client.verify(
-                        answer=answer,
-                        context=context,
-                        timeout_seconds=verify_timeout,
+                    verify_timeout = min(
+                        float(settings.openai_timeout_seconds),
+                        _remaining_budget_seconds(pipeline_started_at, budget_seconds),
                     )
-                    stage_timings["llm_verify_ms"] = _elapsed_milliseconds(verify_started_at)
-                    if not verify_valid:
-                        fallback_reason = "verification_failed"
-                        answer = _build_extractive_fallback(
-                            citations,
-                            query=query,
-                            fallback_reason=fallback_reason,
+                    if verify_timeout <= 0:
+                        verify_skipped = True
+                    else:
+                        verify_started_at = monotonic()
+                        verify_valid = client.verify(
+                            answer=answer,
+                            context=context,
+                            timeout_seconds=verify_timeout,
                         )
+                        stage_timings["llm_verify_ms"] = _elapsed_milliseconds(verify_started_at)
+                        if not verify_valid:
+                            fallback_reason = "verification_failed"
+                            answer = _build_extractive_fallback(
+                                citations,
+                                query=query,
+                                fallback_reason=fallback_reason,
+                            )
         except Exception as exc:
             fallback_reason = "generation_error"
             llm_error = str(exc)
@@ -1155,6 +1231,7 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
         "reranked": len(reranked),
         "graph_nodes": len(graph_context),
         "openai_enabled": client.enabled,
+        "openai_verify_enabled": settings.openai_verify_enabled,
         "discovered_modules": discovered_modules,
         "inventory_target": None,
         "inventory_terms": [],

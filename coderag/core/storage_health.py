@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
@@ -204,71 +205,115 @@ def run_storage_preflight(
     workspace_path = settings.workspace_path
     metadata_path = settings.workspace_path.parent / "metadata.db"
 
-    items = [
-        _run_component_check(
-            name="workspace",
-            critical=True,
-            check_fn=lambda: _check_workspace(workspace_path),
-        ),
-        _run_component_check(
-            name="metadata_sqlite",
-            critical=True,
-            check_fn=lambda: _check_metadata_sqlite(metadata_path),
-        ),
-        _run_component_check(name="chroma", critical=True, check_fn=_check_chroma),
-        _run_component_check(
-            name="neo4j",
-            critical=True,
-            check_fn=lambda: _check_neo4j(timeout_seconds),
-        ),
-        _run_component_check(
-            name="bm25",
-            critical=False,  # BM25 is not critical, just warn if missing
-            check_fn=lambda: _check_bm25(context=context, repo_id=repo_id),
-        ),
+    checks_plan: list[dict[str, Any]] = [
+        {
+            "type": "check",
+            "name": "workspace",
+            "critical": True,
+            "check_fn": lambda: _check_workspace(workspace_path),
+        },
+        {
+            "type": "check",
+            "name": "metadata_sqlite",
+            "critical": True,
+            "check_fn": lambda: _check_metadata_sqlite(metadata_path),
+        },
+        {
+            "type": "check",
+            "name": "chroma",
+            "critical": True,
+            "check_fn": _check_chroma,
+        },
+        {
+            "type": "check",
+            "name": "neo4j",
+            "critical": True,
+            "check_fn": lambda: _check_neo4j(timeout_seconds),
+        },
+        {
+            "type": "check",
+            "name": "bm25",
+            # BM25 is not critical, just warn if missing.
+            "critical": False,
+            "check_fn": lambda: _check_bm25(context=context, repo_id=repo_id),
+        },
     ]
 
     if settings.health_check_openai:
-        items.append(
-            _run_component_check(
-                name="openai",
-                critical=True,
-                check_fn=lambda: _check_openai(timeout_seconds),
-            )
+        checks_plan.append(
+            {
+                "type": "check",
+                "name": "openai",
+                "critical": True,
+                "check_fn": lambda: _check_openai(timeout_seconds),
+            }
         )
     else:
-        items.append(
+        checks_plan.append(
             {
-                "name": "openai",
-                "ok": True,
-                "critical": False,
-                "code": "skipped",
-                "message": "Chequeo OpenAI deshabilitado por configuración.",
-                "latency_ms": 0.0,
-                "details": {},
+                "type": "static",
+                "item": {
+                    "name": "openai",
+                    "ok": True,
+                    "critical": False,
+                    "code": "skipped",
+                    "message": "Chequeo OpenAI deshabilitado por configuración.",
+                    "latency_ms": 0.0,
+                    "details": {},
+                },
             }
         )
 
     if settings.health_check_redis:
-        items.append(
-            _run_component_check(
-                name="redis",
-                critical=False,
-                check_fn=lambda: _check_redis(timeout_seconds),
-            )
-        )
-    else:
-        items.append(
+        checks_plan.append(
             {
+                "type": "check",
                 "name": "redis",
-                "ok": True,
                 "critical": False,
-                "code": "skipped",
-                "message": "Chequeo Redis deshabilitado por configuración.",
-                "latency_ms": 0.0,
-                "details": {},
+                "check_fn": lambda: _check_redis(timeout_seconds),
             }
         )
+    else:
+        checks_plan.append(
+            {
+                "type": "static",
+                "item": {
+                    "name": "redis",
+                    "ok": True,
+                    "critical": False,
+                    "code": "skipped",
+                    "message": "Chequeo Redis deshabilitado por configuración.",
+                    "latency_ms": 0.0,
+                    "details": {},
+                },
+            }
+        )
+
+    check_entries = [entry for entry in checks_plan if entry["type"] == "check"]
+    max_workers = min(8, max(1, len(check_entries)))
+    results_by_name: dict[str, dict[str, Any]] = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_by_name = {
+            str(entry["name"]): executor.submit(
+                _run_component_check,
+                name=str(entry["name"]),
+                critical=bool(entry["critical"]),
+                check_fn=entry["check_fn"],
+            )
+            for entry in check_entries
+        }
+        results_by_name = {
+            name: future.result()
+            for name, future in future_by_name.items()
+        }
+
+    items: list[dict[str, Any]] = []
+    for entry in checks_plan:
+        if entry["type"] == "check":
+            items.append(results_by_name[str(entry["name"])])
+            continue
+        items.append(entry["item"])
 
     failed_components = [
         item["name"] for item in items if (item["critical"] and not item["ok"])

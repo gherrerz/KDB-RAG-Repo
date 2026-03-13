@@ -1,5 +1,6 @@
 """Integración de Neo4j para la construcción de gráficos de conocimiento de código."""
 
+from threading import Lock
 from typing import Any
 
 from neo4j import GraphDatabase
@@ -11,17 +12,35 @@ from coderag.core.settings import get_settings
 class GraphBuilder:
     """Generador de gráficos para almacenar archivos, símbolos y relaciones."""
 
+    _shared_driver: Any | None = None
+    _shared_config: tuple[str, str, str] | None = None
+    _driver_lock: Lock = Lock()
+
     def __init__(self) -> None:
         """Cree el controlador Neo4j desde la configuración."""
         settings = get_settings()
-        self.driver = GraphDatabase.driver(
-            settings.neo4j_uri,
-            auth=(settings.neo4j_user, settings.neo4j_password),
-        )
+        config = (settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
+        with self._driver_lock:
+            if self._shared_driver is None or self._shared_config != config:
+                self.__class__._shared_driver = GraphDatabase.driver(
+                    settings.neo4j_uri,
+                    auth=(settings.neo4j_user, settings.neo4j_password),
+                )
+                self.__class__._shared_config = config
+            self.driver = self._shared_driver
 
     def close(self) -> None:
-        """Cierra el controlador de Neo4j."""
-        self.driver.close()
+        """Mantiene compatibilidad de API; el driver se comparte por proceso."""
+        return None
+
+    @classmethod
+    def close_shared_driver(cls) -> None:
+        """Cierra explícitamente el driver compartido cuando sea necesario."""
+        with cls._driver_lock:
+            if cls._shared_driver is not None:
+                cls._shared_driver.close()
+                cls._shared_driver = None
+                cls._shared_config = None
 
     def upsert_repo_graph(
         self,

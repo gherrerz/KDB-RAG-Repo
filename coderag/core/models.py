@@ -44,8 +44,8 @@ class QueryRequest(BaseModel):
 
     repo_id: str
     query: str
-    top_n: int = 80
-    top_k: int = 20
+    top_n: int = 60
+    top_k: int = 15
 
 
 class InventoryQueryRequest(BaseModel):
