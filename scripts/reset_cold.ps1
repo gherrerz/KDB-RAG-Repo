@@ -29,14 +29,17 @@ Start-Sleep -Seconds 1
 
 Write-Host "[2/6] Limpiando almacenamiento local..."
 $chromaPath = Join-Path $root "storage/chroma"
+$bm25Path = Join-Path $root "storage/bm25"
 $workspacePath = Join-Path $root "storage/workspace"
 $metadataPath = Join-Path $root "storage/metadata.db"
 
 if (Test-Path $chromaPath) { Remove-Item -Recurse -Force $chromaPath }
+if (Test-Path $bm25Path) { Remove-Item -Recurse -Force $bm25Path }
 if (Test-Path $workspacePath) { Remove-Item -Recurse -Force $workspacePath }
 if (Test-Path $metadataPath) { Remove-Item -Force $metadataPath }
 
 New-Item -ItemType Directory -Path $chromaPath -Force | Out-Null
+New-Item -ItemType Directory -Path $bm25Path -Force | Out-Null
 New-Item -ItemType Directory -Path $workspacePath -Force | Out-Null
 
 Write-Host "[3/6] Limpiando grafo Neo4j..."

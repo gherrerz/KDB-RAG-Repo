@@ -69,6 +69,17 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
     GLOBAL_BM25.clear()
     cleared.append("BM25 en memoria")
 
+    bm25_path = settings.workspace_path.parent / "bm25"
+    try:
+        _remove_path(bm25_path)
+        bm25_path.mkdir(parents=True, exist_ok=True)
+        cleared.append(f"BM25 snapshots ({bm25_path})")
+    except RuntimeError as exc:
+        warnings.append(
+            "No se pudo vaciar carpeta BM25 por lock de archivos: "
+            f"{exc}"
+        )
+
     chroma_reset_done = False
     try:
         client = chromadb.PersistentClient(
