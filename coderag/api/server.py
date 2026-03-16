@@ -10,6 +10,7 @@ from coderag.core.models import (
     InventoryQueryRequest,
     InventoryQueryResponse,
     JobInfo,
+    ProviderModelCatalogResponse,
     QueryRequest,
     QueryResponse,
     RepoCatalogResponse,
@@ -25,6 +26,7 @@ from coderag.core.storage_health import (
     run_storage_preflight,
 )
 from coderag.jobs.worker import JobManager
+from coderag.llm.model_discovery import discover_models
 
 
 @asynccontextmanager
@@ -211,6 +213,11 @@ def query_repo(request: QueryRequest) -> QueryResponse:
         query=request.query,
         top_n=request.top_n,
         top_k=request.top_k,
+        embedding_provider=request.embedding_provider,
+        embedding_model=request.embedding_model,
+        llm_provider=request.llm_provider,
+        answer_model=request.answer_model,
+        verifier_model=request.verifier_model,
     )
 
 
@@ -265,6 +272,36 @@ def list_repos() -> RepoCatalogResponse:
 
 
 @app.get(
+    "/providers/models",
+    response_model=ProviderModelCatalogResponse,
+    tags=["Catalogo"],
+    summary="Catálogo de modelos por provider",
+    description=(
+        "Obtiene modelos de embeddings o LLM por provider. "
+        "Intenta discovery remoto y aplica fallback local cuando corresponde."
+    ),
+)
+def list_provider_models(
+    provider: str,
+    kind: str,
+    force_refresh: bool = False,
+) -> ProviderModelCatalogResponse:
+    """Lista modelos por provider/tipo para poblar selectores de UI."""
+    result = discover_models(
+        provider=provider,
+        kind=kind,
+        force_refresh=force_refresh,
+    )
+    return ProviderModelCatalogResponse(
+        provider=result.provider,
+        kind=result.kind,
+        models=result.models,
+        source=result.source,
+        warning=result.warning,
+    )
+
+
+@app.get(
     "/repos/{repo_id}/status",
     response_model=RepoQueryStatusResponse,
     tags=["Catalogo"],
@@ -281,6 +318,9 @@ def repo_status(repo_id: str) -> RepoQueryStatusResponse:
         repo_id=repo_id,
         listed_in_catalog=repo_id in listed_repo_ids,
     )
+    runtime_payload = jobs.get_repo_runtime(repo_id)
+    if runtime_payload:
+        status_payload.update(runtime_payload)
     return RepoQueryStatusResponse(**status_payload)
 
 

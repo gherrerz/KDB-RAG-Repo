@@ -42,6 +42,15 @@ class RepoIngestRequest(BaseModel):
         default=None,
         description="Hash commit opcional para fijar una revisión específica.",
     )
+    embedding_provider: str | None = Field(
+        default=None,
+        description="Proveedor de embeddings opcional para esta ingesta.",
+        examples=["openai", "anthropic", "gemini", "vertex_ai"],
+    )
+    embedding_model: str | None = Field(
+        default=None,
+        description="Modelo de embeddings opcional para esta ingesta.",
+    )
 
 
 class JobInfo(BaseModel):
@@ -94,6 +103,28 @@ class QueryRequest(BaseModel):
         default=15,
         ge=1,
         description="Cantidad final tras reranking usada para contexto/citas.",
+    )
+    embedding_provider: str | None = Field(
+        default=None,
+        description="Proveedor de embeddings opcional para vectorizar query.",
+        examples=["openai", "anthropic", "gemini", "vertex_ai"],
+    )
+    embedding_model: str | None = Field(
+        default=None,
+        description="Modelo de embeddings opcional para vectorizar query.",
+    )
+    llm_provider: str | None = Field(
+        default=None,
+        description="Proveedor LLM opcional para respuesta/verificación.",
+        examples=["openai", "anthropic", "gemini", "vertex_ai"],
+    )
+    answer_model: str | None = Field(
+        default=None,
+        description="Modelo answer opcional para la consulta.",
+    )
+    verifier_model: str | None = Field(
+        default=None,
+        description="Modelo verifier opcional para la consulta.",
     )
 
 
@@ -172,6 +203,16 @@ class RepoCatalogResponse(BaseModel):
     repo_ids: list[str] = Field(default_factory=list, description="Lista de repo_id disponibles para consulta.")
 
 
+class ProviderModelCatalogResponse(BaseModel):
+    """Respuesta de catálogo de modelos para provider/tipo solicitado."""
+
+    provider: str = Field(description="Provider evaluado para discovery.")
+    kind: str = Field(description="Tipo de modelos retornados (embedding o llm).")
+    models: list[str] = Field(default_factory=list, description="Lista de modelos disponibles o fallback.")
+    source: str = Field(description="Origen de datos: remote, cache o fallback.")
+    warning: str | None = Field(default=None, description="Código de advertencia cuando aplica fallback o error.")
+
+
 class RepoQueryStatusResponse(BaseModel):
     """Estado de disponibilidad de consulta para un repositorio específico."""
 
@@ -181,6 +222,18 @@ class RepoQueryStatusResponse(BaseModel):
     chroma_counts: dict[str, int | None] = Field(default_factory=dict, description="Conteos por colección Chroma (code_symbols, code_files, code_modules).")
     bm25_loaded: bool = Field(description="Indica si BM25 está cargado en memoria para el repo.")
     graph_available: bool | None = Field(default=None, description="Disponibilidad de grafo para el repo (si pudo evaluarse).")
+    last_embedding_provider: str | None = Field(
+        default=None,
+        description=(
+            "Proveedor de embedding usado en la última ingesta conocida del repo."
+        ),
+    )
+    last_embedding_model: str | None = Field(
+        default=None,
+        description=(
+            "Modelo de embedding usado en la última ingesta conocida del repo."
+        ),
+    )
     warnings: list[str] = Field(default_factory=list, description="Advertencias de readiness no bloqueantes.")
 
 

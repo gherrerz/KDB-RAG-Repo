@@ -7,12 +7,54 @@ import requests
 from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget, QVBoxLayout, QWidget
 
 from coderag.core.settings import get_settings
+from coderag.ui.provider_action_state import (
+    ActionState,
+    evaluate_ingest_action,
+    evaluate_query_action,
+)
 from coderag.ui.evidence_view import EvidenceView
 from coderag.ui.ingestion_view import IngestionView
+from coderag.ui.provider_messages import (
+    ingest_requires_repo_url_message,
+)
+from coderag.ui.query_preconditions import evaluate_local_query_preconditions
+from coderag.ui.query_response_formatter import (
+    build_query_answer_text,
+    build_repo_not_ready_message,
+)
 from coderag.ui.query_view import QueryView
 
 API_BASE = "http://127.0.0.1:8000"
 UI_REQUEST_TIMEOUT_SECONDS = get_settings().ui_request_timeout_seconds
+QUERY_PROFILE_SETTINGS: dict[str, dict[str, float | int | bool]] = {
+    "rapido": {
+        "top_n": 40,
+        "top_k": 10,
+        "timeout_seconds": 45.0,
+        "allow_retry": False,
+        "retry_top_n": 25,
+        "retry_top_k": 8,
+        "retry_timeout_seconds": 30.0,
+    },
+    "balanceado": {
+        "top_n": 80,
+        "top_k": 20,
+        "timeout_seconds": float(UI_REQUEST_TIMEOUT_SECONDS),
+        "allow_retry": True,
+        "retry_top_n": 40,
+        "retry_top_k": 10,
+        "retry_timeout_seconds": 45.0,
+    },
+    "profundo": {
+        "top_n": 120,
+        "top_k": 30,
+        "timeout_seconds": max(120.0, float(UI_REQUEST_TIMEOUT_SECONDS)),
+        "allow_retry": True,
+        "retry_top_n": 60,
+        "retry_top_k": 15,
+        "retry_timeout_seconds": 60.0,
+    },
+}
 
 
 class MainWindow(QMainWindow):
@@ -46,6 +88,7 @@ class MainWindow(QMainWindow):
         self.query_view.refresh_repo_ids_button.clicked.connect(
             lambda: self._refresh_repo_ids(log_on_error=True)
         )
+        self._connect_action_state_signals()
 
         self._active_job_id: str | None = None
         self._job_poll_enabled = False
@@ -57,13 +100,110 @@ class MainWindow(QMainWindow):
         self._refresh_repo_ids(log_on_error=False)
         self._selected_query_repo_id = self.query_view.get_repo_id_text()
         self.query_view.repo_id.currentTextChanged.connect(self._on_query_repo_changed)
+        self._update_ingest_action_state()
+        self._update_query_action_state()
 
     def _set_query_controls_enabled(self, enabled: bool) -> None:
         """Habilita o deshabilita acciones de consulta durante operaciones críticas."""
         self.query_view.repo_id.setDisabled(not enabled)
+        self.query_view.embedding_provider.setDisabled(not enabled)
+        self.query_view.embedding_model.setDisabled(not enabled)
+        self.query_view.llm_provider.setDisabled(not enabled)
+        self.query_view.answer_model.setDisabled(not enabled)
+        self.query_view.verifier_model.setDisabled(not enabled)
+        self.query_view.query_profile.setDisabled(not enabled)
         self.query_view.refresh_repo_ids_button.setDisabled(not enabled)
+        self.query_view.refresh_models_button.setDisabled(not enabled)
         self.query_view.query_input.setDisabled(not enabled)
-        self.query_view.query_button.setDisabled(not enabled)
+        if not enabled:
+            state = evaluate_query_action(
+                controls_enabled=False,
+                has_repo=False,
+                has_question=False,
+                embedding_ready=True,
+                embedding_reason="ok",
+                llm_ready=True,
+                llm_reason="ok",
+                force_fallback=False,
+            )
+            self._apply_query_action_state(state)
+            return
+        self._update_query_action_state()
+
+    def _update_ingest_action_state(self) -> None:
+        """Actualiza habilitacion y tooltip de Ingestar segun readiness actual."""
+        if self.ingestion_view.ingest_button.text() == "Ingestando...":
+            return
+
+        ready, reason = self.ingestion_view.is_embedding_provider_ready()
+        state = evaluate_ingest_action(
+            embedding_ready=ready,
+            embedding_reason=reason,
+            force_fallback=self.ingestion_view.is_force_fallback_enabled(),
+        )
+        self._apply_ingest_action_state(state)
+
+    def _update_query_action_state(self) -> None:
+        """Actualiza habilitacion y tooltip de Consultar segun estado operativo."""
+        if self.query_view.query_input.isEnabled() is False:
+            return
+
+        emb_ready, emb_reason = self.query_view.is_embedding_provider_ready()
+        llm_ready, llm_reason = self.query_view.is_llm_provider_ready()
+        has_repo = bool(self.query_view.get_repo_id_text())
+        has_question = bool(self.query_view.get_question_text())
+        state = evaluate_query_action(
+            controls_enabled=True,
+            has_repo=has_repo,
+            has_question=has_question,
+            embedding_ready=emb_ready,
+            embedding_reason=emb_reason,
+            llm_ready=llm_ready,
+            llm_reason=llm_reason,
+            force_fallback=self.query_view.is_force_fallback_enabled(),
+        )
+        self._apply_query_action_state(state)
+
+    def _connect_action_state_signals(self) -> None:
+        """Conecta señales de UI que afectan disponibilidad de acciones."""
+        self.ingestion_view.embedding_provider.currentTextChanged.connect(
+            lambda _: self._update_ingest_action_state()
+        )
+        self.ingestion_view.force_fallback.toggled.connect(
+            lambda _: self._update_ingest_action_state()
+        )
+        self.query_view.embedding_provider.currentTextChanged.connect(
+            lambda _: self._update_query_action_state()
+        )
+        self.query_view.llm_provider.currentTextChanged.connect(
+            lambda _: self._update_query_action_state()
+        )
+        self.query_view.force_fallback.toggled.connect(
+            lambda _: self._update_query_action_state()
+        )
+        self.query_view.repo_id.currentTextChanged.connect(
+            lambda _: self._update_query_action_state()
+        )
+        self.query_view.query_input.textChanged.connect(
+            lambda _: self._update_query_action_state()
+        )
+
+    def _apply_ingest_action_state(self, state: ActionState) -> None:
+        """Aplica estado evaluado al botón/hint de ingesta."""
+        self.ingestion_view.ingest_button.setDisabled(not state.enabled)
+        self.ingestion_view.ingest_button.setToolTip(state.message)
+        self.ingestion_view.set_ingest_action_hint(state.message)
+
+    def _apply_query_action_state(self, state: ActionState) -> None:
+        """Aplica estado evaluado al botón/hint de consulta."""
+        self.query_view.query_button.setDisabled(not state.enabled)
+        self.query_view.query_button.setToolTip(state.message)
+        self.query_view.set_query_action_hint(state.message)
+
+    def _finalize_job_poll(self) -> None:
+        """Finaliza polling de job y libera estado asociado."""
+        self._job_poll_enabled = False
+        self._active_job_id = None
 
     def _apply_window_theme(self) -> None:
         """Establezca un estilo oscuro consistente para pestañas y widgets de shell."""
@@ -102,7 +242,16 @@ class MainWindow(QMainWindow):
         repo_url = self.ingestion_view.repo_url.text().strip()
         if not repo_url:
             self.ingestion_view.set_status("error", "Error")
-            self.ingestion_view.append_log("Repo URL es obligatorio")
+            self.ingestion_view.append_log(ingest_requires_repo_url_message())
+            return
+
+        embedding_ready, reason = self.ingestion_view.is_embedding_provider_ready()
+        if not embedding_ready and not self.ingestion_view.is_force_fallback_enabled():
+            self.ingestion_view.set_status("error", "Error")
+            self.ingestion_view.append_log(
+                "Provider de embeddings no esta listo "
+                f"({reason}). Activa 'Forzar fallback' para continuar."
+            )
             return
 
         payload = {
@@ -110,6 +259,8 @@ class MainWindow(QMainWindow):
             "repo_url": repo_url,
             "token": self.ingestion_view.token.text().strip() or None,
             "branch": self.ingestion_view.branch.text().strip() or "main",
+            "embedding_provider": self.ingestion_view.embedding_provider.currentText(),
+            "embedding_model": self.ingestion_view.get_embedding_model() or None,
         }
         self.ingestion_view.set_running(True)
         self.ingestion_view.set_status("running", "En progreso")
@@ -145,6 +296,7 @@ class MainWindow(QMainWindow):
             self.ingestion_view.set_status("error", "Error")
             self.ingestion_view.set_progress(0)
             self.ingestion_view.append_log(f"Error de ingesta: {exc}")
+            self._update_ingest_action_state()
 
     def _on_reset_all(self) -> None:
         """Solicite un restablecimiento completo de índices, gráficos, metadatos y espacio de trabajo."""
@@ -196,6 +348,7 @@ class MainWindow(QMainWindow):
             self.ingestion_view.append_log(f"Error de limpieza: {exc}")
         finally:
             self.ingestion_view.set_reset_running(False)
+            self._update_ingest_action_state()
 
     def timerEvent(self, event: Any) -> None:  # noqa: N802
         """Sondear el punto final del trabajo de ingesta y actualizar los widgets de estado."""
@@ -246,8 +399,8 @@ class MainWindow(QMainWindow):
             self.ingestion_view.set_running(False)
             self.ingestion_view.append_log("Job completado")
             self._set_query_controls_enabled(True)
-            self._job_poll_enabled = False
-            self._active_job_id = None
+            self._update_ingest_action_state()
+            self._finalize_job_poll()
             return
 
         if status in {"partial"}:
@@ -258,8 +411,8 @@ class MainWindow(QMainWindow):
                 "Job completado parcialmente: revisar readiness antes de consultar."
             )
             self._set_query_controls_enabled(True)
-            self._job_poll_enabled = False
-            self._active_job_id = None
+            self._update_ingest_action_state()
+            self._finalize_job_poll()
             return
 
         if status in {"failed", "error"}:
@@ -268,8 +421,8 @@ class MainWindow(QMainWindow):
             self.ingestion_view.set_running(False)
             self.ingestion_view.append_log("Job falló")
             self._set_query_controls_enabled(True)
-            self._job_poll_enabled = False
-            self._active_job_id = None
+            self._update_ingest_action_state()
+            self._finalize_job_poll()
             return
 
         self.ingestion_view.set_status("running", "En progreso")
@@ -279,38 +432,24 @@ class MainWindow(QMainWindow):
         """Enviar solicitud de consulta y dar respuesta con citas."""
         repo_id = self.query_view.get_repo_id_text()
         question = self.query_view.get_question_text()
+        profile = self.query_view.get_query_profile()
+        profile_settings = self._resolve_query_profile_settings(profile)
 
-        if not repo_id:
-            self.query_view.set_status("error", "Error")
-            self.query_view.append_assistant_message(
-                "Debes seleccionar un ID de repositorio del listado.",
-                error=True,
-            )
-            return
-
-        if self._job_poll_enabled:
-            self.query_view.set_status("error", "Error")
-            self.query_view.append_assistant_message(
-                "La ingesta está en progreso. Espera a que finalice antes de consultar.",
-                error=True,
-            )
-            return
-
-        if not self.query_view.has_repo_id(repo_id):
-            self.query_view.set_status("error", "Error")
-            self.query_view.append_assistant_message(
-                "El ID seleccionado no existe en la base de conocimiento. "
-                "Actualiza la lista e intenta nuevamente.",
-                error=True,
-            )
-            return
-
-        if not question:
-            self.query_view.set_status("error", "Error")
-            self.query_view.append_assistant_message(
-                "Debes escribir una pregunta para consultar.",
-                error=True,
-            )
+        emb_ready, emb_reason = self.query_view.is_embedding_provider_ready()
+        llm_ready, llm_reason = self.query_view.is_llm_provider_ready()
+        local_check = evaluate_local_query_preconditions(
+            repo_id=repo_id,
+            question=question,
+            has_repo_in_catalog=self.query_view.has_repo_id(repo_id),
+            job_poll_enabled=self._job_poll_enabled,
+            embedding_ready=emb_ready,
+            embedding_reason=emb_reason,
+            llm_ready=llm_ready,
+            llm_reason=llm_reason,
+            force_fallback=self.query_view.is_force_fallback_enabled(),
+        )
+        if not local_check.allowed:
+            self._show_query_error(local_check.message)
             return
 
         try:
@@ -321,30 +460,18 @@ class MainWindow(QMainWindow):
             status_response.raise_for_status()
             status_payload = status_response.json()
             if not bool(status_payload.get("query_ready")):
-                self.query_view.set_status("error", "Error")
-                warning_lines = status_payload.get("warnings") or []
-                hint = ""
-                if warning_lines:
-                    hint = "\n" + "\n".join(f"- {line}" for line in warning_lines[:3])
-                self.query_view.append_assistant_message(
-                    "El repositorio no esta listo para consultas. "
-                    "Ejecuta una nueva ingesta o revisa el estado de indices."
-                    f"{hint}",
-                    error=True,
+                self._show_query_error(
+                    build_repo_not_ready_message(status_payload.get("warnings") or []),
                 )
                 return
         except requests.HTTPError:
-            self.query_view.set_status("error", "Error")
-            self.query_view.append_assistant_message(
+            self._show_query_error(
                 "No se pudo validar el estado del repositorio antes de consultar.",
-                error=True,
             )
             return
         except Exception as exc:
-            self.query_view.set_status("error", "Error")
-            self.query_view.append_assistant_message(
+            self._show_query_error(
                 f"Error validando estado del repositorio: {exc}",
-                error=True,
             )
             return
 
@@ -356,25 +483,87 @@ class MainWindow(QMainWindow):
         payload = {
             "repo_id": repo_id,
             "query": question,
-            "top_n": 80,
-            "top_k": 20,
+            "top_n": int(profile_settings["top_n"]),
+            "top_k": int(profile_settings["top_k"]),
+            "embedding_provider": self.query_view.get_embedding_provider(),
+            "embedding_model": self.query_view.get_embedding_model() or None,
+            "llm_provider": self.query_view.get_llm_provider(),
+            "answer_model": self.query_view.get_answer_model() or None,
+            "verifier_model": self.query_view.get_verifier_model() or None,
         }
+        query_timeout = float(profile_settings["timeout_seconds"])
         try:
             response = requests.post(
                 f"{API_BASE}/query",
                 json=payload,
-                timeout=UI_REQUEST_TIMEOUT_SECONDS,
+                timeout=query_timeout,
             )
             response.raise_for_status()
             data = response.json()
-            answer_text = str(data.get("answer") or "Sin respuesta.")
-            diagnostics = data.get("diagnostics") or {}
-            fallback_reason = diagnostics.get("fallback_reason")
-            if fallback_reason:
-                answer_text = f"{answer_text}\n\n[diagnóstico: {fallback_reason}]"
+            answer_text = build_query_answer_text(
+                str(data.get("answer") or "Sin respuesta."),
+                data.get("diagnostics") or {},
+            )
             self.query_view.append_assistant_message(answer_text)
             self.evidence_view.set_citations(data.get("citations") or [])
             self.query_view.set_status("success", "Completado")
+        except requests.Timeout:
+            if not bool(profile_settings["allow_retry"]):
+                self.query_view.set_status("error", "Error")
+                self.query_view.append_assistant_message(
+                    (
+                        "Timeout en consulta con perfil rapido. "
+                        "Prueba perfil balanceado o profundo para permitir "
+                        "reintento automatico."
+                    ),
+                    error=True,
+                )
+                return
+
+            retry_payload = dict(payload)
+            retry_payload["top_n"] = int(profile_settings["retry_top_n"])
+            retry_payload["top_k"] = int(profile_settings["retry_top_k"])
+            try:
+                retry_timeout = float(profile_settings["retry_timeout_seconds"])
+                response = requests.post(
+                    f"{API_BASE}/query",
+                    json=retry_payload,
+                    timeout=retry_timeout,
+                )
+                response.raise_for_status()
+                data = response.json()
+                answer_text = build_query_answer_text(
+                    str(data.get("answer") or "Sin respuesta."),
+                    data.get("diagnostics") or {},
+                )
+                self.query_view.append_assistant_message(
+                    "Respuesta obtenida tras reintento automatico (modo rapido).\n\n"
+                    f"{answer_text}"
+                )
+                self.evidence_view.set_citations(data.get("citations") or [])
+                self.query_view.set_status("success", "Completado")
+            except requests.HTTPError:
+                detail = "Error HTTP en consulta (reintento rapido)."
+                try:
+                    error_data = response.json()
+                    detail = str(error_data.get("detail") or detail)
+                except Exception:
+                    pass
+                self.query_view.set_status("error", "Error")
+                self.query_view.append_assistant_message(
+                    f"{detail}\n\nEndpoint: {API_BASE}/query",
+                    error=True,
+                )
+            except Exception as exc:
+                self.query_view.set_status("error", "Error")
+                self.query_view.append_assistant_message(
+                    (
+                        "Error en consulta tras timeout inicial: "
+                        f"{exc}. Sugerencia: reduce complejidad de pregunta "
+                        "o cambia temporalmente de modelo."
+                    ),
+                    error=True,
+                )
         except requests.HTTPError:
             detail = "Error HTTP en consulta."
             try:
@@ -395,6 +584,23 @@ class MainWindow(QMainWindow):
             )
         finally:
             self.query_view.set_running(False)
+            self._update_query_action_state()
+
+    @staticmethod
+    def _resolve_query_profile_settings(
+        profile: str,
+    ) -> dict[str, float | int | bool]:
+        """Devuelve estrategia de consulta segun el perfil de UX seleccionado."""
+        normalized = profile.strip().lower()
+        return QUERY_PROFILE_SETTINGS.get(
+            normalized,
+            QUERY_PROFILE_SETTINGS["balanceado"],
+        )
+
+    def _show_query_error(self, message: str) -> None:
+        """Muestra error de consulta con formato consistente en la UI."""
+        self.query_view.set_status("error", "Error")
+        self.query_view.append_assistant_message(message, error=True)
 
     def _on_query_repo_changed(self, repo_id: str) -> None:
         """Limpie la conversación y evidencias cuando cambia el repositorio activo."""
@@ -429,6 +635,7 @@ class MainWindow(QMainWindow):
             current_repo = self.query_view.get_repo_id_text()
             if current_repo != previous_repo:
                 self._on_query_repo_changed(current_repo)
+            self._update_query_action_state()
         except Exception as exc:
             if log_on_error:
                 self.ingestion_view.append_log(

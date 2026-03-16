@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from coderag.api import server
 from coderag.core.storage_health import StoragePreflightError
+from coderag.llm.model_discovery import ModelDiscoveryResult
 
 app = server.app
 
@@ -85,6 +86,45 @@ def test_list_repos_returns_repo_id_catalog(monkeypatch) -> None:
     assert response.json()["repo_ids"] == ["mall", "api-service"]
 
 
+def test_provider_models_endpoint_returns_catalog(monkeypatch) -> None:
+    """Expone catálogo de modelos por provider para poblar combos de UI."""
+
+    def fake_discover_models(
+        provider: str,
+        kind: str,
+        *,
+        force_refresh: bool = False,
+    ) -> ModelDiscoveryResult:
+        assert provider == "gemini"
+        assert kind == "embedding"
+        assert force_refresh is True
+        return ModelDiscoveryResult(
+            provider="gemini",
+            kind="embedding",
+            models=["text-embedding-004"],
+            source="remote",
+            warning=None,
+        )
+
+    monkeypatch.setattr(server, "discover_models", fake_discover_models)
+    client = TestClient(app)
+
+    response = client.get(
+        "/providers/models",
+        params={
+            "provider": "gemini",
+            "kind": "embedding",
+            "force_refresh": "true",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "gemini"
+    assert payload["kind"] == "embedding"
+    assert payload["models"] == ["text-embedding-004"]
+    assert payload["source"] == "remote"
+
+
 def test_repo_status_endpoint_returns_structured_repo_readiness(monkeypatch) -> None:
     """Retorna estado consultable por repo con shape estable para UI/API."""
 
@@ -109,6 +149,14 @@ def test_repo_status_endpoint_returns_structured_repo_readiness(monkeypatch) -> 
         }
 
     monkeypatch.setattr(server.jobs, "list_repo_ids", fake_list_repo_ids)
+    monkeypatch.setattr(
+        server.jobs,
+        "get_repo_runtime",
+        lambda repo_id: {
+            "last_embedding_provider": "gemini",
+            "last_embedding_model": "text-embedding-004",
+        },
+    )
     monkeypatch.setattr(server, "get_repo_query_status", fake_get_repo_query_status)
 
     client = TestClient(app)
@@ -121,6 +169,8 @@ def test_repo_status_endpoint_returns_structured_repo_readiness(monkeypatch) -> 
     assert payload["query_ready"] is True
     assert payload["bm25_loaded"] is True
     assert payload["chroma_counts"]["code_symbols"] == 10
+    assert payload["last_embedding_provider"] == "gemini"
+    assert payload["last_embedding_model"] == "text-embedding-004"
 
 
 def test_inventory_query_endpoint_returns_paginated_payload(monkeypatch) -> None:
@@ -197,6 +247,66 @@ def test_storage_health_endpoint_returns_structured_payload() -> None:
     assert payload["strict"] is True
     assert payload["context"] == "health"
     assert payload["cached"] is True
+
+
+def test_query_endpoint_forwards_optional_provider_fields(monkeypatch) -> None:
+    """Propaga parámetros opcionales de provider/model al servicio run_query."""
+    from coderag.api import query_service
+
+    captured: dict[str, object] = {}
+
+    def fake_list_repo_ids() -> list[str]:
+        return ["mall"]
+
+    def fake_get_repo_query_status(*, repo_id: str, listed_in_catalog: bool) -> dict:
+        return {
+            "repo_id": repo_id,
+            "listed_in_catalog": listed_in_catalog,
+            "query_ready": True,
+            "chroma_counts": {
+                "code_symbols": 10,
+                "code_files": 3,
+                "code_modules": 2,
+            },
+            "bm25_loaded": True,
+            "graph_available": True,
+            "warnings": [],
+        }
+
+    def fake_run_query(**kwargs):
+        captured.update(kwargs)
+        return {
+            "answer": "ok",
+            "citations": [],
+            "diagnostics": {},
+        }
+
+    monkeypatch.setattr(server.jobs, "list_repo_ids", fake_list_repo_ids)
+    monkeypatch.setattr(server, "get_repo_query_status", fake_get_repo_query_status)
+    monkeypatch.setattr(query_service, "run_query", fake_run_query)
+
+    client = TestClient(app)
+    response = client.post(
+        "/query",
+        json={
+            "repo_id": "mall",
+            "query": "hola",
+            "top_n": 5,
+            "top_k": 3,
+            "embedding_provider": "gemini",
+            "embedding_model": "text-embedding-004",
+            "llm_provider": "anthropic",
+            "answer_model": "claude-3-5-sonnet-20241022",
+            "verifier_model": "claude-3-5-sonnet-20241022",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["embedding_provider"] == "gemini"
+    assert captured["embedding_model"] == "text-embedding-004"
+    assert captured["llm_provider"] == "anthropic"
+    assert captured["answer_model"] == "claude-3-5-sonnet-20241022"
+    assert captured["verifier_model"] == "claude-3-5-sonnet-20241022"
 
 
 def test_query_endpoint_blocks_when_storage_preflight_fails(monkeypatch) -> None:

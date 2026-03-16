@@ -29,6 +29,10 @@ class JobManager:
                     repo_ids.add(child.name)
         return sorted(repo_ids)
 
+    def get_repo_runtime(self, repo_id: str) -> dict[str, str | None] | None:
+        """Devuelve metadata runtime de la última ingesta del repositorio."""
+        return self.store.get_repo_runtime(repo_id)
+
     def reset_all_data(self) -> tuple[list[str], list[str]]:
         """Restablezca todos los índices persistentes y el estado del trabajo/caché en memoria."""
         running_jobs = [
@@ -89,9 +93,19 @@ class JobManager:
                 repo_url=request.repo_url,
                 branch=request.branch,
                 commit=request.commit,
+                embedding_provider=request.embedding_provider,
+                embedding_model=request.embedding_model,
                 logger=logger,
             )
             job.repo_id = repo_id
+            self.store.upsert_repo_runtime(
+                repo_id=repo_id,
+                repo_url=request.repo_url,
+                branch=request.branch,
+                local_path=str(self._workspace_path / repo_id),
+                embedding_provider=request.embedding_provider,
+                embedding_model=request.embedding_model,
+            )
             job.progress = 1.0
             readiness = get_repo_query_status(
                 repo_id=repo_id,

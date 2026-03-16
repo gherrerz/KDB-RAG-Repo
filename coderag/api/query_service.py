@@ -17,6 +17,12 @@ from coderag.core.models import (
     RetrievalChunk,
 )
 from coderag.core.settings import get_settings
+from coderag.api.citation_filters import build_inventory_citations, is_noisy_path
+from coderag.api.query_diagnostics import (
+    build_inventory_diagnostics,
+    build_inventory_missing_target_diagnostics,
+    build_query_diagnostics,
+)
 from coderag.ingestion.graph_builder import GraphBuilder
 from coderag.llm.openai_client import AnswerClient
 from coderag.retrieval.context_assembler import assemble_context
@@ -92,7 +98,7 @@ def _fallback_header(fallback_reason: str) -> str:
     """Devuelve un mensaje de encabezado alternativo según la causa raíz."""
     messages = {
         "not_configured": (
-            "OpenAI no está configurado; respuesta extractiva basada en "
+            "LLM no está configurado; respuesta extractiva basada en "
             "evidencia."
         ),
         "verification_failed": (
@@ -875,18 +881,6 @@ def _elapsed_milliseconds(started_at: float) -> float:
     return round((monotonic() - started_at) * 1000, 2)
 
 
-def _is_noisy_path(path: str) -> bool:
-    """Indica si es probable que la ruta de la cita sea ruido no informativo."""
-    normalized = path.strip().lower()
-    if not normalized:
-        return True
-    if normalized in {".", "..", "document", "docs"}:
-        return True
-    if normalized.startswith("document/"):
-        return True
-    return False
-
-
 def _citation_priority(citation: Citation) -> tuple[int, float]:
     """Asigne prioridad de clasificación utilizando señales genéricas de calidad de ruta."""
     path = citation.path.strip().lower()
@@ -963,18 +957,14 @@ def run_inventory_query(
     stage_timings["parse_ms"] = _elapsed_milliseconds(parse_started_at)
 
     if not inventory_target:
-        diagnostics = {
-            "inventory_target": None,
-            "inventory_terms": [],
-            "inventory_count": 0,
-            "inventory_explain": explain_inventory,
-            "module_name_raw": module_name_raw,
-            "module_name_resolved": module_name,
-            "query_budget_seconds": budget_seconds,
-            "budget_exhausted": False,
-            "stage_timings_ms": stage_timings,
-            "fallback_reason": "inventory_target_missing",
-        }
+        stage_timings["total_ms"] = _elapsed_milliseconds(pipeline_started_at)
+        diagnostics = build_inventory_missing_target_diagnostics(
+            explain_inventory=explain_inventory,
+            module_name_raw=module_name_raw,
+            module_name=module_name,
+            budget_seconds=budget_seconds,
+            stage_timings=stage_timings,
+        )
         return InventoryQueryResponse(
             answer="No se detectó un objetivo de inventario en la consulta.",
             target=None,
@@ -1018,17 +1008,7 @@ def run_inventory_query(
         for item in paged_inventory
     ]
 
-    citations = [
-        Citation(
-            path=item.path,
-            start_line=item.start_line,
-            end_line=item.end_line,
-            score=1.0,
-            reason="inventory_graph_match",
-        )
-        for item in items
-        if not _is_noisy_path(item.path)
-    ]
+    citations = build_inventory_citations(items)
 
     if (
         fallback_reason is None
@@ -1057,19 +1037,21 @@ def run_inventory_query(
     )
 
     stage_timings["total_ms"] = _elapsed_milliseconds(pipeline_started_at)
-    diagnostics = {
-        "inventory_target": inventory_target,
-        "inventory_terms": inventory_terms,
-        "inventory_count": total_items,
-        "inventory_explain": explain_inventory,
-        "inventory_purpose_count": len(component_purposes),
-        "module_name_raw": module_name_raw,
-        "module_name_resolved": module_name,
-        "query_budget_seconds": budget_seconds,
-        "budget_exhausted": _remaining_budget_seconds(pipeline_started_at, budget_seconds) <= 0,
-        "stage_timings_ms": stage_timings,
-        "fallback_reason": fallback_reason,
-    }
+    diagnostics = build_inventory_diagnostics(
+        inventory_target=inventory_target,
+        inventory_terms=inventory_terms,
+        inventory_count=total_items,
+        explain_inventory=explain_inventory,
+        inventory_purpose_count=len(component_purposes),
+        module_name_raw=module_name_raw,
+        module_name=module_name,
+        budget_seconds=budget_seconds,
+        budget_exhausted=(
+            _remaining_budget_seconds(pipeline_started_at, budget_seconds) <= 0
+        ),
+        stage_timings=stage_timings,
+        fallback_reason=fallback_reason,
+    )
 
     return InventoryQueryResponse(
         answer=answer,
@@ -1084,7 +1066,17 @@ def run_inventory_query(
     )
 
 
-def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse:
+def run_query(
+    repo_id: str,
+    query: str,
+    top_n: int,
+    top_k: int,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+    llm_provider: str | None = None,
+    answer_model: str | None = None,
+    verifier_model: str | None = None,
+) -> QueryResponse:
     """Ejecute el proceso de consulta completo y devuelva la respuesta con citas."""
     settings = get_settings()
     inventory_intent = _is_inventory_query(query)
@@ -1112,11 +1104,38 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
         )
 
     budget_seconds = max(1.0, float(settings.query_max_seconds))
+    verify_enabled = (
+        settings.is_verify_enabled()
+        if hasattr(settings, "is_verify_enabled")
+        else bool(getattr(settings, "openai_verify_enabled", True))
+    )
+    resolved_embedding_provider = (
+        settings.resolve_embedding_provider(embedding_provider)
+        if hasattr(settings, "resolve_embedding_provider")
+        else (embedding_provider or "openai")
+    )
+    resolved_embedding_model = (
+        settings.resolve_embedding_model(
+            resolved_embedding_provider,
+            embedding_model,
+        )
+        if hasattr(settings, "resolve_embedding_model")
+        else (
+            embedding_model
+            or getattr(settings, "openai_embedding_model", "text-embedding-3-small")
+        )
+    )
     pipeline_started_at = monotonic()
     stage_timings: dict[str, float] = {}
 
     retrieval_started_at = monotonic()
-    initial = hybrid_search(repo_id=repo_id, query=query, top_n=top_n)
+    initial = hybrid_search(
+        repo_id=repo_id,
+        query=query,
+        top_n=top_n,
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+    )
     stage_timings["hybrid_search_ms"] = _elapsed_milliseconds(retrieval_started_at)
 
     rerank_started_at = monotonic()
@@ -1161,14 +1180,18 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
     ]
 
     filtered_citations = [
-        item for item in raw_citations if not _is_noisy_path(item.path)
+        item for item in raw_citations if not is_noisy_path(item.path)
     ]
     citations_source = filtered_citations
     if not citations_source and raw_citations:
         citations_source = raw_citations
     citations = sorted(citations_source, key=_citation_priority)
 
-    client = AnswerClient()
+    client = AnswerClient(
+        provider=llm_provider,
+        answer_model=answer_model,
+        verifier_model=verifier_model,
+    )
     fallback_reason: str | None = None
     verify_valid: bool | None = None
     verify_skipped = False
@@ -1205,7 +1228,7 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
                 )
                 stage_timings["llm_answer_ms"] = _elapsed_milliseconds(answer_started_at)
 
-                if not settings.openai_verify_enabled:
+                if not verify_enabled:
                     verify_skipped = True
                 else:
                     verify_timeout = min(
@@ -1249,35 +1272,34 @@ def run_query(repo_id: str, query: str, top_n: int, top_k: int) -> QueryResponse
         )
 
     stage_timings["total_ms"] = _elapsed_milliseconds(pipeline_started_at)
-    diagnostics = {
-        "retrieved": len(initial),
-        "reranked": len(reranked),
-        "graph_nodes": len(graph_context),
-        "context_chars": len(context),
-        "raw_citations": len(raw_citations),
-        "filtered_citations": len(filtered_citations),
-        "returned_citations": len(citations),
-        "low_signal_retrieval": len(initial) < 3,
-        "context_sufficient": context_sufficient,
-        "openai_enabled": client.enabled,
-        "openai_verify_enabled": settings.openai_verify_enabled,
-        "discovered_modules": discovered_modules,
-        "inventory_target": None,
-        "inventory_terms": [],
-        "inventory_count": 0,
-        "fallback_reason": fallback_reason,
-        "verify_valid": verify_valid,
-        "verify_skipped": verify_skipped,
-        "query_budget_seconds": budget_seconds,
-        "budget_exhausted": _remaining_budget_seconds(pipeline_started_at, budget_seconds) <= 0,
-        "stage_timings_ms": stage_timings,
-        "inventory_intent": inventory_intent,
-        "inventory_route": (
-            "fallback_to_general"
-            if inventory_intent and not inventory_target
-            else None
+    diagnostics = build_query_diagnostics(
+        settings=settings,
+        retrieved_count=len(initial),
+        reranked_count=len(reranked),
+        graph_nodes_count=len(graph_context),
+        context_chars=len(context),
+        raw_citations_count=len(raw_citations),
+        filtered_citations_count=len(filtered_citations),
+        returned_citations_count=len(citations),
+        context_sufficient=context_sufficient,
+        llm_enabled=client.enabled,
+        llm_provider=client.provider,
+        llm_answer_model=client.answer_model,
+        llm_verifier_model=client.verifier_model,
+        verify_enabled=verify_enabled,
+        embedding_provider=resolved_embedding_provider,
+        embedding_model=resolved_embedding_model,
+        discovered_modules=discovered_modules,
+        fallback_reason=fallback_reason,
+        verify_valid=verify_valid,
+        verify_skipped=verify_skipped,
+        budget_seconds=budget_seconds,
+        budget_exhausted=(
+            _remaining_budget_seconds(pipeline_started_at, budget_seconds) <= 0
         ),
-    }
-    if llm_error is not None:
-        diagnostics["llm_error"] = llm_error
+        stage_timings=stage_timings,
+        inventory_intent=inventory_intent,
+        inventory_target=inventory_target,
+        llm_error=llm_error,
+    )
     return QueryResponse(answer=answer, citations=citations, diagnostics=diagnostics)

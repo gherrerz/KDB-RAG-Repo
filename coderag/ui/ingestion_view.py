@@ -3,6 +3,7 @@
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFrame,
     QFormLayout,
@@ -16,6 +17,25 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from coderag.core.settings import get_settings
+from coderag.ui.base_styles import (
+    BASE_BUTTON_STYLES,
+    BASE_INPUT_STYLES_WITH_TEXTEDIT,
+    BASE_WIDGET_TEXT_STYLES,
+)
+from coderag.ui.card_styles import (
+    frame_card_styles,
+    status_chip_styles,
+    title_subtitle_styles,
+    top_card_styles,
+)
+from coderag.ui.provider_feedback import (
+    apply_status_chip,
+)
+from coderag.ui.model_catalog_client import fetch_models_for_provider
+from coderag.ui.provider_styles import PROVIDER_FEEDBACK_STYLES
+from coderag.ui.provider_ui_state import resolve_embedding_ui_state
 
 
 class IngestionView(QWidget):
@@ -44,6 +64,31 @@ class IngestionView(QWidget):
 
         self.provider = QComboBox()
         self.provider.addItems(["github", "bitbucket"])
+
+        self.embedding_provider = QComboBox()
+        self.embedding_provider.addItems(
+            ["openai", "anthropic", "gemini", "vertex_ai"]
+        )
+
+        self.embedding_model = QComboBox()
+        self.embedding_model.setEditable(True)
+        self.embedding_model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.embedding_model.setMaxVisibleItems(15)
+        if self.embedding_model.lineEdit() is not None:
+            self.embedding_model.lineEdit().setPlaceholderText("Modelo embeddings")
+        self.refresh_embedding_models_button = QPushButton("Refrescar modelos")
+        self.refresh_embedding_models_button.setProperty("variant", "secondary")
+        self.embedding_warning = QLabel("")
+        self.embedding_warning.setObjectName("providerWarning")
+        self.embedding_warning.setWordWrap(True)
+        self.embedding_status_chip = QLabel("Embeddings: Listo")
+        self.embedding_status_chip.setObjectName("providerStatusChip")
+        self.embedding_status_chip.setProperty("state", "ready")
+        self.force_fallback = QCheckBox("Forzar fallback si provider no esta listo")
+        self.force_fallback.setObjectName("forceFallbackCheck")
+        self.ingest_action_hint = QLabel("")
+        self.ingest_action_hint.setObjectName("actionHint")
+        self.ingest_action_hint.setWordWrap(True)
 
         self.repo_url = QLineEdit()
         self.repo_url.setPlaceholderText("https://github.com/org/repo.git")
@@ -89,6 +134,12 @@ class IngestionView(QWidget):
         form.setContentsMargins(14, 12, 14, 12)
         form.setVerticalSpacing(10)
         form.addRow("Provider", self.provider)
+        form.addRow("Embedding Provider", self.embedding_provider)
+        form.addRow("Embedding Model", self.embedding_model)
+        form.addRow("", self.refresh_embedding_models_button)
+        form.addRow("", self.embedding_warning)
+        form.addRow("", self.embedding_status_chip)
+        form.addRow("", self.force_fallback)
         form.addRow("Repo URL", self.repo_url)
         form.addRow("Token", self.token)
         form.addRow("Branch", self.branch)
@@ -123,85 +174,40 @@ class IngestionView(QWidget):
         actions.addWidget(self.reset_button)
 
         layout.addLayout(actions)
+        layout.addWidget(self.ingest_action_hint)
         layout.addWidget(self.logs_card)
         self.setLayout(layout)
 
         self.ingest_button.clicked.connect(lambda: self._flash_button(self.ingest_button))
         self.reset_button.clicked.connect(lambda: self._flash_button(self.reset_button))
+        self.refresh_embedding_models_button.clicked.connect(
+            lambda: self._refresh_embedding_models(force_refresh=True)
+        )
+        self.refresh_embedding_models_button.clicked.connect(
+            lambda: self._flash_button(self.refresh_embedding_models_button)
+        )
 
         self.setStyleSheet(
             """
-            QWidget {
-                font-size: 13px;
-                color: #EAF1FF;
-            }
+            """
+            + BASE_WIDGET_TEXT_STYLES
+            + """
             IngestionView {
                 background-color: #0A1324;
             }
-            QFrame#ingestionTopCard,
-            QFrame#ingestCard {
-                background-color: #111C32;
-                border: 1px solid #2A3A5A;
-                border-radius: 12px;
+            """
+            + frame_card_styles("ingestionTopCard", "ingestCard", "ingestionLogsCard")
+            + top_card_styles("ingestionTopCard")
+            + title_subtitle_styles("ingestionTitle", "ingestionSubtitle")
+            + status_chip_styles("statusChip")
+            + PROVIDER_FEEDBACK_STYLES
+            + """
+            QLabel#providerWarning {
+                padding: 2px 0 4px 0;
             }
-            QFrame#ingestionTopCard {
-                background-color: #15243E;
-            }
-            QFrame#ingestionLogsCard {
-                background-color: #111C32;
-                border: 1px solid #2A3A5A;
-                border-radius: 12px;
-            }
-            QLabel#ingestionTitle {
-                color: #EAF1FF;
-                letter-spacing: 0.4px;
-            }
-            QLabel#ingestionSubtitle {
-                color: #A8B7D6;
-            }
-            QLabel#statusChip {
-                padding: 4px 10px;
-                border-radius: 10px;
-                font-weight: 600;
-                color: #F8FBFF;
-                background-color: #41577D;
-            }
-            QLabel#statusChip[pulse="true"] {
-                border: 1px solid #8FB9FF;
-                padding: 3px 9px;
-            }
-            QLabel#statusChip[state="running"] {
-                background-color: #D98F2B;
-            }
-            QLabel#statusChip[state="success"] {
-                background-color: #1FA971;
-            }
-            QLabel#statusChip[state="error"] {
-                background-color: #C93A4B;
-            }
-            QLineEdit, QComboBox, QTextEdit {
-                background-color: #0E1A2F;
-                color: #EAF1FF;
-                border: 1px solid #2A3A5A;
-                border-radius: 8px;
-                padding: 7px;
-            }
-            QLineEdit:focus, QComboBox:focus, QTextEdit:focus {
-                border: 1px solid #5EA0FF;
-                background-color: #10213B;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                width: 0;
-                height: 0;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid #A8B7D6;
-                margin-right: 8px;
-            }
+            """
+            + BASE_INPUT_STYLES_WITH_TEXTEDIT
+            + """
             QProgressBar {
                 border: 1px solid #2A3A5A;
                 border-radius: 8px;
@@ -213,24 +219,9 @@ class IngestionView(QWidget):
                 background-color: #2F7BFF;
                 border-radius: 6px;
             }
-            QPushButton {
-                background-color: #2F7BFF;
-                color: #F8FBFF;
-                border: none;
-                border-radius: 8px;
-                padding: 9px;
-                font-weight: 700;
-            }
-            QPushButton:hover {
-                background-color: #4A91FF;
-            }
-            QPushButton[flash="true"] {
-                background-color: #6AA7FF;
-            }
-            QPushButton:disabled {
-                background-color: #344561;
-                color: #90A2C3;
-            }
+            """
+            + BASE_BUTTON_STYLES
+            + """
             QPushButton#dangerButton,
             QPushButton[variant="danger"] {
                 background-color: #B53343;
@@ -245,6 +236,11 @@ class IngestionView(QWidget):
             }
             """
         )
+
+        self.embedding_provider.currentTextChanged.connect(
+            self._on_embedding_provider_changed
+        )
+        self._on_embedding_provider_changed(self.embedding_provider.currentText())
 
     def set_status(self, state: str, text: str) -> None:
         """Actualiza el estado del chip y el texto."""
@@ -298,6 +294,9 @@ class IngestionView(QWidget):
     def set_running(self, running: bool) -> None:
         """Habilite o deshabilite los controles de formulario según la ejecución de la ingesta."""
         self.provider.setDisabled(running)
+        self.embedding_provider.setDisabled(running)
+        self.embedding_model.setDisabled(running)
+        self.refresh_embedding_models_button.setDisabled(running)
         self.repo_url.setDisabled(running)
         self.token.setDisabled(running)
         self.branch.setDisabled(running)
@@ -308,6 +307,9 @@ class IngestionView(QWidget):
     def set_reset_running(self, running: bool) -> None:
         """Actualice la interfaz de usuario mientras se ejecuta la operación de reinicio completo."""
         self.provider.setDisabled(running)
+        self.embedding_provider.setDisabled(running)
+        self.embedding_model.setDisabled(running)
+        self.refresh_embedding_models_button.setDisabled(running)
         self.repo_url.setDisabled(running)
         self.token.setDisabled(running)
         self.branch.setDisabled(running)
@@ -325,3 +327,89 @@ class IngestionView(QWidget):
             return
         current = self.logs.toPlainText()
         self.logs.setPlainText(f"{current}\n{text}".strip())
+
+    def _on_embedding_provider_changed(self, provider: str) -> None:
+        """Autocompleta modelo de embeddings y muestra estado de capabilities."""
+        self._refresh_embedding_models(force_refresh=False, provider=provider)
+
+    def _refresh_embedding_models(
+        self,
+        *,
+        force_refresh: bool,
+        provider: str | None = None,
+    ) -> None:
+        """Recarga catálogo de embeddings desde API y aplica fallback local."""
+        selected_provider = (provider or self.embedding_provider.currentText()).strip()
+        settings = get_settings()
+        state = resolve_embedding_ui_state(
+            settings,
+            selected_provider,
+            context="ingestion",
+        )
+        current_model = self.embedding_model.currentText().strip()
+        if provider is not None:
+            preferred_model = state.default_model
+        else:
+            preferred_model = current_model or state.default_model
+        catalog = fetch_models_for_provider(
+            selected_provider,
+            "embedding",
+            force_refresh=force_refresh,
+        )
+        self._set_combo_items(
+            self.embedding_model,
+            catalog.models,
+            preferred_model,
+        )
+
+        warning_parts: list[str] = []
+        if state.warning:
+            warning_parts.append(state.warning)
+        if (
+            catalog.source == "fallback"
+            and catalog.warning
+            and catalog.warning != "catalog_service_unavailable"
+        ):
+            warning_parts.append(
+                "No se pudo actualizar el catálogo remoto; usando lista local."
+            )
+        self.embedding_warning.setText(" ".join(warning_parts).strip())
+        apply_status_chip(self.embedding_status_chip, state.chip_state, state.chip_text)
+
+    @staticmethod
+    def _set_combo_items(combo: QComboBox, options: list[str], selected: str) -> None:
+        """Recarga opciones del combo preservando una selección válida."""
+        chosen = selected.strip() if selected else ""
+        values = [item.strip() for item in options if item.strip()]
+        if chosen and chosen not in values:
+            values.append(chosen)
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(values)
+        if chosen:
+            combo.setCurrentText(chosen)
+        elif values:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+
+    def is_force_fallback_enabled(self) -> bool:
+        """Indica si el usuario decidió forzar fallback para ingesta."""
+        return self.force_fallback.isChecked()
+
+    def is_embedding_provider_ready(self) -> tuple[bool, str]:
+        """Evalúa si el provider de embeddings está listo para ingesta."""
+        settings = get_settings()
+        state = resolve_embedding_ui_state(
+            settings,
+            self.embedding_provider.currentText(),
+            context="ingestion",
+        )
+        return state.ready, state.reason
+
+    def set_ingest_action_hint(self, text: str) -> None:
+        """Actualiza el mensaje inline asociado al botón de ingesta."""
+        self.ingest_action_hint.setText(text.strip())
+
+    def get_embedding_model(self) -> str:
+        """Devuelve el modelo de embeddings actual para payload de ingesta."""
+        return self.embedding_model.currentText().strip()

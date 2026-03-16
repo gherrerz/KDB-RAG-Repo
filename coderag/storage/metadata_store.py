@@ -2,6 +2,7 @@
 
 import sqlite3
 from pathlib import Path
+from datetime import datetime
 
 from coderag.core.models import JobInfo, JobStatus
 
@@ -45,9 +46,32 @@ class MetadataStore:
                     url TEXT NOT NULL,
                     branch TEXT NOT NULL,
                     local_path TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT,
+                    embedding_provider TEXT,
+                    embedding_model TEXT
                 )
                 """
+            )
+            self._ensure_repo_runtime_columns(connection)
+
+    @staticmethod
+    def _ensure_repo_runtime_columns(connection: sqlite3.Connection) -> None:
+        """Garantiza columnas runtime en repos para bases existentes."""
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(repos)").fetchall()
+        }
+        required_columns = {
+            "updated_at": "TEXT",
+            "embedding_provider": "TEXT",
+            "embedding_model": "TEXT",
+        }
+        for column_name, column_type in required_columns.items():
+            if column_name in columns:
+                continue
+            connection.execute(
+                f"ALTER TABLE repos ADD COLUMN {column_name} {column_type}"
             )
 
     def upsert_job(self, job: JobInfo) -> None:
@@ -107,3 +131,60 @@ class MetadataStore:
                 """
             ).fetchall()
         return [str(row["repo_id"]) for row in rows if row["repo_id"]]
+
+    def upsert_repo_runtime(
+        self,
+        *,
+        repo_id: str,
+        repo_url: str,
+        branch: str,
+        local_path: str,
+        embedding_provider: str | None,
+        embedding_model: str | None,
+    ) -> None:
+        """Inserta o actualiza metadata runtime por repositorio."""
+        now = datetime.utcnow().isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO repos (
+                    id, url, branch, local_path, created_at,
+                    updated_at, embedding_provider, embedding_model
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    url=excluded.url,
+                    branch=excluded.branch,
+                    local_path=excluded.local_path,
+                    updated_at=excluded.updated_at,
+                    embedding_provider=excluded.embedding_provider,
+                    embedding_model=excluded.embedding_model
+                """,
+                (
+                    repo_id,
+                    repo_url,
+                    branch,
+                    local_path,
+                    now,
+                    now,
+                    embedding_provider,
+                    embedding_model,
+                ),
+            )
+
+    def get_repo_runtime(self, repo_id: str) -> dict[str, str | None] | None:
+        """Obtiene metadata runtime almacenada para un repositorio."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT embedding_provider, embedding_model
+                FROM repos
+                WHERE id = ?
+                """,
+                (repo_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "last_embedding_provider": row["embedding_provider"],
+            "last_embedding_model": row["embedding_model"],
+        }

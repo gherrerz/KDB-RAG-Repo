@@ -49,9 +49,18 @@ def _query_collection(
     return collection_name, result
 
 
-def hybrid_search(repo_id: str, query: str, top_n: int = 50) -> list[RetrievalChunk]:
+def hybrid_search(
+    repo_id: str,
+    query: str,
+    top_n: int = 50,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+) -> list[RetrievalChunk]:
     """Busque datos de repositorios indexados con vector y fusión BM25."""
-    embedder = EmbeddingClient()
+    embedder = EmbeddingClient(
+        provider=embedding_provider,
+        model=embedding_model,
+    )
     normalized_query = _normalize_query(query)
     vector_results: list[dict] = []
     query_embedding: list[float] | None = None

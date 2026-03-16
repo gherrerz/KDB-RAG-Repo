@@ -75,7 +75,11 @@ def test_ingest_repository_continues_on_graph_failure(
         "extract_symbol_chunks",
         lambda repo_id, scanned_files: symbols,
     )
-    monkeypatch.setattr(pipeline, "_index_vectors", lambda repo_id, s, c: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_index_vectors",
+        lambda repo_id, s, c, **kwargs: None,
+    )
     monkeypatch.setattr(
         pipeline,
         "_index_bm25",

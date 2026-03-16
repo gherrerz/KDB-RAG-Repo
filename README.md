@@ -191,9 +191,16 @@ flowchart TB
 
 Variables relevantes en `.env`:
 
+- `LLM_PROVIDER`: proveedor para answer/verifier (`openai`, `anthropic`, `gemini`, `vertex_ai`).
+- `LLM_ANSWER_MODEL`, `LLM_VERIFIER_MODEL`: modelos LLM por defecto.
+- `LLM_VERIFY_ENABLED`: habilita/deshabilita verificación LLM posterior a la respuesta.
+- `EMBEDDING_PROVIDER`: proveedor de embeddings (`openai`, `anthropic`, `gemini`, `vertex_ai`).
+- `EMBEDDING_MODEL`: modelo de embeddings por defecto.
+- `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `VERTEX_AI_API_KEY`.
+- `VERTEX_AI_PROJECT_ID`, `VERTEX_AI_LOCATION`.
 - `OPENAI_API_KEY`: clave API de OpenAI.
 - `OPENAI_EMBEDDING_MODEL`, `OPENAI_ANSWER_MODEL`, `OPENAI_VERIFIER_MODEL`.
-- `OPENAI_VERIFY_ENABLED`: habilita/deshabilita la etapa de verificación LLM posterior a la respuesta.
+- `OPENAI_VERIFY_ENABLED`: compatibilidad heredada para verificación (fallback).
 - `CHROMA_PATH`: ruta persistente de Chroma.
 - `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`.
 - `REDIS_URL` (opcional/futuro): endpoint para cola de jobs distribuida.
@@ -222,6 +229,80 @@ SCAN_EXCLUDED_FILES=.gitignore,.env
 ```
 
 Si falta alguna, la ingesta falla al iniciar con error de configuración.
+
+### Compatibilidad multi-provider
+
+- La UI permite elegir provider/modelo por operación para ingesta y consulta.
+- La API mantiene los mismos endpoints (`/repos/ingest`, `/query`) y acepta campos opcionales nuevos.
+- Si no se envían campos nuevos, el comportamiento permanece igual (OpenAI + variables `OPENAI_*`).
+- Para `vertex_ai`, `VERTEX_AI_API_KEY` debe contener un token OAuth Bearer válido y
+   requiere `VERTEX_AI_PROJECT_ID` para habilitar llamadas reales a Vertex.
+- La UI autocompleta modelos sugeridos al cambiar provider y muestra advertencias
+   cuando un provider no está soportado o no está configurado en el entorno.
+- La UI muestra chips de estado por provider con indicador visual de readiness
+   (`Listo` o `No listo`) para embeddings y LLM.
+- La UI aplica bloqueo preventivo antes de ejecutar Ingestar/Consultar cuando el
+   provider seleccionado no está listo. Puedes continuar activando la opción
+   "Forzar fallback" en el panel correspondiente.
+- Además del bloqueo al intentar ejecutar, los botones `Ingestar` y `Consultar`
+   se deshabilitan dinámicamente con tooltip contextual cuando falta readiness.
+- En Fase 3.1 se agrega mensaje inline bajo cada botón de acción para mostrar
+   el motivo de bloqueo sin depender del hover del mouse.
+- En Fase 3.2 se unifica la lógica de warnings/chips de readiness en un helper
+   compartido (`coderag/ui/provider_feedback.py`) para reducir duplicación.
+- En Fase 3.3 se centraliza el catálogo de modelos por defecto por provider en
+   `coderag/ui/provider_defaults.py`, utilizado por Ingesta y Consulta.
+- En Fase 3.4 se centralizan warnings, tooltips y hints operativos en
+   `coderag/ui/provider_messages.py` para facilitar ajustes de UX e i18n.
+- En Fase 3.5 se agrega `coderag/ui/provider_capabilities.py` con TypedDict
+   y normalizadores para capacidades, reduciendo checks defensivos duplicados.
+- En Fase 3.6 se extrae la lógica de habilitación de acciones a
+   `coderag/ui/provider_action_state.py`, dejando `main_window.py` más simple
+   y con decisiones testeables de forma pura.
+- En Fase 3.7 se consolidan estilos repetidos de warnings/chips/hints en
+   `coderag/ui/provider_styles.py`, reutilizados por Ingesta y Consulta.
+- En Fase 3.8 se consolidan estilos base de inputs y botones en
+   `coderag/ui/base_styles.py`, reduciendo duplicación sin cambiar la estética.
+- En Fase 3.9 se consolidan estilos estructurales de cards, top-bar y chips de
+   estado en `coderag/ui/card_styles.py`, reutilizados por Ingesta y Consulta.
+- En Fase 4.0 se extrae la resolución de defaults/readiness/warnings/chips de
+   providers a `coderag/ui/provider_ui_state.py`, reduciendo duplicación entre
+   `ingestion_view.py` y `query_view.py` con lógica testeable y pura.
+- En Fase 4.1 se encapsula en `main_window.py` la conexión de señales de
+   disponibilidad y la aplicación de estado de acciones (ingesta/consulta),
+   reduciendo repetición y centralizando el cierre de polling de jobs.
+- En Fase 4.2 se extraen las precondiciones locales de consulta a
+   `coderag/ui/query_preconditions.py` y se centraliza el render de errores de
+   query en un helper de `main_window.py`, simplificando el flujo sin cambios
+   de comportamiento.
+- En Fase 4.3 se extrae el formateo de respuesta/diagnóstico de consulta y el
+   mensaje de "repo no listo" a `coderag/ui/query_response_formatter.py`,
+   reduciendo lógica inline en `main_window.py` y mejorando testabilidad.
+- En Fase 4.4 se consolidan helpers internos del cliente LLM en
+   `coderag/llm/openai_client.py` (timeout/model path/extracción de texto REST),
+   reduciendo duplicación entre Anthropic/Gemini/Vertex sin cambios funcionales.
+- En Fase 4.5 se consolidan helpers REST de embeddings en
+   `coderag/ingestion/embedding.py` (timeout/model path/parser de respuestas),
+   reduciendo duplicación entre Gemini/Vertex y manteniendo compatibilidad.
+- En Fase 4.6 se extrae la construcción de `diagnostics` de consultas a
+   `coderag/api/query_diagnostics.py`, simplificando `query_service.py` y
+   preservando el mismo contrato de respuesta (incluyendo `inventory_route` y
+   `llm_error` condicional).
+- En Fase 4.7 se consolidan helpers de construcción de payload `generateContent`
+   y normalización de modelo Vertex en `coderag/llm/openai_client.py`,
+   reduciendo duplicación entre Gemini/Vertex sin cambios funcionales.
+- En Fase 4.8 se extrae la construcción de `diagnostics` de inventario a
+   `coderag/api/query_diagnostics.py`, simplificando `run_inventory_query` en
+   `query_service.py` y conservando el contrato de respuesta.
+- En Fase 4.9 se consolida el filtrado de rutas ruidosas y la construcción de
+   citas de inventario en `coderag/api/citation_filters.py`, reduciendo lógica
+   inline duplicada en `query_service.py`.
+- En Fase 5.0 se endurece el contrato de diagnostics de inventario para incluir
+   `total_ms` también en retornos tempranos (sin target detectado), mejorando
+   observabilidad y consistencia de telemetría.
+- En Fase 5.1 se persiste metadata runtime por repo de la última ingesta
+   (`last_embedding_provider`, `last_embedding_model`) y se expone en
+   `GET /repos/{repo_id}/status` para observabilidad de compatibilidad.
 
 > Nota: en esta configuración se recomienda `NEO4J_URI=bolt://127.0.0.1:17687`
 para evitar conflictos de puertos locales comunes.

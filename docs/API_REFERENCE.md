@@ -38,6 +38,8 @@ Este documento es la fuente de verdad de la API HTTP de Coderag.
 | token | str \| null | no | `null` | Token para repos privados. |
 | branch | str | no | `main` | Rama objetivo de ingesta. |
 | commit | str \| null | no | `null` | Commit puntual opcional. |
+| embedding_provider | str \| null | no | `null` | Provider de embeddings por operación (`openai`, `anthropic`, `gemini`, `vertex_ai`). |
+| embedding_model | str \| null | no | `null` | Modelo de embeddings por operación. |
 
 ## JobInfo
 
@@ -60,6 +62,11 @@ Este documento es la fuente de verdad de la API HTTP de Coderag.
 | query | str | si | N/A | Pregunta en lenguaje natural. |
 | top_n | int | no | `60` | Candidatos de retrieval inicial. |
 | top_k | int | no | `15` | Resultados tras reranking. |
+| embedding_provider | str \| null | no | `null` | Provider para embedding de la query (`openai`, `anthropic`, `gemini`, `vertex_ai`). |
+| embedding_model | str \| null | no | `null` | Modelo para embedding de la query. |
+| llm_provider | str \| null | no | `null` | Provider LLM por operación (`openai`, `anthropic`, `gemini`, `vertex_ai`). |
+| answer_model | str \| null | no | `null` | Modelo answer por operación. |
+| verifier_model | str \| null | no | `null` | Modelo verifier por operación. |
 
 ## Citation
 
@@ -128,6 +135,8 @@ Este documento es la fuente de verdad de la API HTTP de Coderag.
 | chroma_counts | dict[str, int \| null] | no | `{}` | Conteo por coleccion (`code_symbols`, `code_files`, `code_modules`). |
 | bm25_loaded | bool | si | N/A | Si BM25 esta cargado en memoria. |
 | graph_available | bool \| null | no | `null` | Disponibilidad de nodos en Neo4j para ese repo. |
+| last_embedding_provider | str \| null | no | `null` | Provider de embedding usado en la ultima ingesta conocida. |
+| last_embedding_model | str \| null | no | `null` | Modelo de embedding usado en la ultima ingesta conocida. |
 | warnings | list[str] | no | `[]` | Advertencias operativas. |
 
 ## StorageHealthItem
@@ -241,7 +250,8 @@ Campos frecuentes:
 - `raw_citations`, `filtered_citations`, `returned_citations`.
 - `low_signal_retrieval`: true cuando `retrieved < 3`.
 - `context_sufficient`: validacion minima de contexto.
-- `openai_enabled`, `openai_verify_enabled`.
+- `llm_enabled`, `llm_provider`, `llm_answer_model`, `llm_verifier_model`, `llm_verify_enabled`.
+- `llm_capabilities`, `embedding_provider`, `embedding_model`, `embedding_capabilities`.
 - `discovered_modules`: modulos detectados por heuristica.
 - `inventory_intent`: si la consulta parecia de inventario.
 - `inventory_route`: `graph_first` o `fallback_to_general` segun routing.

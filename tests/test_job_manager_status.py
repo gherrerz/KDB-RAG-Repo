@@ -36,7 +36,7 @@ def test_job_manager_marks_partial_when_repo_not_query_ready(
     monkeypatch.setattr(
         pipeline_module,
         "ingest_repository",
-        lambda repo_url, branch, commit, logger: "repo-demo",
+        lambda repo_url, branch, commit, logger, **kwargs: "repo-demo",
     )
     monkeypatch.setattr(
         health_module,
@@ -95,7 +95,7 @@ def test_job_manager_marks_completed_when_repo_query_ready(
     monkeypatch.setattr(
         pipeline_module,
         "ingest_repository",
-        lambda repo_url, branch, commit, logger: "repo-ready",
+        lambda repo_url, branch, commit, logger, **kwargs: "repo-ready",
     )
     monkeypatch.setattr(
         health_module,
@@ -119,3 +119,8 @@ def test_job_manager_marks_completed_when_repo_query_ready(
     job = manager.get_job(created.id)
     assert job is not None
     assert job.status == JobStatus.completed
+
+    runtime = manager.get_repo_runtime("repo-ready")
+    assert runtime is not None
+    assert runtime["last_embedding_provider"] is None
+    assert runtime["last_embedding_model"] is None

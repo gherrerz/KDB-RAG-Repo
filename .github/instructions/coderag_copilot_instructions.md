@@ -4,7 +4,7 @@
 
 Este documento define **las instrucciones completas** para que un agente
 de IA construya un sistema **RAG para análisis de repositorios de
-código** con Python, OpenAI, ChromaDB y Neo4j.
+código** con Python, ChromaDB, Neo4j, modelos de LLM con OpenAI, Anthropic, Gemini de Google y Vertex AI de Google
 
 El sistema final debe permitir: 1. **Ingestar repositorios de GitHub o
 Bitbucket** 2. Construir un **RAG híbrido (vector + BM25 + grafo)** 3.
@@ -23,7 +23,7 @@ que permita:
 -   Conectar con GitHub o Bitbucket
 -   Clonar repositorios
 -   Analizar código fuente
--   Generar embeddings
+-   Generar embeddings con modelo de de OpenAI o Anthropic o Gemini de Google o Vertex AI de Google
 -   Construir un grafo de conocimiento del código
 
 ### Consulta
@@ -31,7 +31,7 @@ que permita:
 -   Permitir preguntas en lenguaje natural
 -   Recuperar contexto con **Hybrid RAG**
 -   Expandir información usando **GraphRAG**
--   Responder con LLMs de OpenAI
+-   Responder con LLMs de OpenAI o Anthropic o Gemini de Google o Vertex AI de Google
 -   Mostrar evidencias (archivo + líneas)
 
 ------------------------------------------------------------------------

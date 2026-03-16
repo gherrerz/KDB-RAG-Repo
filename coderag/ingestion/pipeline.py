@@ -64,6 +64,8 @@ def ingest_repository(
     branch: str,
     commit: str | None,
     logger: LoggerFn,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
 ) -> str:
     """Ejecute la ingesta completa del repositorio y devuelva el identificador del repositorio."""
     settings = get_settings()
@@ -109,7 +111,13 @@ def ingest_repository(
     )
 
     logger("Generando embeddings...")
-    _index_vectors(repo_id, scanned_files, symbol_chunks)
+    _index_vectors(
+        repo_id,
+        scanned_files,
+        symbol_chunks,
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+    )
 
     logger("Construyendo BM25...")
     _index_bm25(repo_id, scanned_files, symbol_chunks)
@@ -128,10 +136,15 @@ def _index_vectors(
     repo_id: str,
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
 ) -> None:
     """Generar y conservar vectores para símbolos/archivos/módulos."""
     chroma = ChromaIndex()
-    embedder = EmbeddingClient()
+    embedder = EmbeddingClient(
+        provider=embedding_provider,
+        model=embedding_model,
+    )
 
     symbol_texts = [chunk.snippet for chunk in symbols]
     symbol_embeddings = embedder.embed_texts(symbol_texts)

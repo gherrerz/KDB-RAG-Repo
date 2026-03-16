@@ -1,15 +1,16 @@
 """Pruebas para filtrado y priorización de la calidad de las citas."""
 
-from coderag.api.query_service import _citation_priority, _is_noisy_path
+from coderag.api.citation_filters import is_noisy_path
+from coderag.api.query_service import _citation_priority
 from coderag.core.models import Citation
 
 
 def test_is_noisy_path_filters_non_informative_paths() -> None:
     """Marks known noisy pseudo-paths as non-informative."""
-    assert _is_noisy_path(".")
-    assert _is_noisy_path("document")
-    assert _is_noisy_path("document/reference/file.md")
-    assert not _is_noisy_path("services/api/index.ts")
+    assert is_noisy_path(".")
+    assert is_noisy_path("document")
+    assert is_noisy_path("document/reference/file.md")
+    assert not is_noisy_path("services/api/index.ts")
 
 
 def test_citation_priority_prefers_code_files_and_structured_paths() -> None:

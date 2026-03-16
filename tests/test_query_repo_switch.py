@@ -117,5 +117,6 @@ def test_sync_job_ui_partial_unlocks_query_controls(window: MainWindow) -> None:
 
     assert window._job_poll_enabled is False
     assert window._active_job_id is None
-    assert window.query_view.query_button.isEnabled() is True
+    assert window.query_view.query_input.isEnabled() is True
+    assert window.query_view.repo_id.isEnabled() is True
     assert window.ingestion_view.status_chip.text() == "Parcial"

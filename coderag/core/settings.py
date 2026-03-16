@@ -2,9 +2,13 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+ProviderName = Literal["openai", "anthropic", "gemini", "vertex_ai"]
 
 
 class Settings(BaseSettings):
@@ -29,6 +33,21 @@ class Settings(BaseSettings):
         default=True,
         alias="OPENAI_VERIFY_ENABLED",
     )
+    llm_provider: ProviderName = Field(default="openai", alias="LLM_PROVIDER")
+    llm_answer_model: str = Field(default="", alias="LLM_ANSWER_MODEL")
+    llm_verifier_model: str = Field(default="", alias="LLM_VERIFIER_MODEL")
+    llm_verify_enabled: bool = Field(default=True, alias="LLM_VERIFY_ENABLED")
+    embedding_provider: ProviderName = Field(
+        default="openai",
+        alias="EMBEDDING_PROVIDER",
+    )
+    embedding_model: str = Field(default="", alias="EMBEDDING_MODEL")
+
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    vertex_ai_api_key: str = Field(default="", alias="VERTEX_AI_API_KEY")
+    vertex_ai_project_id: str = Field(default="", alias="VERTEX_AI_PROJECT_ID")
+    vertex_ai_location: str = Field(default="us-central1", alias="VERTEX_AI_LOCATION")
     chroma_path: Path = Field(default=Path("./storage/chroma"), alias="CHROMA_PATH")
     neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")
     neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
@@ -77,6 +96,161 @@ class Settings(BaseSettings):
     )
     health_check_openai: bool = Field(default=True, alias="HEALTH_CHECK_OPENAI")
     health_check_redis: bool = Field(default=False, alias="HEALTH_CHECK_REDIS")
+    discovery_timeout_seconds: float = Field(
+        default=8.0,
+        alias="MODEL_DISCOVERY_TIMEOUT_SECONDS",
+    )
+    discovery_cache_ttl_seconds: int = Field(
+        default=3600,
+        alias="MODEL_DISCOVERY_CACHE_TTL_SECONDS",
+    )
+    discovery_max_results: int = Field(
+        default=80,
+        alias="MODEL_DISCOVERY_MAX_RESULTS",
+    )
+    discovery_gemini_sdk_enabled: bool = Field(
+        default=True,
+        alias="MODEL_DISCOVERY_GEMINI_SDK_ENABLED",
+    )
+
+    def resolve_embedding_provider(self, override: str | None = None) -> ProviderName:
+        """Resuelve el proveedor de embeddings con prioridad override > env."""
+        provider = (override or self.embedding_provider or "openai").strip().lower()
+        if provider in {"openai", "anthropic", "gemini", "vertex_ai"}:
+            return provider  # type: ignore[return-value]
+        return "openai"
+
+    def resolve_embedding_model(self, provider: ProviderName, override: str | None = None) -> str:
+        """Resuelve el modelo de embeddings manteniendo fallback legado OpenAI."""
+        if override and override.strip():
+            return override.strip()
+        if self.embedding_model.strip():
+            return self.embedding_model.strip()
+        if provider == "gemini":
+            return "text-embedding-004"
+        if provider == "vertex_ai":
+            return "text-embedding-005"
+        return self.openai_embedding_model
+
+    def resolve_llm_provider(self, override: str | None = None) -> ProviderName:
+        """Resuelve el proveedor LLM con prioridad override > env."""
+        provider = (override or self.llm_provider or "openai").strip().lower()
+        if provider in {"openai", "anthropic", "gemini", "vertex_ai"}:
+            return provider  # type: ignore[return-value]
+        return "openai"
+
+    def resolve_answer_model(self, provider: ProviderName, override: str | None = None) -> str:
+        """Resuelve el modelo answer con fallback a configuración actual."""
+        if override and override.strip():
+            return override.strip()
+        if self.llm_answer_model.strip():
+            return self.llm_answer_model.strip()
+        if provider == "anthropic":
+            return "claude-3-5-sonnet-20241022"
+        if provider == "gemini":
+            return "gemini-2.0-flash"
+        if provider == "vertex_ai":
+            return "gemini-2.0-flash"
+        return self.openai_answer_model
+
+    def resolve_verifier_model(self, provider: ProviderName, override: str | None = None) -> str:
+        """Resuelve el modelo verifier con fallback a configuración actual."""
+        if override and override.strip():
+            return override.strip()
+        if self.llm_verifier_model.strip():
+            return self.llm_verifier_model.strip()
+        if provider == "anthropic":
+            return "claude-3-5-sonnet-20241022"
+        if provider == "gemini":
+            return "gemini-2.0-flash"
+        if provider == "vertex_ai":
+            return "gemini-2.0-flash"
+        return self.openai_verifier_model
+
+    def resolve_api_key(self, provider: ProviderName) -> str:
+        """Obtiene la API key efectiva por proveedor con fallback legacy."""
+        if provider == "anthropic":
+            return self.anthropic_api_key
+        if provider == "gemini":
+            return self.gemini_api_key
+        if provider == "vertex_ai":
+            return self.vertex_ai_api_key
+        return self.openai_api_key
+
+    def is_vertex_ai_configured(self) -> bool:
+        """Valida si Vertex AI tiene credenciales y proyecto mínimos."""
+        return bool(self.vertex_ai_api_key and self.vertex_ai_project_id)
+
+    def embedding_provider_capabilities(self, provider: ProviderName) -> dict[str, str | bool]:
+        """Devuelve capacidades/configuración del provider de embeddings."""
+        if provider == "openai":
+            configured = bool(self.openai_api_key)
+            reason = "ok" if configured else "missing_openai_api_key"
+            return {"provider": provider, "supported": True, "configured": configured, "reason": reason}
+        if provider == "gemini":
+            configured = bool(self.gemini_api_key)
+            reason = "ok" if configured else "missing_gemini_api_key"
+            return {"provider": provider, "supported": True, "configured": configured, "reason": reason}
+        if provider == "vertex_ai":
+            configured = self.is_vertex_ai_configured()
+            reason = "ok" if configured else "missing_vertex_ai_api_key_or_project"
+            return {"provider": provider, "supported": True, "configured": configured, "reason": reason}
+        return {
+            "provider": provider,
+            "supported": False,
+            "configured": False,
+            "reason": "provider_without_embedding_backend",
+        }
+
+    def llm_provider_capabilities(self, provider: ProviderName) -> dict[str, str | bool]:
+        """Devuelve capacidades/configuración del provider LLM."""
+        if provider == "openai":
+            configured = bool(self.openai_api_key)
+            reason = "ok" if configured else "missing_openai_api_key"
+            return {
+                "provider": provider,
+                "supported": True,
+                "configured": configured,
+                "answer": True,
+                "verify": True,
+                "reason": reason,
+            }
+        if provider == "anthropic":
+            configured = bool(self.anthropic_api_key)
+            reason = "ok" if configured else "missing_anthropic_api_key"
+            return {
+                "provider": provider,
+                "supported": True,
+                "configured": configured,
+                "answer": True,
+                "verify": True,
+                "reason": reason,
+            }
+        if provider == "gemini":
+            configured = bool(self.gemini_api_key)
+            reason = "ok" if configured else "missing_gemini_api_key"
+            return {
+                "provider": provider,
+                "supported": True,
+                "configured": configured,
+                "answer": True,
+                "verify": True,
+                "reason": reason,
+            }
+        configured = self.is_vertex_ai_configured()
+        reason = "ok" if configured else "missing_vertex_ai_api_key_or_project"
+        return {
+            "provider": provider,
+            "supported": True,
+            "configured": configured,
+            "answer": True,
+            "verify": True,
+            "reason": reason,
+        }
+
+    def is_verify_enabled(self) -> bool:
+        """Devuelve si la verificación LLM está habilitada."""
+        return bool(self.llm_verify_enabled and self.openai_verify_enabled)
 
 
 @lru_cache(maxsize=1)

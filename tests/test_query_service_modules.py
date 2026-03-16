@@ -436,7 +436,13 @@ def test_run_query_inventory_without_target_falls_back_to_general(
 ) -> None:
     """Mantiene la ruta general de control de calidad cuando la intención del inventario no tiene un objetivo extraíble."""
 
-    def _fake_hybrid(repo_id: str, query: str, top_n: int) -> list[RetrievalChunk]:
+    def _fake_hybrid(
+        repo_id: str,
+        query: str,
+        top_n: int,
+        **kwargs,
+    ) -> list[RetrievalChunk]:
+        _ = kwargs
         return [
             RetrievalChunk(
                 id="c1",
@@ -452,6 +458,12 @@ def test_run_query_inventory_without_target_falls_back_to_general(
     monkeypatch.setattr(query_service, "assemble_context", lambda chunks, graph_records, max_tokens: "ctx")
 
     class _AnswerClient:
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+            self.provider = "openai"
+            self.answer_model = "gpt-test"
+            self.verifier_model = "gpt-test"
+
         enabled = False
 
     monkeypatch.setattr(query_service, "AnswerClient", _AnswerClient)
@@ -558,7 +570,13 @@ def test_run_query_retries_with_raw_citations_if_filtered_empty(
 ) -> None:
     """Si el filtrado elimina todo, reutiliza citas crudas para evitar fallback vacío."""
 
-    def _fake_hybrid(repo_id: str, query: str, top_n: int) -> list[RetrievalChunk]:
+    def _fake_hybrid(
+        repo_id: str,
+        query: str,
+        top_n: int,
+        **kwargs,
+    ) -> list[RetrievalChunk]:
+        _ = kwargs
         return [
             RetrievalChunk(
                 id="c1",
@@ -578,6 +596,12 @@ def test_run_query_retries_with_raw_citations_if_filtered_empty(
     )
 
     class _AnswerClient:
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+            self.provider = "openai"
+            self.answer_model = "gpt-test"
+            self.verifier_model = "gpt-test"
+
         enabled = False
 
     monkeypatch.setattr(query_service, "AnswerClient", _AnswerClient)
@@ -600,7 +624,13 @@ def test_run_query_uses_insufficient_context_fallback_reason(
 ) -> None:
     """Evita generación LLM cuando el contexto es insuficiente y deja razón diagnóstica."""
 
-    def _fake_hybrid(repo_id: str, query: str, top_n: int) -> list[RetrievalChunk]:
+    def _fake_hybrid(
+        repo_id: str,
+        query: str,
+        top_n: int,
+        **kwargs,
+    ) -> list[RetrievalChunk]:
+        _ = kwargs
         return [
             RetrievalChunk(
                 id="c1",
@@ -616,6 +646,12 @@ def test_run_query_uses_insufficient_context_fallback_reason(
     monkeypatch.setattr(query_service, "assemble_context", lambda *args, **kwargs: "x")
 
     class _AnswerClient:
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+            self.provider = "openai"
+            self.answer_model = "gpt-test"
+            self.verifier_model = "gpt-test"
+
         enabled = True
 
         def answer(self, *args, **kwargs):  # pragma: no cover - no debería ejecutarse
@@ -635,3 +671,35 @@ def test_run_query_uses_insufficient_context_fallback_reason(
 
     assert result.diagnostics["context_sufficient"] is False
     assert result.diagnostics["fallback_reason"] == "insufficient_context"
+
+
+def test_run_inventory_query_missing_target_includes_total_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incluye total_ms en diagnostics incluso cuando falta target de inventario."""
+    monkeypatch.setattr(query_service, "_is_inventory_query", lambda query: True)
+    monkeypatch.setattr(query_service, "_extract_inventory_target", lambda query: None)
+    monkeypatch.setattr(
+        query_service,
+        "_is_inventory_explain_query",
+        lambda query: False,
+    )
+    monkeypatch.setattr(query_service, "_extract_module_name", lambda query: None)
+    monkeypatch.setattr(
+        query_service,
+        "_resolve_module_scope",
+        lambda repo_id, module_name: None,
+    )
+
+    result = query_service.run_inventory_query(
+        repo_id="repo1",
+        query="inventario sin objetivo",
+        page=1,
+        page_size=50,
+    )
+
+    assert result.diagnostics["fallback_reason"] == "inventory_target_missing"
+    timings = result.diagnostics["stage_timings_ms"]
+    assert "parse_ms" in timings
+    assert "total_ms" in timings
+    assert timings["total_ms"] >= 0
