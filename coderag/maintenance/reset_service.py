@@ -14,7 +14,7 @@ from chromadb.config import Settings as ChromaSettings
 from coderag.core.settings import get_settings
 from coderag.ingestion.graph_builder import GraphBuilder
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
-from coderag.ingestion.index_chroma import COLLECTIONS
+from coderag.ingestion.index_chroma import COLLECTIONS, ChromaIndex
 
 
 def _on_remove_error(func, path: str, exc_info) -> None:
@@ -66,6 +66,8 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
     cleared: list[str] = []
     warnings: list[str] = []
 
+    ChromaIndex.reset_shared_state()
+
     GLOBAL_BM25.clear()
     cleared.append("BM25 en memoria")
 
@@ -100,6 +102,8 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
         except Exception:
             pass
         gc.collect()
+
+    ChromaIndex.reset_shared_state()
 
     try:
         _compact_chroma_sqlite(settings.chroma_path)

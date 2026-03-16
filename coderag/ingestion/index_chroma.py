@@ -2,6 +2,7 @@
 
 from threading import Lock
 from typing import Any
+import gc
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -26,6 +27,12 @@ def _is_dimension_mismatch_error(exc: Exception) -> bool:
     return "embedding dimension" in message and "collection" in message
 
 
+def _is_missing_collection_error(exc: Exception) -> bool:
+    """Detecta errores de colección no encontrada emitidos por Chroma."""
+    message = str(exc).lower()
+    return "collection" in message and "does not exist" in message
+
+
 class ChromaIndex:
     """Abstracción sobre colecciones persistentes de Chroma."""
 
@@ -33,6 +40,15 @@ class ChromaIndex:
     _shared_collections: dict[str, Any] | None = None
     _shared_path: str | None = None
     _shared_lock: Lock = Lock()
+
+    @classmethod
+    def reset_shared_state(cls) -> None:
+        """Libera el cliente/colecciones compartidas para forzar reconstrucción limpia."""
+        with cls._shared_lock:
+            cls._shared_client = None
+            cls._shared_collections = None
+            cls._shared_path = None
+        gc.collect()
 
     def __init__(self) -> None:
         """Inicialice el cliente y las colecciones persistentes de Chroma."""
@@ -79,6 +95,19 @@ class ChromaIndex:
                 batch_size=batch_size,
             )
         except Exception as exc:
+            if _is_missing_collection_error(exc):
+                # Recupera referencias stale tras reset concurrente/externo.
+                self.__class__.reset_shared_state()
+                self.__init__()
+                self._upsert_batched(
+                    collection_name=collection_name,
+                    ids=ids,
+                    documents=documents,
+                    embeddings=embeddings,
+                    metadatas=metadatas,
+                    batch_size=batch_size,
+                )
+                return
             if not _is_dimension_mismatch_error(exc):
                 raise
             raise RuntimeError(
@@ -130,6 +159,14 @@ class ChromaIndex:
                 where=where,
             )
         except Exception as exc:
+            if _is_missing_collection_error(exc):
+                self.__class__.reset_shared_state()
+                self.__init__()
+                return self.collections[collection_name].query(
+                    query_embeddings=[query_embedding],
+                    n_results=top_n,
+                    where=where,
+                )
             if not _is_dimension_mismatch_error(exc):
                 raise
             return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
