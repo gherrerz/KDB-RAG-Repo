@@ -23,6 +23,7 @@ Este documento es la fuente de verdad de la API HTTP de Coderag.
 | POST | `/query` | `run_query` | `QueryRequest` | `QueryResponse` |
 | POST | `/inventory/query` | `run_inventory_query` | `InventoryQueryRequest` | `InventoryQueryResponse` |
 | GET | `/repos` | `JobManager.list_repo_ids` | N/A | `RepoCatalogResponse` |
+| GET | `/providers/models` | `discover_models` | Query params (`provider`, `kind`, `force_refresh`) | `ProviderModelCatalogResponse` |
 | GET | `/repos/{repo_id}/status` | `get_repo_query_status` | Path `repo_id` | `RepoQueryStatusResponse` |
 | GET | `/health/storage` | `run_storage_preflight` | N/A | `StorageHealthResponse` |
 | POST | `/admin/reset` | `JobManager.reset_all_data` | N/A | `ResetResponse` |
@@ -124,6 +125,25 @@ Este documento es la fuente de verdad de la API HTTP de Coderag.
 | Campo | Tipo | Requerido | Default | Descripcion |
 |---|---|---|---|---|
 | repo_ids | list[str] | no | `[]` | Repos disponibles para consulta. |
+
+## GET /providers/models
+
+Query params:
+
+| Param | Tipo | Requerido | Default | Descripcion |
+|---|---|---|---|---|
+| provider | str | si | N/A | Provider objetivo (`openai`, `anthropic`, `gemini`, `vertex_ai`; incluye alias `vertex`). |
+| kind | str | si | N/A | Tipo de catálogo (`embedding` o `llm`). |
+| force_refresh | bool | no | `false` | Fuerza discovery sin usar cache TTL. |
+
+Notas de comportamiento:
+
+- `source` puede ser `remote`, `cache` o `fallback`.
+- `warning` incluye código técnico de fallback/error no bloqueante (por ejemplo:
+  `missing_anthropic_api_key`, `anthropic_remote_catalog_failed`,
+  `anthropic_embedding_unsupported`).
+- El endpoint no devuelve error HTTP por fallback de catálogo; siempre responde
+  `200` con `models` y metadatos de `source/warning`.
 
 ## RepoQueryStatusResponse
 

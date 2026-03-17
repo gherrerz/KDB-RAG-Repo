@@ -53,11 +53,12 @@ Se incluye API (FastAPI), UI de escritorio (PySide6), almacenamiento vectorial
 ### Componentes
 
 - UI: PySide6 (`ingesta`, `consulta`, `evidencias`).
-- API: FastAPI (`/repos/ingest`, `/jobs/{id}`, `/query`, `/inventory/query`, `/repos`, `/repos/{repo_id}/status`, `/health/storage`, `/admin/reset`).
+- API: FastAPI (`/repos/ingest`, `/jobs/{id}`, `/query`, `/inventory/query`, `/repos`, `/providers/models`, `/repos/{repo_id}/status`, `/health/storage`, `/admin/reset`).
 - Ingesta: clonación, escaneo, chunking, embeddings, BM25, grafo.
 - Retrieval: fusión vectorial + BM25 + expansión de grafo + ensamblado de
    contexto.
-- LLM: OpenAI para respuesta y verificación anti-alucinación.
+- LLM: multi-provider (`openai`, `anthropic`, `gemini`, `vertex_ai`) para
+   respuesta y verificación anti-alucinación.
 
 ### Diagramas (Mermaid)
 
@@ -77,7 +78,7 @@ flowchart LR
 
    subgraph RET["Consulta"]
       PIPER["Pipeline de<br/>Retrieval"]
-      LLM["LLM<br/>OpenAI"]
+      LLM["LLM<br/>Multi-provider"]
       FBACK["Fallback<br/>Extractivo"]
    end
 
@@ -233,12 +234,16 @@ Si falta alguna, la ingesta falla al iniciar con error de configuración.
 ### Compatibilidad multi-provider
 
 - La UI permite elegir provider/modelo por operación para ingesta y consulta.
-- La API mantiene los mismos endpoints (`/repos/ingest`, `/query`) y acepta campos opcionales nuevos.
+- La API mantiene los endpoints de operación (`/repos/ingest`, `/query`,
+   `/inventory/query`) y agrega catálogo de modelos por provider en
+   `/providers/models`.
 - Si no se envían campos nuevos, el comportamiento permanece igual (OpenAI + variables `OPENAI_*`).
 - Para `vertex_ai`, `VERTEX_AI_API_KEY` debe contener un token OAuth Bearer válido y
    requiere `VERTEX_AI_PROJECT_ID` para habilitar llamadas reales a Vertex.
 - La UI autocompleta modelos sugeridos al cambiar provider y muestra advertencias
    cuando un provider no está soportado o no está configurado en el entorno.
+- Cuando el catálogo remoto es autoritativo (`source=remote|cache`), la UI
+   prioriza esos modelos y evita fijar defaults legacy fuera de catálogo.
 - La UI muestra chips de estado por provider con indicador visual de readiness
    (`Listo` o `No listo`) para embeddings y LLM.
 - La UI aplica bloqueo preventivo antes de ejecutar Ingestar/Consultar cuando el
@@ -351,9 +356,14 @@ El `diagnostics` de la respuesta incluye, entre otros:
 
 - `retrieved`, `reranked`, `graph_nodes`.
 - `inventory_target`, `inventory_terms`, `inventory_count`.
-- `fallback_reason`: `not_configured`, `verification_failed` o `generation_error`.
-- `verify_valid`: resultado de verificación cuando OpenAI está habilitado.
+- `fallback_reason`: `not_configured`, `verification_failed`,
+   `generation_error`, `insufficient_context`, `time_budget_exhausted`.
+- `verify_valid`: resultado de verificación cuando LLM verify está habilitado.
 - `llm_error`: detalle de excepción (solo si hubo error de generación/verificación).
+
+En UI, cuando `fallback_reason=generation_error`, se anexa causa legible
+derivada de `llm_error` (por ejemplo: créditos insuficientes, rate limit,
+modelo no disponible o credenciales inválidas).
 
 ### 5) Listar repos disponibles para consulta
 
@@ -499,6 +509,13 @@ Checklist sugerida antes de release (3 escenarios):
 - **`OPENAI no configurado`**
    - Verifica que la clave esté en `.env` (no en `.env.example`).
    - Reinicia la API después de cambios en entorno.
+
+- **`[diagnóstico: generation_error]` en consultas Anthropic/Gemini/OpenAI**
+   - Revisa `diagnostics.llm_error` para causa técnica exacta.
+   - Si aparece "credit balance is too low", la cuenta del provider no tiene
+      saldo suficiente y debe recargarse/actualizar plan.
+   - Si aparece "model ... not available", selecciona un modelo vigente del
+      catálogo remoto en `Refrescar Modelos`.
 
 - **Fallback por verificación (`fallback_reason=verification_failed`)**
     - No implica falta de configuración; indica que la respuesta generada no
