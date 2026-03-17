@@ -70,6 +70,18 @@ def test_extract_inventory_target_for_es_and_en() -> None:
         )
         == "clase"
     )
+    assert (
+        query_service._extract_inventory_target(
+            "cuales son las dependencias del proyecto"
+        )
+        == "dependencia"
+    )
+    assert (
+        query_service._extract_inventory_target(
+            "which dependencies are used by this project"
+        )
+        == "dependency"
+    )
 
 
 def test_extract_inventory_target_explicit_type_specification() -> None:
@@ -143,6 +155,15 @@ def test_inventory_term_aliases_expand_for_classes() -> None:
     assert "clases" in aliases
     assert "class" in aliases
     assert "classes" in aliases
+
+
+def test_inventory_term_aliases_expand_for_dependencies() -> None:
+    """Expande dependencias a variantes canónicas en español/inglés."""
+    aliases = query_service._inventory_term_aliases("dependencias")
+    assert "dependencia" in aliases
+    assert "dependencias" in aliases
+    assert "dependency" in aliases
+    assert "dependencies" in aliases
 
 
 def test_query_inventory_entities_merges_alias_matches(
@@ -268,6 +289,18 @@ def test_extract_module_name_is_generic() -> None:
             "traeme todos los servicios de mall-portal"
         )
         == "mall-portal"
+    )
+    assert (
+        query_service._extract_module_name(
+            "cuales son las dependencias del proyecto"
+        )
+        is None
+    )
+    assert (
+        query_service._extract_module_name(
+            "which dependencies are used by the project"
+        )
+        is None
     )
 
 

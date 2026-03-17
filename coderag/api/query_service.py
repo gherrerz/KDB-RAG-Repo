@@ -48,6 +48,16 @@ INVENTORY_EQUIVALENT_GROUPS = [
     {"manager", "gestor"},
     {"factory", "fabrica", "fábrica"},
     {"helper", "util", "utils", "utilidad"},
+    {
+        "dependency",
+        "dependencies",
+        "dependencia",
+        "dependencias",
+        "requirement",
+        "requirements",
+        "requisito",
+        "requisitos",
+    },
     {"component", "componente", "element", "elemento"},
     {"file", "archivo", "fichero"},
 ]
@@ -76,6 +86,8 @@ MODULE_NAME_STOPWORDS = {
     "type",
     "clase",
     "class",
+    "proyecto",
+    "project",
 }
 
 INVENTORY_TARGET_STOPWORDS = {
