@@ -168,14 +168,35 @@ def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
 
 
 def _discover_gemini(kind: ModelKind) -> ModelDiscoveryResult:
-    """Intenta discovery SDK para Gemini y cae a fallback local si falla."""
+    """Descubre modelos Gemini con REST primero y SDK como fallback."""
     settings = get_settings()
     api_key = settings.gemini_api_key.strip()
     if not api_key:
         return _fallback("gemini", kind, warning="missing_gemini_api_key")
 
+    timeout = max(1.0, float(settings.discovery_timeout_seconds))
+    rest_warning: str | None = None
+
+    try:
+        names = _discover_gemini_rest_names(kind=kind, api_key=api_key, timeout=timeout)
+        models = _filter_models(names, kind, provider="gemini")
+        if models:
+            return ModelDiscoveryResult(
+                provider="gemini",
+                kind=kind,
+                models=models,
+                source="remote",
+            )
+        rest_warning = "gemini_rest_catalog_empty"
+    except Exception:
+        rest_warning = "gemini_rest_catalog_failed"
+
     if not settings.discovery_gemini_sdk_enabled:
-        return _fallback("gemini", kind, warning="gemini_sdk_discovery_disabled")
+        return _fallback(
+            "gemini",
+            kind,
+            warning=rest_warning or "gemini_sdk_discovery_disabled",
+        )
 
     try:
         import google.generativeai as genai  # type: ignore[import-not-found]
@@ -197,6 +218,8 @@ def _discover_gemini(kind: ModelKind) -> ModelDiscoveryResult:
 
         models = _filter_models(names, kind, provider="gemini")
         if not models:
+            if rest_warning:
+                return _fallback("gemini", kind, warning="gemini_rest_and_sdk_empty")
             return _fallback("gemini", kind, warning="gemini_sdk_catalog_empty")
         return ModelDiscoveryResult(
             provider="gemini",
@@ -205,7 +228,86 @@ def _discover_gemini(kind: ModelKind) -> ModelDiscoveryResult:
             source="remote",
         )
     except Exception:
+        if rest_warning:
+            return _fallback("gemini", kind, warning="gemini_rest_and_sdk_catalog_failed")
         return _fallback("gemini", kind, warning="gemini_sdk_catalog_failed")
+
+
+def _discover_gemini_rest_names(*, kind: ModelKind, api_key: str, timeout: float) -> list[str]:
+    """Obtiene nombres de modelos Gemini desde API REST con paginación."""
+    next_page_token: str | None = None
+    entries: list[str] = []
+    # Evita bucles infinitos si el backend devuelve un token inconsistente.
+    for _ in range(12):
+        payload = _gemini_models_page(
+            api_key=api_key,
+            timeout=timeout,
+            page_token=next_page_token,
+        )
+        raw_models = payload.get("models") or []
+        for item in raw_models:
+            model_name = _gemini_model_name_for_kind(item, kind=kind)
+            if model_name:
+                entries.append(model_name)
+        raw_token = str(payload.get("nextPageToken") or "").strip()
+        if not raw_token:
+            break
+        next_page_token = raw_token
+    return entries
+
+
+def _gemini_models_page(
+    *,
+    api_key: str,
+    timeout: float,
+    page_token: str | None,
+) -> dict:
+    """Solicita una página del catálogo Gemini por REST."""
+    params: dict[str, str | int] = {
+        "key": api_key,
+        "pageSize": 100,
+    }
+    if page_token:
+        params["pageToken"] = page_token
+
+    response = requests.get(
+        "https://generativelanguage.googleapis.com/v1beta/models",
+        params=params,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data if isinstance(data, dict) else {}
+
+
+def _gemini_model_name_for_kind(item: object, *, kind: ModelKind) -> str | None:
+    """Filtra un item de Gemini según tipo y devuelve nombre corto."""
+    if not isinstance(item, dict):
+        return None
+
+    raw_name = str(item.get("name") or "").strip()
+    if not raw_name:
+        return None
+
+    methods = _gemini_supported_methods(item)
+    if kind == "embedding":
+        if "embedcontent" not in methods and "batchembedcontents" not in methods:
+            return None
+    elif "generatecontent" not in methods:
+        return None
+
+    model_name = raw_name.split("/")[-1].strip()
+    return model_name or None
+
+
+def _gemini_supported_methods(item: dict) -> set[str]:
+    """Normaliza métodos soportados desde SDK o REST a minúsculas."""
+    methods = (
+        item.get("supportedGenerationMethods")
+        or item.get("supported_generation_methods")
+        or []
+    )
+    return {str(method).strip().lower() for method in methods if str(method).strip()}
 
 
 def _filter_models(entries: list[str], kind: ModelKind, *, provider: ProviderName) -> list[str]:

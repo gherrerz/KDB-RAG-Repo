@@ -30,11 +30,11 @@ QUERY_PROFILE_SETTINGS: dict[str, dict[str, float | int | bool]] = {
     "rapido": {
         "top_n": 40,
         "top_k": 10,
-        "timeout_seconds": 45.0,
-        "allow_retry": False,
+        "timeout_seconds": max(90.0, float(UI_REQUEST_TIMEOUT_SECONDS)),
+        "allow_retry": True,
         "retry_top_n": 25,
         "retry_top_k": 8,
-        "retry_timeout_seconds": 30.0,
+        "retry_timeout_seconds": max(60.0, float(UI_REQUEST_TIMEOUT_SECONDS)),
     },
     "balanceado": {
         "top_n": 80,
@@ -492,6 +492,10 @@ class MainWindow(QMainWindow):
             "verifier_model": self.query_view.get_verifier_model() or None,
         }
         query_timeout = float(profile_settings["timeout_seconds"])
+        query_timeout = self._adjust_timeout_for_model(
+            query_timeout,
+            payload["answer_model"],
+        )
         try:
             response = requests.post(
                 f"{API_BASE}/query",
@@ -525,6 +529,10 @@ class MainWindow(QMainWindow):
             retry_payload["top_k"] = int(profile_settings["retry_top_k"])
             try:
                 retry_timeout = float(profile_settings["retry_timeout_seconds"])
+                retry_timeout = self._adjust_timeout_for_model(
+                    retry_timeout,
+                    retry_payload["answer_model"],
+                )
                 response = requests.post(
                     f"{API_BASE}/query",
                     json=retry_payload,
@@ -596,6 +604,17 @@ class MainWindow(QMainWindow):
             normalized,
             QUERY_PROFILE_SETTINGS["balanceado"],
         )
+
+    @staticmethod
+    def _adjust_timeout_for_model(
+        base_timeout_seconds: float,
+        model: object,
+    ) -> float:
+        """Ajusta timeout por modelo para evitar expiraciones prematuras en UI."""
+        selected = str(model or "").strip().lower()
+        if selected.startswith("gpt-5"):
+            return max(base_timeout_seconds, 120.0)
+        return base_timeout_seconds
 
     def _show_query_error(self, message: str) -> None:
         """Muestra error de consulta con formato consistente en la UI."""

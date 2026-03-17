@@ -7,6 +7,7 @@ import unicodedata
 from openai import OpenAI
 import requests
 
+from coderag.core.provider_model_catalog import default_llm_model, llm_models_for_provider
 from coderag.core.settings import ProviderName, get_settings
 from coderag.llm.prompts import (
     SYSTEM_PROMPT,
@@ -119,6 +120,32 @@ def _extract_generative_text(data: dict) -> str:
     return _extract_text_parts(parts)
 
 
+def _extract_openai_responses_text(data: dict) -> str:
+    """Extrae texto de OpenAI Responses API en formatos output_text u output[]."""
+    output_text = str(data.get("output_text") or "").strip()
+    if output_text:
+        return output_text
+
+    output_items = data.get("output") or []
+    if not isinstance(output_items, list):
+        return ""
+
+    parts: list[str] = []
+    for item in output_items:
+        if not isinstance(item, dict):
+            continue
+        content_items = item.get("content") or []
+        if not isinstance(content_items, list):
+            continue
+        for content in content_items:
+            if not isinstance(content, dict):
+                continue
+            text = str(content.get("text") or "").strip()
+            if text:
+                parts.append(text)
+    return "\n".join(parts).strip()
+
+
 def _is_unsupported_temperature_error(exc: Exception) -> bool:
     """Detecta errores del provider cuando el modelo no permite temperature=0."""
     message = str(exc).lower()
@@ -127,6 +154,55 @@ def _is_unsupported_temperature_error(exc: Exception) -> bool:
         and "unsupported" in message
         and ("does not support 0" in message or "unsupported_value" in message)
     )
+
+
+def _is_openai_model_selection_error(exc: Exception) -> bool:
+    """Detecta errores por modelo inválido/no soportado/sin acceso."""
+    message = str(exc).lower()
+    model_related = (
+        "model" in message
+        and (
+            "does not exist" in message
+            or "not found" in message
+            or "not available" in message
+            or "access" in message
+            or "permission" in message
+            or "unsupported" in message
+        )
+    )
+    endpoint_related = (
+        ("not supported" in message or "only supported" in message)
+        and ("endpoint" in message or "responses" in message or "chat" in message)
+    )
+    return model_related or endpoint_related
+
+
+def _is_openai_responses_payload_error(exc: Exception) -> bool:
+    """Detecta errores de formato payload en Responses API para probar otra variante."""
+    message = str(exc).lower()
+    return (
+        "input" in message
+        and (
+            "role" in message
+            or "content" in message
+            or "invalid type" in message
+            or "unsupported" in message
+        )
+    )
+
+
+def _openai_model_candidates(primary_model: str) -> list[str]:
+    """Construye candidatos de modelo con fallback determinista y sin duplicados."""
+    candidates: list[str] = []
+    for item in [
+        primary_model,
+        default_llm_model("openai"),
+        *llm_models_for_provider("openai"),
+    ]:
+        value = item.strip()
+        if value and value not in candidates:
+            candidates.append(value)
+    return candidates
 
 
 class AnswerClient:
@@ -238,32 +314,84 @@ class AnswerClient:
         request_kwargs: dict[str, object] = {}
         if timeout_seconds is not None:
             request_kwargs["timeout"] = max(1.0, float(timeout_seconds))
+        rest_timeout = float(request_kwargs.get("timeout", 20.0))
 
-        if hasattr(self.client, "responses"):
-            response = self.client.responses.create(
-                model=model,
-                input=messages,
-                **request_kwargs,
-            )
-            return (response.output_text or "").strip()
+        last_error: Exception | None = None
+        for candidate_model in _openai_model_candidates(model):
+            # Soporta modelos responses-only incluso con SDK antiguo sin client.responses.
+            try:
+                response = requests.post(
+                    "https://api.openai.com/v1/responses",
+                    json={
+                        "model": candidate_model,
+                        "instructions": SYSTEM_PROMPT,
+                        "input": prompt,
+                    },
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=rest_timeout,
+                )
+                response.raise_for_status()
+                text = _extract_openai_responses_text(response.json())
+                if text:
+                    return text
+            except Exception as exc:
+                last_error = exc
 
-        try:
-            completion = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-                **request_kwargs,
-            )
-        except Exception as exc:
-            if not _is_unsupported_temperature_error(exc):
+            if hasattr(self.client, "responses"):
+                try:
+                    response = self.client.responses.create(
+                        model=candidate_model,
+                        instructions=SYSTEM_PROMPT,
+                        input=prompt,
+                        **request_kwargs,
+                    )
+                    return (response.output_text or "").strip()
+                except Exception as exc:
+                    last_error = exc
+                    if _is_openai_responses_payload_error(exc):
+                        try:
+                            response = self.client.responses.create(
+                                model=candidate_model,
+                                input=messages,
+                                **request_kwargs,
+                            )
+                            return (response.output_text or "").strip()
+                        except Exception as exc_legacy:
+                            last_error = exc_legacy
+                    # Si falla por incompatibilidad de endpoint/modelo, intenta chat
+                    # para el mismo modelo antes de pasar al siguiente fallback.
+                    if not _is_openai_model_selection_error(last_error):
+                        raise
+
+            try:
+                completion = self.client.chat.completions.create(
+                    model=candidate_model,
+                    messages=messages,
+                    temperature=0,
+                    **request_kwargs,
+                )
+            except Exception as exc:
+                last_error = exc
+                if _is_unsupported_temperature_error(exc):
+                    completion = self.client.chat.completions.create(
+                        model=candidate_model,
+                        messages=messages,
+                        **request_kwargs,
+                    )
+                    content = completion.choices[0].message.content
+                    return (content or "").strip()
+                if _is_openai_model_selection_error(exc):
+                    continue
                 raise
-            completion = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                **request_kwargs,
-            )
-        content = completion.choices[0].message.content
-        return (content or "").strip()
+            content = completion.choices[0].message.content
+            return (content or "").strip()
+
+        if last_error is not None:
+            raise last_error
+        return ""
 
     def _call_anthropic(
         self,

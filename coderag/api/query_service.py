@@ -106,7 +106,7 @@ def _fallback_header(fallback_reason: str) -> str:
             "mostrando evidencia trazable."
         ),
         "generation_error": (
-            "Ocurrió un error al generar respuesta con OpenAI; mostrando "
+            "Ocurrió un error al generar respuesta con el modelo seleccionado; mostrando "
             "evidencia trazable."
         ),
         "time_budget_exhausted": (

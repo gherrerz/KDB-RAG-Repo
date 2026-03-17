@@ -220,11 +220,11 @@ def test_query_profile_profundo_uses_expanded_payload_and_timeout(
     assert float(captured["timeout"]) >= 120.0
 
 
-def test_query_profile_rapido_timeout_stops_without_retry(
+def test_query_profile_rapido_timeout_retries_then_reports_error(
     monkeypatch: pytest.MonkeyPatch,
     qapp: QApplication,
 ) -> None:
-    """Perfil rapido informa timeout y evita reintento para respuesta predecible."""
+    """Perfil rapido aplica reintento y luego informa error si persiste timeout."""
     window = _build_window(monkeypatch)
 
     called = {"count": 0}
@@ -243,8 +243,8 @@ def test_query_profile_rapido_timeout_stops_without_retry(
 
     window._on_query()
 
-    assert called["count"] == 1
-    assert "perfil rapido" in window.query_view.history_output.toPlainText().lower()
+    assert called["count"] == 2
+    assert "tras timeout inicial" in window.query_view.history_output.toPlainText().lower()
 
 
 def test_query_profile_balanceado_retries_with_reduced_scope(
