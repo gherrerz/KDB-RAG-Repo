@@ -33,6 +33,7 @@ from coderag.ui.provider_feedback import (
     apply_status_chip,
 )
 from coderag.ui.model_catalog_client import fetch_models_for_provider
+from coderag.ui.model_catalog_client import should_show_remote_catalog_fallback_hint
 from coderag.ui.provider_styles import PROVIDER_FEEDBACK_STYLES
 from coderag.ui.provider_ui_state import (
     resolve_embedding_ui_state,
@@ -501,8 +502,7 @@ class QueryView(QWidget):
             warning_parts.append(state.warning)
         if (
             catalog.source == "fallback"
-            and catalog.warning
-            and catalog.warning != "catalog_service_unavailable"
+            and should_show_remote_catalog_fallback_hint(catalog.warning)
         ):
             warning_parts.append(
                 "No se pudo actualizar el catálogo remoto; usando lista local."
@@ -545,8 +545,7 @@ class QueryView(QWidget):
             warning_parts.append(state.warning)
         if (
             catalog.source == "fallback"
-            and catalog.warning
-            and catalog.warning != "catalog_service_unavailable"
+            and should_show_remote_catalog_fallback_hint(catalog.warning)
         ):
             warning_parts.append(
                 "No se pudo actualizar el catálogo remoto; usando lista local."

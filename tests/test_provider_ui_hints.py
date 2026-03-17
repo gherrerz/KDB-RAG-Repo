@@ -8,7 +8,10 @@ from PySide6.QtWidgets import QApplication
 import coderag.ui.ingestion_view as ingestion_view_module
 import coderag.ui.query_view as query_view_module
 from coderag.ui.ingestion_view import IngestionView
-from coderag.ui.model_catalog_client import UIModelCatalogResult
+from coderag.ui.model_catalog_client import (
+    UIModelCatalogResult,
+    should_show_remote_catalog_fallback_hint,
+)
 from coderag.ui.query_view import QueryView
 
 
@@ -131,7 +134,37 @@ def test_query_provider_autofill_and_warnings(
                 "reason": "ok",
             }
 
+    def _fake_fetch_models_for_provider(
+        provider: str,
+        kind: str,
+        *,
+        force_refresh: bool = False,
+    ) -> UIModelCatalogResult:
+        _ = force_refresh
+        if provider == "vertex_ai" and kind == "embedding":
+            return UIModelCatalogResult(
+                models=["text-embedding-005", "text-multilingual-embedding-002"],
+                source="fallback",
+                warning="missing_vertex_ai_api_key_or_project",
+            )
+        if provider == "anthropic" and kind == "llm":
+            return UIModelCatalogResult(
+                models=["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+                source="fallback",
+                warning="missing_anthropic_api_key",
+            )
+        return UIModelCatalogResult(
+            models=["gpt-4.1-mini"],
+            source="fallback",
+            warning="catalog_service_unavailable",
+        )
+
     monkeypatch.setattr(query_view_module, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        query_view_module,
+        "fetch_models_for_provider",
+        _fake_fetch_models_for_provider,
+    )
     view = QueryView()
 
     view.embedding_provider.setCurrentText("vertex_ai")
@@ -299,3 +332,66 @@ def test_query_vertex_refresh_keeps_embedding_and_llm_catalogs(
     assert [
         view.verifier_model.itemText(i) for i in range(view.verifier_model.count())
     ] == ["gemini-2.0-flash", "gemini-1.5-pro"]
+
+
+def test_remote_catalog_hint_helper_filters_expected_fallbacks() -> None:
+    """No muestra hint remoto para fallback esperado por capabilities/provider."""
+    assert not should_show_remote_catalog_fallback_hint("anthropic_embedding_unsupported")
+    assert not should_show_remote_catalog_fallback_hint("missing_anthropic_api_key")
+    assert should_show_remote_catalog_fallback_hint("anthropic_remote_catalog_failed")
+
+
+def test_ingestion_anthropic_embedding_does_not_show_remote_failure_hint(
+    monkeypatch: pytest.MonkeyPatch,
+    qapp: QApplication,
+) -> None:
+    """Anthropic embeddings usa fallback esperado sin warning remoto adicional."""
+
+    class _Settings:
+        def embedding_provider_capabilities(self, provider: str) -> dict[str, str | bool]:
+            if provider == "anthropic":
+                return {
+                    "provider": provider,
+                    "supported": False,
+                    "configured": False,
+                    "reason": "provider_without_embedding_backend",
+                }
+            return {
+                "provider": provider,
+                "supported": True,
+                "configured": True,
+                "reason": "ok",
+            }
+
+    def _fake_fetch_models_for_provider(
+        provider: str,
+        kind: str,
+        *,
+        force_refresh: bool = False,
+    ) -> UIModelCatalogResult:
+        _ = force_refresh
+        if provider == "anthropic" and kind == "embedding":
+            return UIModelCatalogResult(
+                models=["text-embedding-3-small", "text-embedding-3-large"],
+                source="fallback",
+                warning="anthropic_embedding_unsupported",
+            )
+        return UIModelCatalogResult(
+            models=["text-embedding-3-small"],
+            source="fallback",
+            warning="catalog_service_unavailable",
+        )
+
+    monkeypatch.setattr(ingestion_view_module, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        ingestion_view_module,
+        "fetch_models_for_provider",
+        _fake_fetch_models_for_provider,
+    )
+
+    view = IngestionView()
+    view.embedding_provider.setCurrentText("anthropic")
+
+    warning_text = view.embedding_warning.text().lower()
+    assert "catalogo remoto" not in warning_text
+    assert "fallback" in warning_text

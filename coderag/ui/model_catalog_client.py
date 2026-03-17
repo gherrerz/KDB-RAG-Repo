@@ -14,6 +14,20 @@ from coderag.core.settings import get_settings
 
 API_BASE = "http://127.0.0.1:8000"
 
+_NON_REMOTE_FALLBACK_WARNINGS = {
+    "catalog_service_unavailable",
+    "model_kind_invalid",
+    "missing_openai_api_key",
+    "missing_anthropic_api_key",
+    "missing_gemini_api_key",
+    "missing_vertex_ai_api_key_or_project",
+    "provider_without_embedding_backend",
+    "anthropic_embedding_unsupported",
+    "gemini_sdk_discovery_disabled",
+    "unknown_provider_catalog_fallback",
+    "anthropic_catalog_fallback",
+}
+
 
 @dataclass(frozen=True)
 class UIModelCatalogResult:
@@ -22,6 +36,20 @@ class UIModelCatalogResult:
     models: list[str]
     source: str
     warning: str | None = None
+
+
+def should_show_remote_catalog_fallback_hint(warning: str | None) -> bool:
+    """Indica si conviene mostrar aviso genérico de fallo remoto."""
+    normalized = (warning or "").strip().lower()
+    if not normalized or normalized in _NON_REMOTE_FALLBACK_WARNINGS:
+        return False
+    if "remote_catalog" in normalized:
+        return True
+    if normalized.endswith("_catalog_failed") or normalized.endswith("_catalog_empty"):
+        return True
+    if normalized == "empty_remote_models":
+        return True
+    return False
 
 
 def fetch_models_for_provider(
