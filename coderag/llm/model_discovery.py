@@ -94,8 +94,90 @@ def _discover_uncached(provider: str, kind: ModelKind) -> ModelDiscoveryResult:
     if provider == "gemini":
         return _discover_gemini(kind)
     if provider == "anthropic":
-        return _fallback(provider, kind, warning="anthropic_catalog_fallback")
+        return _discover_anthropic(kind)
     return _fallback(provider, kind, warning="unknown_provider_catalog_fallback")
+
+
+def _discover_anthropic(kind: ModelKind) -> ModelDiscoveryResult:
+    """Descubre modelos Anthropic por API remota con fallback local."""
+    if kind == "embedding":
+        return _fallback("anthropic", kind, warning="anthropic_embedding_unsupported")
+
+    settings = get_settings()
+    api_key = settings.anthropic_api_key.strip()
+    if not api_key:
+        return _fallback("anthropic", kind, warning="missing_anthropic_api_key")
+
+    timeout = max(1.0, float(settings.discovery_timeout_seconds))
+    try:
+        names = _discover_anthropic_names(api_key=api_key, timeout=timeout)
+        models = _filter_models(names, kind, provider="anthropic")
+        if not models:
+            return _fallback("anthropic", kind, warning="anthropic_remote_catalog_empty")
+        return ModelDiscoveryResult(
+            provider="anthropic",
+            kind=kind,
+            models=models,
+            source="remote",
+        )
+    except Exception:
+        return _fallback("anthropic", kind, warning="anthropic_remote_catalog_failed")
+
+
+def _discover_anthropic_names(*, api_key: str, timeout: float) -> list[str]:
+    """Lista IDs de modelos Anthropic con paginación tolerante a errores."""
+    payload = _anthropic_models_page(api_key=api_key, timeout=timeout, after_id=None)
+    names = _anthropic_names_from_payload(payload)
+
+    for _ in range(10):
+        has_more = bool(payload.get("has_more"))
+        cursor = str(payload.get("last_id") or "").strip()
+        if not has_more or not cursor:
+            break
+        try:
+            payload = _anthropic_models_page(
+                api_key=api_key,
+                timeout=timeout,
+                after_id=cursor,
+            )
+        except Exception:
+            break
+        names.extend(_anthropic_names_from_payload(payload))
+
+    return names
+
+
+def _anthropic_models_page(*, api_key: str, timeout: float, after_id: str | None) -> dict:
+    """Solicita una página de modelos Anthropic."""
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+    }
+    params: dict[str, str | int] = {"limit": 100}
+    if after_id:
+        params["after_id"] = after_id
+
+    response = requests.get(
+        "https://api.anthropic.com/v1/models",
+        headers=headers,
+        params=params,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data if isinstance(data, dict) else {}
+
+
+def _anthropic_names_from_payload(payload: dict) -> list[str]:
+    """Extrae IDs de modelos Anthropic desde el payload remoto."""
+    names: list[str] = []
+    for item in payload.get("data") or []:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id") or "").strip()
+        if model_id:
+            names.append(model_id)
+    return names
 
 
 def _discover_openai(kind: ModelKind) -> ModelDiscoveryResult:
