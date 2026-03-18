@@ -1,6 +1,6 @@
 """Widgets de vista de ingesta para la configuración y ejecución del repositorio."""
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -13,7 +13,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSplitter,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -44,6 +47,8 @@ class IngestionView(QWidget):
 
     STATUS_PULSE_MS = 180
     BUTTON_FLASH_MS = 140
+    _SETTINGS_KEY_EXPANDED = "ingestion/layout/config_expanded"
+    _SETTINGS_KEY_SPLITTER = "ingestion/layout/splitter_sizes"
 
     def __init__(self) -> None:
         """Inicialice los controles de formulario para la ingesta del repositorio."""
@@ -112,6 +117,20 @@ class IngestionView(QWidget):
         self.repo_id.setReadOnly(True)
         self.repo_id.setPlaceholderText("Disponible al completar")
 
+        # Mantiene la misma altura visual que Consulta para evitar clipping y
+        # asegurar consistencia entre pestañas.
+        for control in (
+            self.provider,
+            self.embedding_provider,
+            self.embedding_model,
+            self.repo_url,
+            self.token,
+            self.branch,
+            self.job_id,
+            self.repo_id,
+        ):
+            control.setMinimumHeight(30)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setObjectName("ingestionProgress")
         self.progress_bar.setRange(0, 100)
@@ -120,6 +139,7 @@ class IngestionView(QWidget):
         self.logs = QTextEdit()
         self.logs.setObjectName("ingestionLogs")
         self.logs.setReadOnly(True)
+        self.logs.setMinimumHeight(280)
         self.logs.setPlaceholderText("Logs de ingesta...")
 
         self.top_card = QFrame()
@@ -128,8 +148,36 @@ class IngestionView(QWidget):
         self.form_card = QFrame()
         self.form_card.setObjectName("ingestCard")
 
+        self.form_scroll = QScrollArea()
+        self.form_scroll.setObjectName("ingestionFormScroll")
+        self.form_scroll.setWidgetResizable(True)
+        self.form_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.form_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
         self.logs_card = QFrame()
         self.logs_card.setObjectName("ingestionLogsCard")
+
+        self.form_toggle_button = QToolButton()
+        self.form_toggle_button.setObjectName("ingestionFormToggle")
+        self.form_toggle_button.setText("Configuracion de ingesta")
+        self.form_toggle_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.form_toggle_button.setArrowType(Qt.ArrowType.DownArrow)
+        self.form_toggle_button.setCheckable(True)
+        self.form_toggle_button.setChecked(True)
+
+        self.form_section = QFrame()
+        self.form_section.setObjectName("ingestionFormSection")
+
+        self.ingestion_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.ingestion_splitter.setObjectName("ingestionMainSplitter")
+        self.ingestion_splitter.setChildrenCollapsible(False)
+        self.ingestion_splitter.setHandleWidth(8)
+        self._ingestion_splitter_initialized = False
+        self._saved_ingestion_splitter_sizes: list[int] | None = None
+        self._layout_settings = QSettings("CodeRAG", "DesktopUI")
 
         form = QFormLayout()
         form.setContentsMargins(14, 12, 14, 12)
@@ -147,6 +195,16 @@ class IngestionView(QWidget):
         form.addRow("Job ID", self.job_id)
         form.addRow("Repo ID", self.repo_id)
         self.form_card.setLayout(form)
+        self.form_card.setMinimumHeight(self.form_card.sizeHint().height())
+        self.form_scroll.setWidget(self.form_card)
+
+        form_section_layout = QVBoxLayout()
+        form_section_layout.setContentsMargins(0, 0, 0, 0)
+        form_section_layout.setSpacing(8)
+        form_section_layout.addWidget(self.form_toggle_button)
+        form_section_layout.addWidget(self.form_scroll)
+        self.form_section.setLayout(form_section_layout)
+        self.form_section.setMinimumHeight(170)
 
         top_bar = QGridLayout()
         top_bar.setContentsMargins(14, 12, 14, 12)
@@ -161,12 +219,17 @@ class IngestionView(QWidget):
         logs_layout.setContentsMargins(12, 12, 12, 12)
         logs_layout.addWidget(self.logs)
         self.logs_card.setLayout(logs_layout)
+        self.logs_card.setMinimumHeight(300)
+
+        self.ingestion_splitter.addWidget(self.form_section)
+        self.ingestion_splitter.addWidget(self.logs_card)
+        self.ingestion_splitter.setStretchFactor(0, 0)
+        self.ingestion_splitter.setStretchFactor(1, 1)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(10)
         layout.addWidget(self.top_card)
-        layout.addWidget(self.form_card)
         layout.addWidget(self.progress_bar)
 
         actions = QHBoxLayout()
@@ -176,8 +239,11 @@ class IngestionView(QWidget):
 
         layout.addLayout(actions)
         layout.addWidget(self.ingest_action_hint)
-        layout.addWidget(self.logs_card)
+        layout.addWidget(self.ingestion_splitter, 1)
         self.setLayout(layout)
+
+        self.form_toggle_button.toggled.connect(self._set_form_section_expanded)
+        self.ingestion_splitter.splitterMoved.connect(self._on_splitter_moved)
 
         self.ingest_button.clicked.connect(lambda: self._flash_button(self.ingest_button))
         self.reset_button.clicked.connect(lambda: self._flash_button(self.reset_button))
@@ -220,6 +286,26 @@ class IngestionView(QWidget):
                 background-color: #2F7BFF;
                 border-radius: 6px;
             }
+            QToolButton#ingestionFormToggle {
+                background-color: #162A47;
+                border: 1px solid #2A3A5A;
+                border-radius: 10px;
+                padding: 7px 10px;
+                color: #D7E6FF;
+                font-weight: 600;
+                text-align: left;
+            }
+            QToolButton#ingestionFormToggle:hover {
+                background-color: #1C3252;
+            }
+            QSplitter#ingestionMainSplitter::handle {
+                background-color: #14233C;
+                border-radius: 4px;
+                margin: 2px 16px;
+            }
+            QSplitter#ingestionMainSplitter::handle:hover {
+                background-color: #2A4E7D;
+            }
             """
             + BASE_BUTTON_STYLES
             + """
@@ -241,7 +327,107 @@ class IngestionView(QWidget):
         self.embedding_provider.currentTextChanged.connect(
             self._on_embedding_provider_changed
         )
+        self._load_layout_preferences()
         self._on_embedding_provider_changed(self.embedding_provider.currentText())
+
+    def showEvent(self, event) -> None:
+        """Aplica proporción inicial del splitter tras primer render del panel."""
+        super().showEvent(event)
+        if self._ingestion_splitter_initialized:
+            return
+        self._ingestion_splitter_initialized = True
+        QTimer.singleShot(0, self._restore_or_apply_ingestion_splitter_sizes)
+
+    def _set_form_section_expanded(self, expanded: bool) -> None:
+        """Colapsa o expande formulario para priorizar logs de ejecución."""
+        self.form_scroll.setVisible(expanded)
+        self.form_toggle_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+        if expanded:
+            self.form_section.setMinimumHeight(170)
+            self.form_section.setMaximumHeight(16777215)
+        else:
+            collapsed_height = self.form_toggle_button.sizeHint().height() + 8
+            self.form_section.setMinimumHeight(collapsed_height)
+            self.form_section.setMaximumHeight(collapsed_height)
+        self._persist_layout_preferences()
+        QTimer.singleShot(0, self._apply_ingestion_splitter_sizes)
+
+    def _apply_ingestion_splitter_sizes(self) -> None:
+        """Define proporción 30/70 entre configuración y logs."""
+        total = max(360, self.ingestion_splitter.height())
+        if not self.form_toggle_button.isChecked():
+            collapsed = self.form_toggle_button.sizeHint().height() + 10
+            self.ingestion_splitter.setSizes([collapsed, max(240, total - collapsed)])
+            return
+        config_size = max(170, int(total * 0.30))
+        log_size = max(240, total - config_size)
+        self.ingestion_splitter.setSizes([config_size, log_size])
+
+    def _restore_or_apply_ingestion_splitter_sizes(self) -> None:
+        """Restaura tamaños previos del splitter o aplica proporción por defecto."""
+        if self._saved_ingestion_splitter_sizes and len(self._saved_ingestion_splitter_sizes) == 2:
+            self.ingestion_splitter.setSizes(self._saved_ingestion_splitter_sizes)
+            return
+        self._apply_ingestion_splitter_sizes()
+
+    def _load_layout_preferences(self) -> None:
+        """Carga preferencias persistidas de layout para la vista de ingesta."""
+        expanded = self._layout_settings.value(
+            self._SETTINGS_KEY_EXPANDED,
+            True,
+            type=bool,
+        )
+        saved_sizes_raw = self._layout_settings.value(
+            self._SETTINGS_KEY_SPLITTER,
+            "",
+            type=str,
+        )
+        self._saved_ingestion_splitter_sizes = self._parse_splitter_sizes(saved_sizes_raw)
+
+        self.form_toggle_button.blockSignals(True)
+        self.form_toggle_button.setChecked(bool(expanded))
+        self.form_toggle_button.blockSignals(False)
+        self._set_form_section_expanded(bool(expanded))
+
+    def _persist_layout_preferences(self) -> None:
+        """Guarda estado colapsado y tamaños actuales del splitter."""
+        self._layout_settings.setValue(
+            self._SETTINGS_KEY_EXPANDED,
+            self.form_toggle_button.isChecked(),
+        )
+        sizes = self.ingestion_splitter.sizes()
+        if len(sizes) == 2 and all(size > 0 for size in sizes):
+            self._layout_settings.setValue(
+                self._SETTINGS_KEY_SPLITTER,
+                self._serialize_splitter_sizes(sizes),
+            )
+
+    def _on_splitter_moved(self, _pos: int, _index: int) -> None:
+        """Persiste cambios de tamaño cuando el usuario mueve el splitter."""
+        self._persist_layout_preferences()
+
+    @staticmethod
+    def _serialize_splitter_sizes(sizes: list[int]) -> str:
+        """Serializa tamaños del splitter en formato compacto persistible."""
+        return ",".join(str(int(size)) for size in sizes)
+
+    @staticmethod
+    def _parse_splitter_sizes(value: str) -> list[int] | None:
+        """Parsea tamaños de splitter desde preferencias persistidas."""
+        if not value.strip():
+            return None
+        parts = [item.strip() for item in value.split(",")]
+        if len(parts) != 2:
+            return None
+        try:
+            sizes = [int(parts[0]), int(parts[1])]
+        except ValueError:
+            return None
+        if any(size <= 0 for size in sizes):
+            return None
+        return sizes
 
     def set_status(self, state: str, text: str) -> None:
         """Actualiza el estado del chip y el texto."""

@@ -1,6 +1,6 @@
 """Widgets de vista de consultas para hacer preguntas sobre el repositorio."""
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
@@ -13,7 +13,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
+    QSplitter,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -47,6 +50,8 @@ class QueryView(QWidget):
 
     STATUS_PULSE_MS = 180
     BUTTON_FLASH_MS = 140
+    _SETTINGS_KEY_EXPANDED = "query/layout/config_expanded"
+    _SETTINGS_KEY_SPLITTER = "query/layout/splitter_sizes"
 
     def __init__(self) -> None:
         """Inicialice el formulario de consulta y responda los widgets de salida."""
@@ -69,6 +74,8 @@ class QueryView(QWidget):
         self.copy_history_button.setProperty("variant", "secondary")
         self.refresh_repo_ids_button.setProperty("variant", "secondary")
         self.refresh_models_button.setProperty("variant", "secondary")
+        self.refresh_repo_ids_button.setMinimumHeight(34)
+        self.refresh_models_button.setMinimumHeight(34)
 
         self.repo_id = QComboBox()
         self.repo_id.setEditable(False)
@@ -126,6 +133,21 @@ class QueryView(QWidget):
         self.force_fallback = QCheckBox("Forzar fallback si provider no esta listo")
         self.force_fallback.setObjectName("forceFallbackCheck")
 
+        # Evita clipping vertical del texto en combos/spinboxes cuando el
+        # panel de configuración queda compacto dentro del splitter.
+        for control in (
+            self.repo_id,
+            self.embedding_provider,
+            self.embedding_model,
+            self.llm_provider,
+            self.answer_model,
+            self.verifier_model,
+            self.query_profile,
+            self.top_n_input,
+            self.top_k_input,
+        ):
+            control.setMinimumHeight(30)
+
         self.query_input = QLineEdit()
         self.query_input.setObjectName("queryInput")
         self.query_input.setPlaceholderText("Consulta la base de conocimientos...")
@@ -141,6 +163,7 @@ class QueryView(QWidget):
         self.history_output = QPlainTextEdit()
         self.history_output.setObjectName("queryHistory")
         self.history_output.setReadOnly(True)
+        self.history_output.setMinimumHeight(260)
         self.history_output.setPlaceholderText(
             "El historial de preguntas y respuestas aparecerá aquí..."
         )
@@ -154,6 +177,13 @@ class QueryView(QWidget):
 
         self.repo_card = QFrame()
         self.repo_card.setObjectName("queryRepoCard")
+
+        self.repo_scroll = QScrollArea()
+        self.repo_scroll.setObjectName("queryRepoScroll")
+        self.repo_scroll.setWidgetResizable(True)
+        self.repo_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.repo_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.repo_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         self.history_card = QFrame()
         self.history_card.setObjectName("queryHistoryCard")
@@ -204,6 +234,37 @@ class QueryView(QWidget):
         repo_bar.addWidget(self.include_context, 9, 0, 1, 4)
         repo_bar.addWidget(self.force_fallback, 10, 0, 1, 4)
         self.repo_card.setLayout(repo_bar)
+        self.repo_card.setMinimumHeight(self.repo_card.sizeHint().height())
+        self.repo_scroll.setWidget(self.repo_card)
+
+        self.repo_toggle_button = QToolButton()
+        self.repo_toggle_button.setObjectName("queryRepoToggle")
+        self.repo_toggle_button.setText("Configuracion de consulta")
+        self.repo_toggle_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.repo_toggle_button.setArrowType(Qt.ArrowType.DownArrow)
+        self.repo_toggle_button.setCheckable(True)
+        self.repo_toggle_button.setChecked(True)
+
+        self.repo_section = QFrame()
+        self.repo_section.setObjectName("queryRepoSection")
+
+        self.query_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.query_splitter.setObjectName("queryMainSplitter")
+        self.query_splitter.setChildrenCollapsible(False)
+        self.query_splitter.setHandleWidth(8)
+        self._query_splitter_initialized = False
+        self._saved_query_splitter_sizes: list[int] | None = None
+        self._layout_settings = QSettings("CodeRAG", "DesktopUI")
+
+        repo_section_layout = QVBoxLayout()
+        repo_section_layout.setContentsMargins(0, 0, 0, 0)
+        repo_section_layout.setSpacing(8)
+        repo_section_layout.addWidget(self.repo_toggle_button)
+        repo_section_layout.addWidget(self.repo_scroll)
+        self.repo_section.setLayout(repo_section_layout)
+        self.repo_section.setMinimumHeight(150)
 
         top_bar = QGridLayout()
         top_bar.setContentsMargins(14, 12, 14, 12)
@@ -220,16 +281,24 @@ class QueryView(QWidget):
         history_layout.setContentsMargins(12, 12, 12, 12)
         history_layout.addWidget(self.history_output)
         self.history_card.setLayout(history_layout)
+        self.history_card.setMinimumHeight(280)
+
+        self.query_splitter.addWidget(self.repo_section)
+        self.query_splitter.addWidget(self.history_card)
+        self.query_splitter.setStretchFactor(0, 0)
+        self.query_splitter.setStretchFactor(1, 1)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(10)
         layout.addWidget(self.top_card)
-        layout.addWidget(self.repo_card)
-        layout.addWidget(self.history_card)
+        layout.addWidget(self.query_splitter, 1)
         layout.addWidget(self.input_bar)
         layout.addWidget(self.query_action_hint)
         self.setLayout(layout)
+
+        self.repo_toggle_button.toggled.connect(self._set_repo_section_expanded)
+        self.query_splitter.splitterMoved.connect(self._on_splitter_moved)
 
         self.copy_history_button.clicked.connect(self.copy_all_history)
         self.copy_history_button.clicked.connect(
@@ -306,6 +375,26 @@ class QueryView(QWidget):
             QFrame#inputBar[state="error"] {
                 border: 1px solid #C93A4B;
             }
+            QToolButton#queryRepoToggle {
+                background-color: #162A47;
+                border: 1px solid #2A3A5A;
+                border-radius: 10px;
+                padding: 7px 10px;
+                color: #D7E6FF;
+                font-weight: 600;
+                text-align: left;
+            }
+            QToolButton#queryRepoToggle:hover {
+                background-color: #1C3252;
+            }
+            QSplitter#queryMainSplitter::handle {
+                background-color: #14233C;
+                border-radius: 4px;
+                margin: 2px 16px;
+            }
+            QSplitter#queryMainSplitter::handle:hover {
+                background-color: #2A4E7D;
+            }
             """
             + BASE_BUTTON_STYLES
             + """
@@ -329,7 +418,107 @@ class QueryView(QWidget):
         )
         self.llm_provider.currentTextChanged.connect(self._on_llm_provider_changed)
         self.retrieval_only_mode.toggled.connect(self._on_retrieval_mode_changed)
+        self._load_layout_preferences()
         self.refresh_model_catalogs(force_refresh=False)
+
+    def showEvent(self, event) -> None:
+        """Aplica proporción inicial del splitter tras primer render del panel."""
+        super().showEvent(event)
+        if self._query_splitter_initialized:
+            return
+        self._query_splitter_initialized = True
+        QTimer.singleShot(0, self._restore_or_apply_query_splitter_sizes)
+
+    def _set_repo_section_expanded(self, expanded: bool) -> None:
+        """Colapsa o expande la configuración para priorizar el historial."""
+        self.repo_scroll.setVisible(expanded)
+        self.repo_toggle_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+        if expanded:
+            self.repo_section.setMinimumHeight(150)
+            self.repo_section.setMaximumHeight(16777215)
+        else:
+            collapsed_height = self.repo_toggle_button.sizeHint().height() + 8
+            self.repo_section.setMinimumHeight(collapsed_height)
+            self.repo_section.setMaximumHeight(collapsed_height)
+        self._persist_layout_preferences()
+        QTimer.singleShot(0, self._apply_query_splitter_sizes)
+
+    def _apply_query_splitter_sizes(self) -> None:
+        """Define proporción 30/70 entre configuración y salida de chat."""
+        total = max(320, self.query_splitter.height())
+        if not self.repo_toggle_button.isChecked():
+            collapsed = self.repo_toggle_button.sizeHint().height() + 10
+            self.query_splitter.setSizes([collapsed, max(220, total - collapsed)])
+            return
+        config_size = max(150, int(total * 0.30))
+        output_size = max(220, total - config_size)
+        self.query_splitter.setSizes([config_size, output_size])
+
+    def _restore_or_apply_query_splitter_sizes(self) -> None:
+        """Restaura tamaños previos del splitter o aplica proporción por defecto."""
+        if self._saved_query_splitter_sizes and len(self._saved_query_splitter_sizes) == 2:
+            self.query_splitter.setSizes(self._saved_query_splitter_sizes)
+            return
+        self._apply_query_splitter_sizes()
+
+    def _load_layout_preferences(self) -> None:
+        """Carga preferencias persistidas de layout para la vista de consulta."""
+        expanded = self._layout_settings.value(
+            self._SETTINGS_KEY_EXPANDED,
+            True,
+            type=bool,
+        )
+        saved_sizes_raw = self._layout_settings.value(
+            self._SETTINGS_KEY_SPLITTER,
+            "",
+            type=str,
+        )
+        self._saved_query_splitter_sizes = self._parse_splitter_sizes(saved_sizes_raw)
+
+        self.repo_toggle_button.blockSignals(True)
+        self.repo_toggle_button.setChecked(bool(expanded))
+        self.repo_toggle_button.blockSignals(False)
+        self._set_repo_section_expanded(bool(expanded))
+
+    def _persist_layout_preferences(self) -> None:
+        """Guarda estado colapsado y tamaños actuales del splitter."""
+        self._layout_settings.setValue(
+            self._SETTINGS_KEY_EXPANDED,
+            self.repo_toggle_button.isChecked(),
+        )
+        sizes = self.query_splitter.sizes()
+        if len(sizes) == 2 and all(size > 0 for size in sizes):
+            self._layout_settings.setValue(
+                self._SETTINGS_KEY_SPLITTER,
+                self._serialize_splitter_sizes(sizes),
+            )
+
+    def _on_splitter_moved(self, _pos: int, _index: int) -> None:
+        """Persiste cambios de tamaño cuando el usuario mueve el splitter."""
+        self._persist_layout_preferences()
+
+    @staticmethod
+    def _serialize_splitter_sizes(sizes: list[int]) -> str:
+        """Serializa tamaños del splitter en formato compacto persistible."""
+        return ",".join(str(int(size)) for size in sizes)
+
+    @staticmethod
+    def _parse_splitter_sizes(value: str) -> list[int] | None:
+        """Parsea tamaños de splitter desde preferencias persistidas."""
+        if not value.strip():
+            return None
+        parts = [item.strip() for item in value.split(",")]
+        if len(parts) != 2:
+            return None
+        try:
+            sizes = [int(parts[0]), int(parts[1])]
+        except ValueError:
+            return None
+        if any(size <= 0 for size in sizes):
+            return None
+        return sizes
 
     def set_status(self, state: str, text: str) -> None:
         """Actualice el estado y el texto del chip de estado de la consulta."""
