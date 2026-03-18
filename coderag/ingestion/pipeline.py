@@ -59,6 +59,55 @@ def _read_scan_filters_from_settings(
     return int(max_file_size), excluded_dirs, excluded_extensions, excluded_files
 
 
+def _repo_has_existing_index_data(repo_id: str, logger: LoggerFn) -> bool:
+    """Determina si existe data indexada previa para el repositorio."""
+    chroma = ChromaIndex()
+    chroma_total = 0
+    for collection_name in ("code_symbols", "code_files", "code_modules"):
+        chroma_total += chroma.count_by_repo_id(
+            collection_name=collection_name,
+            repo_id=repo_id,
+        )
+
+    bm25_exists = GLOBAL_BM25.has_repo(repo_id) or GLOBAL_BM25.has_repo_snapshot(repo_id)
+
+    graph_exists = False
+    graph = GraphBuilder()
+    try:
+        graph_exists = graph.has_repo_data(repo_id)
+    except Exception as exc:
+        logger(
+            "Advertencia: no se pudo verificar estado previo en Neo4j "
+            f"para repo '{repo_id}' ({exc})"
+        )
+    finally:
+        graph.close()
+
+    return chroma_total > 0 or bm25_exists or graph_exists
+
+
+def _purge_repo_indices(repo_id: str, logger: LoggerFn) -> None:
+    """Purga datos indexados previos por repo_id en Chroma, BM25 y Neo4j."""
+    chroma = ChromaIndex()
+    chroma_deleted = chroma.delete_by_repo_id(repo_id=repo_id)
+
+    bm25_deleted = GLOBAL_BM25.delete_repo(repo_id)
+
+    graph = GraphBuilder()
+    try:
+        graph_deleted = graph.delete_repo_subgraph(repo_id)
+    finally:
+        graph.close()
+
+    logger(
+        "Purge por repo_id completado: "
+        f"chroma_total={chroma_deleted['total']}, "
+        f"bm25_docs={bm25_deleted['docs_removed']}, "
+        f"bm25_snapshot={bm25_deleted['snapshot_removed']}, "
+        f"neo4j_nodes={graph_deleted}"
+    )
+
+
 def ingest_repository(
     repo_url: str,
     branch: str,
@@ -76,6 +125,19 @@ def ingest_repository(
         branch=branch,
         commit=commit,
     )
+
+    if _repo_has_existing_index_data(repo_id=repo_id, logger=logger):
+        logger(
+            "Repositorio existente detectado; iniciando purge por repo_id "
+            "antes de reindexar..."
+        )
+        try:
+            _purge_repo_indices(repo_id=repo_id, logger=logger)
+        except Exception as exc:
+            raise RuntimeError(
+                "No se pudo limpiar la data indexada previa del repositorio "
+                f"'{repo_id}'. Se aborta la ingesta para evitar inconsistencias."
+            ) from exc
 
     (
         max_file_size,

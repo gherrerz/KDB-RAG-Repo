@@ -90,6 +90,23 @@ class GraphBuilder:
                     end_line=symbol.end_line,
                 )
 
+    def has_repo_data(self, repo_id: str) -> bool:
+        """Indica si existen nodos asociados al repositorio en Neo4j."""
+        query = "MATCH (n {repo_id: $repo_id}) RETURN count(n) AS total"
+        with self.driver.session() as session:
+            record = session.run(query, repo_id=repo_id).single()
+            if record is None:
+                return False
+            return int(record.get("total", 0) or 0) > 0
+
+    def delete_repo_subgraph(self, repo_id: str) -> int:
+        """Elimina el subgrafo asociado al repo_id y devuelve nodos borrados."""
+        query = "MATCH (n {repo_id: $repo_id}) DETACH DELETE n"
+        with self.driver.session() as session:
+            result = session.run(query, repo_id=repo_id)
+            summary = result.consume()
+            return int(summary.counters.nodes_deleted)
+
     def query_inventory(
         self,
         repo_id: str,

@@ -170,3 +170,58 @@ class ChromaIndex:
             if not _is_dimension_mismatch_error(exc):
                 raise
             return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+    def count_by_repo_id(
+        self,
+        collection_name: str,
+        repo_id: str,
+        page_size: int = 500,
+    ) -> int:
+        """Cuenta documentos de un repositorio en una colección Chroma."""
+        collection = self.collections[collection_name]
+        total = 0
+        offset = 0
+        while True:
+            page = collection.get(
+                where={"repo_id": repo_id},
+                limit=page_size,
+                offset=offset,
+                include=[],
+            )
+            ids = page.get("ids") or []
+            page_count = len(ids)
+            total += page_count
+            if page_count < page_size:
+                break
+            offset += page_size
+        return total
+
+    def delete_by_repo_id(
+        self,
+        repo_id: str,
+    ) -> dict[str, int]:
+        """Elimina documentos de todas las colecciones por repo_id y retorna conteos."""
+        batch_size = self._max_batch_size()
+        deleted_by_collection: dict[str, int] = {}
+
+        for collection_name in COLLECTIONS:
+            collection = self.collections[collection_name]
+            deleted_total = 0
+
+            while True:
+                page = collection.get(
+                    where={"repo_id": repo_id},
+                    limit=batch_size,
+                    offset=0,
+                    include=[],
+                )
+                ids = page.get("ids") or []
+                if not ids:
+                    break
+                collection.delete(ids=ids)
+                deleted_total += len(ids)
+
+            deleted_by_collection[collection_name] = deleted_total
+
+        deleted_by_collection["total"] = sum(deleted_by_collection.values())
+        return deleted_by_collection

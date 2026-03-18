@@ -167,6 +167,29 @@ class BM25Index:
             return True
         return self.load_repo(repo_id)
 
+    def has_repo_snapshot(self, repo_id: str) -> bool:
+        """Indica si existe snapshot persistido para un repositorio."""
+        return self._snapshot_path(repo_id).exists()
+
+    def delete_repo(self, repo_id: str) -> dict[str, int]:
+        """Elimina índice BM25 de memoria y snapshot de disco para un repositorio."""
+        docs_removed = 0
+        payload = self._by_repo.pop(repo_id, None)
+        if payload is not None:
+            _bm25, docs, _metadatas = payload
+            docs_removed = len(docs)
+
+        snapshot_removed = 0
+        path = self._snapshot_path(repo_id)
+        if path.exists():
+            path.unlink()
+            snapshot_removed = 1
+
+        return {
+            "docs_removed": docs_removed,
+            "snapshot_removed": snapshot_removed,
+        }
+
     def query(self, repo_id: str, text: str, top_n: int = 50) -> list[dict]:
         """Devuelve las principales coincidencias de BM25 para el repositorio y la consulta."""
         if repo_id not in self._by_repo:

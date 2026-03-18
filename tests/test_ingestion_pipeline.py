@@ -85,6 +85,11 @@ def test_ingest_repository_continues_on_graph_failure(
         "_index_bm25",
         lambda repo_id, scanned_files, chunks: None,
     )
+    monkeypatch.setattr(
+        pipeline,
+        "_repo_has_existing_index_data",
+        lambda repo_id, logger: False,
+    )
 
     def fail_graph(
         repo_id: str,
@@ -114,3 +119,139 @@ def test_ingest_repository_continues_on_graph_failure(
     assert ".env" in received_scan_args["excluded_files"]
     assert any("Advertencia: grafo Neo4j no disponible" in item for item in logs)
     assert logs[-1] == "Ingesta finalizada"
+
+
+def test_ingest_repository_purges_existing_repo_before_reindex(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Ejecuta purge por repo_id antes de indexar cuando detecta datos previos."""
+    scanned = [ScannedFile(path="a.py", language="python", content="def a():\n pass")]
+    symbols = [
+        SymbolChunk(
+            id="s1",
+            repo_id="r1",
+            path="a.py",
+            language="python",
+            symbol_name="a",
+            symbol_type="function",
+            start_line=1,
+            end_line=2,
+            snippet="def a():\n pass",
+        )
+    ]
+
+    class _Settings:
+        workspace_path = tmp_path
+        scan_max_file_size_bytes = 12345
+        scan_excluded_dirs = ".git,node_modules"
+        scan_excluded_extensions = ".png,.zip"
+        scan_excluded_files = ".gitignore,.env"
+
+    call_order: list[str] = []
+
+    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        pipeline,
+        "clone_repository",
+        lambda repo_url, destination_root, branch, commit: ("r1", tmp_path),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_repo_has_existing_index_data",
+        lambda repo_id, logger: True,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_purge_repo_indices",
+        lambda repo_id, logger: call_order.append("purge"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "scan_repository_with_stats",
+        lambda *args, **kwargs: (
+            scanned,
+            {
+                "visited": 1,
+                "scanned": 1,
+                "excluded_dir": 0,
+                "excluded_extension": 0,
+                "excluded_file": 0,
+                "excluded_size": 0,
+                "excluded_decode": 0,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_symbol_chunks",
+        lambda repo_id, scanned_files: symbols,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_vectors",
+        lambda repo_id, s, c, **kwargs: call_order.append("index_vectors"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_bm25",
+        lambda repo_id, scanned_files, chunks: call_order.append("index_bm25"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_graph",
+        lambda repo_id, scanned_files, chunks: call_order.append("index_graph"),
+    )
+
+    logs: list[str] = []
+    pipeline.ingest_repository(
+        repo_url="https://example.com/repo.git",
+        branch="main",
+        commit=None,
+        logger=logs.append,
+    )
+
+    assert call_order == ["purge", "index_vectors", "index_bm25", "index_graph"]
+    assert any("Repositorio existente detectado" in item for item in logs)
+
+
+def test_ingest_repository_fails_when_purge_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Aborta la ingesta si el purge previo falla para evitar índices mezclados."""
+
+    class _Settings:
+        workspace_path = tmp_path
+        scan_max_file_size_bytes = 12345
+        scan_excluded_dirs = ".git,node_modules"
+        scan_excluded_extensions = ".png,.zip"
+        scan_excluded_files = ".gitignore,.env"
+
+    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        pipeline,
+        "clone_repository",
+        lambda repo_url, destination_root, branch, commit: ("r1", tmp_path),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_repo_has_existing_index_data",
+        lambda repo_id, logger: True,
+    )
+
+    def _fail_purge(repo_id: str, logger) -> None:
+        raise RuntimeError("chroma lock")
+
+    monkeypatch.setattr(pipeline, "_purge_repo_indices", _fail_purge)
+
+    logs: list[str] = []
+    with pytest.raises(RuntimeError) as exc_info:
+        pipeline.ingest_repository(
+            repo_url="https://example.com/repo.git",
+            branch="main",
+            commit=None,
+            logger=logs.append,
+        )
+
+    assert "No se pudo limpiar la data indexada previa" in str(exc_info.value)

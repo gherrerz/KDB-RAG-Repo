@@ -20,6 +20,7 @@ class _FakeCollection:
         self.calls: list[int] = []
         self.fail_once = fail_once
         self.error_once = error_once
+        self.repo_ids: list[str] = []
 
     def upsert(
         self,
@@ -41,6 +42,21 @@ class _FakeCollection:
     def query(self, **kwargs: Any) -> dict[str, list[list[Any]]]:
         """Proporcione una respuesta de consulta mínima para que esté completa."""
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+    def get(self, **kwargs: Any) -> dict[str, list[str]]:
+        """Devuelve ids filtrados por repo_id para probar borrado selectivo."""
+        where = kwargs.get("where") or {}
+        repo_id = where.get("repo_id")
+        if repo_id is None:
+            return {"ids": []}
+
+        matches = [item_id for item_id in self.repo_ids if item_id.startswith(f"{repo_id}:")]
+        limit = int(kwargs.get("limit") or len(matches))
+        return {"ids": matches[:limit]}
+
+    def delete(self, ids: list[str]) -> None:
+        """Elimina ids simulados para un repo_id en pruebas."""
+        self.repo_ids = [item_id for item_id in self.repo_ids if item_id not in set(ids)]
 
 
 class _FakeClient:
@@ -126,3 +142,36 @@ def test_upsert_recovers_from_dimension_message_error(
 
     message = str(exc_info.value)
     assert "Dimensión de embeddings incompatible" in message
+
+
+def test_delete_by_repo_id_removes_documents_from_all_collections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Elimina documentos filtrados por repo_id y devuelve conteo total agregado."""
+    fake_client = _FakeClient()
+
+    import coderag.ingestion.index_chroma as module
+
+    monkeypatch.setattr(
+        module.chromadb,
+        "PersistentClient",
+        lambda *args, **kwargs: fake_client,
+    )
+    module.ChromaIndex._shared_client = None
+    module.ChromaIndex._shared_collections = None
+    module.ChromaIndex._shared_path = None
+    index = ChromaIndex()
+
+    for collection in fake_client.collections.values():
+        collection.repo_ids = ["r1:a", "r1:b", "other:c"]
+
+    result = index.delete_by_repo_id("r1")
+
+    assert result["total"] == 10
+    assert result["code_symbols"] == 2
+    assert result["code_files"] == 2
+    assert result["code_modules"] == 2
+    assert result["docs_misc"] == 2
+    assert result["infra_ci"] == 2
+    for collection in fake_client.collections.values():
+        assert collection.repo_ids == ["other:c"]
