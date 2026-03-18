@@ -10,6 +10,7 @@ verificable (archivos y líneas).
 - [Características Principales](#características-principales)
 - [Arquitectura del Sistema](#arquitectura-del-sistema)
 - [Instalación](#instalación)
+- [Quick Start Rancher](#quick-start-rancher)
 - [Configuración](#configuración)
 - [Ejemplos de Uso](#ejemplos-de-uso)
 - [API](#api)
@@ -169,7 +170,10 @@ flowchart TB
 
 - Python 3.10+
 - Git
-- Docker (recomendado para Neo4j)
+- Rancher Desktop (recomendado para Neo4j) con `nerdctl compose`
+
+> Compatibilidad: si tu entorno usa Docker Desktop, puedes ejecutar los mismos
+> servicios con `docker compose`.
 
 ### Pasos
 
@@ -188,11 +192,64 @@ flowchart TB
 3. Levantar servicios auxiliares:
 
     ```bash
-    docker compose up -d
+   nerdctl compose up -d
     ```
+
+   Verificación rápida del runtime antes de levantar Compose:
+
+   ```bash
+   nerdctl version
+   nerdctl compose version
+   ```
+
+   Alternativa compatible (Docker Desktop):
+
+   ```bash
+   docker compose up -d
+   ```
+
+   Opción recomendada para equipos mixtos (autodetecta runtime):
+
+   ```powershell
+   ./scripts/compose_neo4j.ps1 up
+   ```
 
 > Redis no es requerido en la implementación actual. Se considera opcional/futuro
 > para escenarios de escalado de jobs con colas distribuidas.
+
+## Quick Start Rancher
+
+Flujo recomendado en Windows para operar Neo4j sin fricción entre runtimes:
+
+1. Levantar Neo4j (autodetección Rancher/Docker):
+
+   ```powershell
+   ./scripts/compose_neo4j.ps1 up
+   ```
+
+2. Verificar estado del contenedor:
+
+   ```powershell
+   ./scripts/compose_neo4j.ps1 ps
+   ```
+
+3. Verificar puerto Bolt en host (`17687`):
+
+   ```powershell
+   Test-NetConnection 127.0.0.1 -Port 17687
+   ```
+
+4. Revisar logs de Neo4j:
+
+   ```powershell
+   ./scripts/compose_neo4j.ps1 logs
+   ```
+
+5. Detener servicios cuando termines:
+
+   ```powershell
+   ./scripts/compose_neo4j.ps1 down
+   ```
 
 ## Configuración
 
@@ -567,6 +624,15 @@ Checklist sugerida antes de release (3 escenarios):
     - Revisa `diagnostics.inventory_terms` para confirmar las variantes
        aplicadas en la búsqueda de inventario.
 
-- **Conflictos de puertos Docker**
+- **Conflictos de puertos de contenedores (Compose)**
    - Ajusta puertos host en `docker-compose.yml`.
    - Actualiza `NEO4J_URI` en `.env` acorde al puerto bolt configurado.
+
+- **`nerdctl compose` falla por socket de containerd**
+   - Si aparece `cannot access containerd socket`, verifica que Rancher Desktop
+      esté iniciado y que `nerdctl version` responda correctamente.
+   - Reinicia Rancher Desktop y abre una nueva terminal antes de reintentar.
+   - Si tu entorno apunta a un socket distinto, usa el parámetro `--address`
+      sugerido por el propio error de `nerdctl`.
+   - Como alternativa temporal, ejecuta `./scripts/compose_neo4j.ps1 up` para
+      fallback automático a `docker compose` si `nerdctl` no está operativo.
