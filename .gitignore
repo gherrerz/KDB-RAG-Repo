@@ -55,3 +55,6 @@ docker-compose.override.yml
 
 # Benchmark Reports
 benchmark_reports/
+
+# Local temporary scripts
+.tmp_ingest_smoke.py
