@@ -17,6 +17,7 @@ COLLECTIONS = [
     "docs_misc",
     "infra_ci",
 ]
+CHROMA_HNSW_SPACES = {"l2", "cosine"}
 
 
 def _is_dimension_mismatch_error(exc: Exception) -> bool:
@@ -25,6 +26,12 @@ def _is_dimension_mismatch_error(exc: Exception) -> bool:
         return True
     message = str(exc).lower()
     return "embedding dimension" in message and "collection" in message
+
+
+def _is_space_mismatch_error(exc: Exception) -> bool:
+    """Detecta errores de incompatibilidad del espacio HNSW en colecciones."""
+    message = str(exc).lower()
+    return "hnsw" in message and "space" in message and "collection" in message
 
 
 def _is_missing_collection_error(exc: Exception) -> bool:
@@ -54,6 +61,7 @@ class ChromaIndex:
         """Inicialice el cliente y las colecciones persistentes de Chroma."""
         settings = get_settings()
         chroma_path = str(settings.chroma_path)
+        hnsw_space = settings.resolve_chroma_hnsw_space()
         with self._shared_lock:
             if (
                 self._shared_client is None
@@ -65,7 +73,10 @@ class ChromaIndex:
                     settings=ChromaSettings(anonymized_telemetry=False),
                 )
                 collections = {
-                    name: client.get_or_create_collection(name)
+                    name: client.get_or_create_collection(
+                        name,
+                        metadata={"hnsw:space": hnsw_space},
+                    )
                     for name in COLLECTIONS
                 }
                 self.__class__._shared_client = client
@@ -109,6 +120,11 @@ class ChromaIndex:
                 )
                 return
             if not _is_dimension_mismatch_error(exc):
+                if _is_space_mismatch_error(exc):
+                    raise RuntimeError(
+                        "Espacio HNSW incompatible en Chroma. Verifica "
+                        "CHROMA_HNSW_SPACE y recrea índices antes de reintentar."
+                    ) from exc
                 raise
             raise RuntimeError(
                 "Dimensión de embeddings incompatible con la colección "
@@ -168,8 +184,33 @@ class ChromaIndex:
                     where=where,
                 )
             if not _is_dimension_mismatch_error(exc):
+                if _is_space_mismatch_error(exc):
+                    raise RuntimeError(
+                        "Espacio HNSW incompatible en Chroma. Verifica "
+                        "CHROMA_HNSW_SPACE y recrea índices antes de consultar."
+                    ) from exc
                 raise
             return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+    @staticmethod
+    def _normalize_hnsw_space(raw_value: Any) -> str | None:
+        """Normaliza el valor del espacio HNSW almacenado en metadata."""
+        normalized = str(raw_value or "").strip().lower()
+        if normalized in CHROMA_HNSW_SPACES:
+            return normalized
+        return None
+
+    def collection_hnsw_spaces(self) -> dict[str, str | None]:
+        """Devuelve el espacio HNSW detectado por colección gestionada."""
+        spaces: dict[str, str | None] = {}
+        for name, collection in self.collections.items():
+            metadata = getattr(collection, "metadata", None) or {}
+            space = self._normalize_hnsw_space(metadata.get("hnsw:space"))
+            if space is None:
+                # Chroma usa l2 por defecto cuando no se define metadata explícita.
+                space = "l2"
+            spaces[name] = space
+        return spaces
 
     def count_by_repo_id(
         self,

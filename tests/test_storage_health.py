@@ -18,6 +18,7 @@ def _fake_settings() -> SimpleNamespace:
         health_check_ttl_seconds=60.0,
         health_check_openai=True,
         health_check_redis=False,
+        resolve_chroma_hnsw_space=lambda: "cosine",
     )
 
 
@@ -176,6 +177,15 @@ def test_get_repo_query_status_blocks_ready_on_embedding_mismatch(
     )
     monkeypatch.setattr(storage_health.GLOBAL_BM25, "ensure_repo_loaded", lambda repo_id: True)
     monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
+    monkeypatch.setattr(
+        storage_health.ChromaIndex,
+        "collection_hnsw_spaces",
+        lambda self: {
+            "code_symbols": "cosine",
+            "code_files": "cosine",
+            "code_modules": "cosine",
+        },
+    )
 
     status = storage_health.get_repo_query_status(
         repo_id="repo-a",
@@ -191,3 +201,64 @@ def test_get_repo_query_status_blocks_ready_on_embedding_mismatch(
     assert status["embedding_compatible"] is False
     assert status["compatibility_reason"] == "embedding_dimension_mismatch"
     assert status["query_ready"] is False
+
+
+def test_get_repo_query_status_blocks_ready_on_hnsw_space_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bloquea readiness cuando CHROMA_HNSW_SPACE difiere de colecciones existentes."""
+    monkeypatch.setattr(
+        storage_health,
+        "_count_chroma_documents_for_repo",
+        lambda **kwargs: 5,
+    )
+    monkeypatch.setattr(storage_health.GLOBAL_BM25, "ensure_repo_loaded", lambda repo_id: True)
+    monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
+    monkeypatch.setattr(
+        storage_health.ChromaIndex,
+        "collection_hnsw_spaces",
+        lambda self: {
+            "code_symbols": "l2",
+            "code_files": "l2",
+            "code_modules": "l2",
+        },
+    )
+
+    status = storage_health.get_repo_query_status(
+        repo_id="repo-a",
+        listed_in_catalog=True,
+        runtime_payload={
+            "last_embedding_provider": "openai",
+            "last_embedding_model": "text-embedding-3-small",
+        },
+        requested_embedding_provider="openai",
+        requested_embedding_model="text-embedding-3-small",
+    )
+
+    assert status["chroma_hnsw_space_compatible"] is False
+    assert status["chroma_hnsw_space_configured"] == "cosine"
+    assert status["query_ready"] is False
+    assert status["chroma_hnsw_space_mismatched_collections"] == [
+        "code_files",
+        "code_modules",
+        "code_symbols",
+    ]
+
+
+def test_check_chroma_raises_on_hnsw_space_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Falla preflight cuando el espacio HNSW de colecciones no coincide."""
+
+    class _FakeIndex:
+        client = SimpleNamespace(list_collections=lambda: ["code_symbols"])
+        collections = {"code_symbols": object()}
+
+        def collection_hnsw_spaces(self) -> dict[str, str]:
+            return {"code_symbols": "l2"}
+
+    monkeypatch.setattr(storage_health, "ChromaIndex", _FakeIndex)
+    monkeypatch.setattr(storage_health, "get_settings", _fake_settings)
+
+    with pytest.raises(RuntimeError, match="Espacio HNSW inconsistente"):
+        storage_health._check_chroma()

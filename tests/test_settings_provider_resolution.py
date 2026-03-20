@@ -1,5 +1,7 @@
 """Pruebas de prioridad de resolución provider/modelo en Settings."""
 
+import pytest
+
 from coderag.core.settings import Settings
 
 
@@ -69,3 +71,26 @@ def test_llm_resolution_uses_new_env_before_legacy() -> None:
     assert provider == "anthropic"
     assert answer_model == "env-answer-model"
     assert verifier_model == "env-verifier-model"
+
+
+def test_chroma_hnsw_space_defaults_to_cosine() -> None:
+    """Usa cosine como espacio HNSW por defecto cuando no hay override."""
+    settings = Settings(_env_file=None)
+
+    assert settings.chroma_hnsw_space == "cosine"
+    assert settings.resolve_chroma_hnsw_space() == "cosine"
+
+
+def test_chroma_hnsw_space_accepts_l2_and_cosine() -> None:
+    """Acepta solo valores soportados para CHROMA_HNSW_SPACE."""
+    settings_l2 = Settings(CHROMA_HNSW_SPACE="l2", _env_file=None)
+    settings_cos = Settings(CHROMA_HNSW_SPACE="cosine", _env_file=None)
+
+    assert settings_l2.resolve_chroma_hnsw_space() == "l2"
+    assert settings_cos.resolve_chroma_hnsw_space() == "cosine"
+
+
+def test_chroma_hnsw_space_rejects_invalid_values() -> None:
+    """Rechaza valores no soportados para CHROMA_HNSW_SPACE."""
+    with pytest.raises(ValueError):
+        Settings(CHROMA_HNSW_SPACE="ip", _env_file=None)

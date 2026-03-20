@@ -4,11 +4,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 ProviderName = Literal["openai", "anthropic", "gemini", "vertex_ai"]
+HnswSpaceName = Literal["l2", "cosine"]
 
 
 class Settings(BaseSettings):
@@ -49,6 +50,10 @@ class Settings(BaseSettings):
     vertex_ai_project_id: str = Field(default="", alias="VERTEX_AI_PROJECT_ID")
     vertex_ai_location: str = Field(default="us-central1", alias="VERTEX_AI_LOCATION")
     chroma_path: Path = Field(default=Path("./storage/chroma"), alias="CHROMA_PATH")
+    chroma_hnsw_space: HnswSpaceName = Field(
+        default="cosine",
+        alias="CHROMA_HNSW_SPACE",
+    )
     neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")
     neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
     neo4j_password: str = Field(default="password", alias="NEO4J_PASSWORD")
@@ -117,12 +122,34 @@ class Settings(BaseSettings):
         alias="MODEL_DISCOVERY_GEMINI_SDK_ENABLED",
     )
 
+    @field_validator("chroma_hnsw_space", mode="before")
+    @classmethod
+    def _validate_chroma_hnsw_space(cls, value: object) -> str:
+        """Valida y normaliza el espacio HNSW soportado por Chroma."""
+        normalized = str(value or "").strip().lower()
+        if normalized not in {"l2", "cosine"}:
+            raise ValueError(
+                "CHROMA_HNSW_SPACE debe ser 'l2' o 'cosine' "
+                f"(valor recibido: {value!r})."
+            )
+        return normalized
+
     def resolve_embedding_provider(self, override: str | None = None) -> ProviderName:
         """Resuelve el proveedor de embeddings con prioridad override > env."""
         provider = (override or self.embedding_provider or "openai").strip().lower()
         if provider in {"openai", "anthropic", "gemini", "vertex_ai"}:
             return provider  # type: ignore[return-value]
         return "openai"
+
+    def resolve_chroma_hnsw_space(
+        self,
+        override: str | None = None,
+    ) -> HnswSpaceName:
+        """Resuelve el espacio HNSW de Chroma con prioridad override > env."""
+        candidate = (override or self.chroma_hnsw_space or "cosine").strip().lower()
+        if candidate in {"l2", "cosine"}:
+            return candidate  # type: ignore[return-value]
+        return "cosine"
 
     def resolve_embedding_model(self, provider: ProviderName, override: str | None = None) -> str:
         """Resuelve el modelo de embeddings manteniendo fallback legado OpenAI."""

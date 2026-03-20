@@ -319,6 +319,25 @@ class RepoQueryStatusResponse(BaseModel):
     listed_in_catalog: bool = Field(description="Indica si el repo aparece en el catálogo /repos.")
     query_ready: bool = Field(description="Indica si el repo está listo para /query.")
     chroma_counts: dict[str, int | None] = Field(default_factory=dict, description="Conteos por colección Chroma (code_symbols, code_files, code_modules).")
+    chroma_hnsw_space_configured: str | None = Field(
+        default=None,
+        description="Valor configurado de CHROMA_HNSW_SPACE.",
+    )
+    chroma_hnsw_space_detected: dict[str, str | None] = Field(
+        default_factory=dict,
+        description="Espacio HNSW detectado por colección Chroma.",
+    )
+    chroma_hnsw_space_compatible: bool | None = Field(
+        default=None,
+        description=(
+            "Compatibilidad entre CHROMA_HNSW_SPACE configurado y el espacio "
+            "detectado en colecciones existentes."
+        ),
+    )
+    chroma_hnsw_space_mismatched_collections: list[str] = Field(
+        default_factory=list,
+        description="Colecciones Chroma desalineadas respecto al espacio configurado.",
+    )
     bm25_loaded: bool = Field(description="Indica si BM25 está cargado en memoria para el repo.")
     graph_available: bool | None = Field(default=None, description="Disponibilidad de grafo para el repo (si pudo evaluarse).")
     last_embedding_provider: str | None = Field(

@@ -123,6 +123,8 @@ def _error_code(component: str, message: str) -> str:
         if "connection refused" in lowered or "couldn't connect" in lowered:
             return "neo4j_unreachable"
     if component == "chroma":
+        if "hnsw" in lowered and "space" in lowered:
+            return "chroma_hnsw_space_mismatch"
         return "chroma_unavailable"
     if component == "metadata_sqlite":
         return "metadata_unavailable"
@@ -189,11 +191,29 @@ def _check_metadata_sqlite(db_path: Path) -> dict[str, Any]:
 
 def _check_chroma() -> dict[str, Any]:
     """Valida inicialización y acceso básico a colecciones de Chroma."""
+    settings = get_settings()
     index = ChromaIndex()
     collections = index.client.list_collections()
+    expected_space = settings.resolve_chroma_hnsw_space()
+    spaces_by_collection = index.collection_hnsw_spaces()
+    mismatched_collections = sorted(
+        name
+        for name, detected_space in spaces_by_collection.items()
+        if detected_space != expected_space
+    )
+    if mismatched_collections:
+        joined = ", ".join(mismatched_collections)
+        raise RuntimeError(
+            "Espacio HNSW inconsistente en Chroma. "
+            f"Configurado={expected_space}, colecciones={joined}. "
+            "Ejecuta reset y reingesta para alinear índices."
+        )
     return {
         "collection_count": len(collections),
         "managed_collection_count": len(index.collections),
+        "hnsw_space_configured": expected_space,
+        "hnsw_space_detected": spaces_by_collection,
+        "hnsw_space_mismatched_collections": mismatched_collections,
     }
 
 
@@ -486,6 +506,9 @@ def get_repo_query_status(
     settings = get_settings()
     warnings: list[str] = []
     chroma_counts: dict[str, int | None] = {}
+    configured_hnsw_space = settings.resolve_chroma_hnsw_space()
+    chroma_spaces: dict[str, str | None] = {}
+    chroma_space_mismatched_collections: list[str] = []
 
     for collection_name in QUERY_COLLECTIONS:
         try:
@@ -502,6 +525,24 @@ def get_repo_query_status(
     bm25_loaded = GLOBAL_BM25.ensure_repo_loaded(repo_id)
     if not bm25_loaded:
         warnings.append(f"No hay indice BM25 en memoria para repo '{repo_id}'.")
+
+    try:
+        chroma_spaces = ChromaIndex().collection_hnsw_spaces()
+        chroma_space_mismatched_collections = sorted(
+            name
+            for name, detected_space in chroma_spaces.items()
+            if detected_space != configured_hnsw_space
+        )
+        if chroma_space_mismatched_collections:
+            warnings.append(
+                "Espacio HNSW inconsistente en Chroma. "
+                f"Configurado={configured_hnsw_space}, "
+                "colecciones desalineadas="
+                f"{', '.join(chroma_space_mismatched_collections)}. "
+                "Ejecuta reset y reingesta para alinear índices."
+            )
+    except Exception as exc:
+        warnings.append(f"No se pudo validar hnsw.space en Chroma: {exc}")
 
     graph_available: bool | None = None
     try:
@@ -525,12 +566,22 @@ def get_repo_query_status(
         )
 
     chroma_has_docs = any((count or 0) > 0 for count in chroma_counts.values())
-    query_ready = bool(chroma_has_docs and bm25_loaded and embedding_compatible is not False)
+    chroma_space_compatible = len(chroma_space_mismatched_collections) == 0
+    query_ready = bool(
+        chroma_has_docs
+        and bm25_loaded
+        and embedding_compatible is not False
+        and chroma_space_compatible
+    )
     return {
         "repo_id": repo_id,
         "listed_in_catalog": listed_in_catalog,
         "query_ready": query_ready,
         "chroma_counts": chroma_counts,
+        "chroma_hnsw_space_configured": configured_hnsw_space,
+        "chroma_hnsw_space_detected": chroma_spaces,
+        "chroma_hnsw_space_compatible": chroma_space_compatible,
+        "chroma_hnsw_space_mismatched_collections": chroma_space_mismatched_collections,
         "bm25_loaded": bm25_loaded,
         "graph_available": graph_available,
         "embedding_compatible": embedding_compatible,

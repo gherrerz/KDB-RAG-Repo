@@ -680,6 +680,53 @@ def test_query_endpoint_blocks_when_storage_preflight_fails(monkeypatch) -> None
     assert payload["detail"]["health"]["failed_components"] == ["neo4j"]
 
 
+def test_query_endpoint_blocks_when_chroma_space_preflight_fails(monkeypatch) -> None:
+    """Bloquea consulta cuando preflight detecta mismatch de hnsw.space en Chroma."""
+
+    def fail_preflight(
+        *,
+        context: str,
+        repo_id: str | None = None,
+        force: bool = False,
+    ) -> dict:
+        report = {
+            "ok": False,
+            "strict": True,
+            "checked_at": "2026-01-01T00:00:00+00:00",
+            "context": context,
+            "repo_id": repo_id,
+            "failed_components": ["chroma"],
+            "items": [
+                {
+                    "name": "chroma",
+                    "ok": False,
+                    "critical": True,
+                    "code": "chroma_hnsw_space_mismatch",
+                    "message": "Espacio HNSW inconsistente en Chroma.",
+                    "latency_ms": 1.0,
+                    "details": {},
+                }
+            ],
+            "cached": False,
+        }
+        raise StoragePreflightError(report)
+
+    monkeypatch.setattr(server, "ensure_storage_ready", fail_preflight)
+    client = TestClient(app)
+    response = client.post(
+        "/query",
+        json={
+            "repo_id": "mall",
+            "query": "hola",
+            "top_n": 5,
+            "top_k": 3,
+        },
+    )
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"]["health"]["failed_components"] == ["chroma"]
+
+
 def test_query_endpoint_returns_422_when_repo_is_not_ready(monkeypatch) -> None:
     """Cuando el repo no esta listo para query, la API responde 422 con detalle accionable."""
 

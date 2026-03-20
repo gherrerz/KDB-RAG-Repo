@@ -267,6 +267,7 @@ Variables relevantes en `.env`:
 - `OPENAI_EMBEDDING_MODEL`, `OPENAI_ANSWER_MODEL`, `OPENAI_VERIFIER_MODEL`.
 - `OPENAI_VERIFY_ENABLED`: compatibilidad heredada para verificación (fallback).
 - `CHROMA_PATH`: ruta persistente de Chroma.
+- `CHROMA_HNSW_SPACE`: métrica HNSW de Chroma (`cosine` por defecto, o `l2`).
 - `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`.
 - `REDIS_URL` (opcional/futuro): endpoint para cola de jobs distribuida.
 - `WORKSPACE_PATH`: ruta de repos clonados.
@@ -281,6 +282,18 @@ Variables relevantes en `.env`:
 - `SCAN_EXCLUDED_EXTENSIONS` (obligatoria): extensiones excluidas de la ingesta (CSV).
 - `SCAN_EXCLUDED_FILES` (opcional): nombres o rutas relativas de archivos a excluir (CSV).
 - `SYMBOL_EXTRACTOR_V2_ENABLED`: activa extractor modular por lenguaje para spans completos (`true` por defecto). Usa `false` para rollback al modo legacy de ventana fija.
+
+### Configuración de métrica vectorial (Chroma)
+
+- `CHROMA_HNSW_SPACE` acepta solo `cosine` o `l2`.
+- Valor por defecto recomendado: `cosine`.
+- La API ejecuta validación fail-fast de consistencia entre el valor configurado y
+   las colecciones existentes. Si hay mismatch, bloquea ingesta/consulta hasta
+   ejecutar limpieza y reingesta.
+- Cambio operativo recomendado de métrica:
+   1. Actualizar `CHROMA_HNSW_SPACE`.
+   2. Ejecutar `POST /admin/reset`.
+   3. Reingestar repositorios.
 
 ## Extractores de Simbolos
 

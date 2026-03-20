@@ -65,13 +65,20 @@ class _FakeClient:
     def __init__(self) -> None:
         """Inicializar mapa de colecciones para cliente falso."""
         self.collections: dict[str, _FakeCollection] = {}
+        self.metadata_calls: dict[str, dict[str, str] | None] = {}
 
-    def get_or_create_collection(self, name: str) -> _FakeCollection:
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: dict[str, str] | None = None,
+    ) -> _FakeCollection:
         """Devuelve o crea una colección falsa por nombre."""
+        self.metadata_calls[name] = metadata
         collection = self.collections.get(name)
         if collection is None:
             collection = _FakeCollection()
             self.collections[name] = collection
+        collection.metadata = metadata or {}
         return collection
 
     def delete_collection(self, name: str) -> None:
@@ -108,6 +115,34 @@ def test_upsert_is_split_by_chroma_max_batch_size(monkeypatch: pytest.MonkeyPatc
 
     calls = fake_client.collections["code_symbols"].calls
     assert calls == [3, 3, 1]
+
+
+def test_collections_are_created_with_configured_hnsw_space(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Propaga CHROMA_HNSW_SPACE al crear/abrir colecciones gestionadas."""
+    fake_client = _FakeClient()
+
+    import coderag.ingestion.index_chroma as module
+
+    monkeypatch.setattr(
+        module.chromadb,
+        "PersistentClient",
+        lambda *args, **kwargs: fake_client,
+    )
+    monkeypatch.setenv("CHROMA_HNSW_SPACE", "l2")
+    module.get_settings.cache_clear()
+    module.ChromaIndex._shared_client = None
+    module.ChromaIndex._shared_collections = None
+    module.ChromaIndex._shared_path = None
+
+    try:
+        module.ChromaIndex()
+    finally:
+        module.get_settings.cache_clear()
+
+    for metadata in fake_client.metadata_calls.values():
+        assert metadata == {"hnsw:space": "l2"}
 
 
 def test_upsert_recovers_from_dimension_message_error(
