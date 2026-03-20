@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 
 import requests
 
@@ -12,7 +13,7 @@ from coderag.core.provider_model_catalog import (
 )
 from coderag.core.settings import get_settings
 
-API_BASE = "http://127.0.0.1:8000"
+API_BASE = os.getenv("CODERAG_API_BASE", "http://127.0.0.1:8000")
 
 _NON_REMOTE_FALLBACK_WARNINGS = {
     "catalog_service_unavailable",

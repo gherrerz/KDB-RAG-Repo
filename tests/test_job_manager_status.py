@@ -1,6 +1,9 @@
 """Pruebas de estados operativos del JobManager durante la ingesta."""
 
-from coderag.core.models import JobStatus, RepoIngestRequest
+from datetime import datetime
+from uuid import uuid4
+
+from coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
 from coderag.jobs.worker import JobManager
 
 
@@ -124,3 +127,40 @@ def test_job_manager_marks_completed_when_repo_query_ready(
     assert runtime is not None
     assert runtime["last_embedding_provider"] is None
     assert runtime["last_embedding_model"] is None
+
+
+def test_job_manager_recovers_interrupted_running_jobs(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Convierte jobs running heredados en failed al reiniciar API."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+
+    first_manager = JobManager()
+    orphan = JobInfo(
+        id=str(uuid4()),
+        status=JobStatus.running,
+        progress=0.5,
+        logs=["Extrayendo símbolos..."],
+        repo_id="orphan-repo",
+        error=None,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    first_manager.store.upsert_job(orphan)
+
+    restarted_manager = JobManager()
+    recovered = restarted_manager.get_job(orphan.id)
+
+    assert recovered is not None
+    assert recovered.status == JobStatus.failed
+    assert recovered.error is not None
+    assert "interrumpido" in recovered.error.lower()

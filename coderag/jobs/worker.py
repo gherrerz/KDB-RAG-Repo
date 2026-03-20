@@ -18,6 +18,7 @@ class JobManager:
         self._metadata_path = settings.workspace_path.parent / "metadata.db"
         self._workspace_path = settings.workspace_path
         self.store = MetadataStore(self._metadata_path)
+        self.store.recover_interrupted_jobs()
         self._jobs: dict[str, JobInfo] = {}
 
     def list_repo_ids(self) -> list[str]:

@@ -96,6 +96,42 @@ class MetadataStore:
                 ),
             )
 
+    def recover_interrupted_jobs(self) -> int:
+        """Marca jobs queued/running como failed tras reinicio inesperado."""
+        reason = (
+            "Job interrumpido por reinicio del servicio. "
+            "Reintenta la ingesta."
+        )
+        now = datetime.utcnow().isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE jobs
+                SET
+                    status = ?,
+                    error = CASE
+                        WHEN error IS NULL OR error = '' THEN ?
+                        ELSE error
+                    END,
+                    logs = CASE
+                        WHEN logs IS NULL OR logs = '' THEN ?
+                        ELSE logs || char(10) || ?
+                    END,
+                    updated_at = ?
+                WHERE status IN (?, ?)
+                """,
+                (
+                    JobStatus.failed.value,
+                    reason,
+                    reason,
+                    reason,
+                    now,
+                    JobStatus.queued.value,
+                    JobStatus.running.value,
+                ),
+            )
+            return int(cursor.rowcount or 0)
+
     def get_job(self, job_id: str) -> JobInfo | None:
         """Lee la instantánea del trabajo por identificador."""
         with self._connect() as connection:

@@ -386,19 +386,37 @@ para evitar conflictos de puertos locales comunes.
 
 ## Ejemplos de Uso
 
-### 1) Ejecutar API
+### 1) Arranque recomendado (estable para UI + ingestas largas)
+
+```powershell
+./scripts/start_stable.ps1
+```
+
+Este flujo levanta Neo4j, API sin `--reload` y UI. Es el modo recomendado
+para evitar interrupciones de jobs durante la ingesta.
+
+### 2) Arranque desarrollo (con autoreload)
+
+```powershell
+./scripts/start_dev.ps1
+```
+
+Usa `--reload` para iterar rapido en backend. No se recomienda para ingestas
+largas porque los reinicios del servidor pueden interrumpir jobs en curso.
+
+### 3) Ejecutar API manual
 
 ```bash
 uvicorn coderag.api.server:app --reload
 ```
 
-### 2) Ejecutar UI
+### 4) Ejecutar UI manual
 
 ```bash
 python -m coderag.ui.main_window
 ```
 
-### 3) Ingestar repositorio (PowerShell)
+### 5) Ingestar repositorio (PowerShell)
 
 ```powershell
 $body = @{
@@ -410,7 +428,7 @@ $body = @{
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/repos/ingest -ContentType 'application/json' -Body $body
 ```
 
-### 4) Consultar
+### 6) Consultar
 
 ```powershell
 $q = @{

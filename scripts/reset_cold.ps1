@@ -4,13 +4,31 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+function Wait-Port {
+    param(
+        [Parameter(Mandatory = $true)][int]$Port,
+        [int]$Retries = 30,
+        [int]$DelaySeconds = 1
+    )
+
+    for ($attempt = 1; $attempt -le $Retries; $attempt++) {
+        $ok = Test-NetConnection 127.0.0.1 -Port $Port -WarningAction SilentlyContinue
+        if ($ok.TcpTestSucceeded) {
+            return $true
+        }
+        Start-Sleep -Seconds $DelaySeconds
+    }
+    return $false
+}
+
 Write-Host "[1/6] Deteniendo procesos Python de API/UI..."
 $patterns = @(
     "coderag.api.server:app",
     "-m uvicorn",
-    "-m coderag.ui.main_window"
+    "-m coderag.ui.main_window",
+    "--multiprocessing-fork"
 )
-$pythonProcs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'"
+$pythonProcs = Get-CimInstance Win32_Process | Where-Object { $_.Name -like "python*.exe" }
 foreach ($proc in $pythonProcs) {
     $cmd = [string]$proc.CommandLine
     foreach ($pattern in $patterns) {
@@ -42,7 +60,10 @@ New-Item -ItemType Directory -Path $chromaPath -Force | Out-Null
 New-Item -ItemType Directory -Path $bm25Path -Force | Out-Null
 New-Item -ItemType Directory -Path $workspacePath -Force | Out-Null
 
-Write-Host "[3/6] Limpiando grafo Neo4j..."
+Write-Host "[3/7] Levantando Neo4j (compose helper)..."
+& ./scripts/compose_neo4j.ps1 up
+
+Write-Host "[4/7] Limpiando grafo Neo4j..."
 $pythonExe = Join-Path $root ".venv/Scripts/python.exe"
 if (-not (Test-Path $pythonExe)) {
     throw "No se encontró el ejecutable Python del entorno virtual: $pythonExe"
@@ -113,7 +134,7 @@ if (-not $neo4jCleared) {
     Write-Host "  - aviso: no se pudo limpiar Neo4j tras $neo4jRetries intentos; se continúa con el reset local."
 }
 
-Write-Host "[4/6] Verificando tamaño Chroma..."
+Write-Host "[5/7] Verificando tamaño Chroma..."
 $dbPath = Join-Path $chromaPath "chroma.sqlite3"
 if (Test-Path $dbPath) {
     $size = (Get-Item $dbPath).Length
@@ -122,11 +143,15 @@ if (Test-Path $dbPath) {
     Write-Host "  - chroma.sqlite3 no existe (estado limpio)"
 }
 
-Write-Host "[5/6] Levantando API..."
+Write-Host "[6/7] Levantando API..."
+$env:HEALTH_CHECK_OPENAI = "false"
+$env:CODERAG_API_BASE = "http://127.0.0.1:8000"
 Start-Process -FilePath $pythonExe -ArgumentList "-m uvicorn coderag.api.server:app --host 127.0.0.1 --port 8000" -WorkingDirectory $root | Out-Null
-Start-Sleep -Seconds 2
+if (-not (Wait-Port -Port 8000 -Retries 30 -DelaySeconds 1)) {
+    throw "API no quedó disponible en 127.0.0.1:8000 tras reset cold"
+}
 
-Write-Host "[6/6] Levantando UI..."
+Write-Host "[7/7] Levantando UI..."
 Start-Process -FilePath $pythonExe -ArgumentList "-m coderag.ui.main_window" -WorkingDirectory $root | Out-Null
 
 Write-Host "Reset en frío completado."
