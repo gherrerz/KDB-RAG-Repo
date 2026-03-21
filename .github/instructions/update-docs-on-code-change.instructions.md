@@ -177,8 +177,8 @@ Automatically check if documentation updates are needed when:
 **Update configuration docs when:**
 
 - New environment variables are added
-  - Add to .env.example file
-  - Document in README.md or docs/configuration.md
+  - Add to [.env.example](../../.env.example) file
+  - Document in [README.md](../../README.md) or [docs/CONFIGURATION.md](../../docs/CONFIGURATION.md)
   - Include default values and descriptions
 
 - Config file structure changes
@@ -218,15 +218,15 @@ If `apply-doc-file-structure == true`, then apply the following configurable ins
 
 Maintain these documentation files and update as needed:
 
-- **README.md**: Project overview, quick start, basic usage
-- **CHANGELOG.md**: Version history and user-facing changes
-- **docs/**: Detailed documentation
-  - `installation.md`: Setup and installation guide
-  - `configuration.md`: Configuration options and examples
-  - `api.md`: API reference documentation
-  - `contributing.md`: Contribution guidelines
-  - `migration-guides/`: Version migration guides
-- **examples/**: Working code examples and tutorials
+- [README.md](../../README.md): Project overview, quick start, basic usage
+- [CHANGELOG.md](../../CHANGELOG.md): Version history and user-facing changes
+- [docs/](../../docs/): Detailed documentation
+  - [INSTALLATION.md](../../docs/INSTALLATION.md): Setup and installation guide
+  - [CONFIGURATION.md](../../docs/CONFIGURATION.md): Configuration options and examples
+  - [API_REFERENCE.md](../../docs/API_REFERENCE.md): API reference documentation
+  - [CONTRIBUTING.md](../../docs/CONTRIBUTING.md): Contribution guidelines
+  - [migration-guides/](../../docs/migration-guides/): Version migration guides
+- [examples/](../../examples/): Working code examples and tutorials
 
 ### Changelog Management
 
@@ -528,13 +528,13 @@ Before considering documentation complete, and concluding on the **final procedu
 
 - [ ] **Compiled instructions** are based on the sum of **constant instruction sections** and
 **configurable instruction sections**
-- [ ] README.md reflects current project state
+- [ ] [README.md](../../README.md) reflects current project state
 - [ ] All new features are documented
 - [ ] Code examples are tested and work
 - [ ] API documentation is complete and accurate
 - [ ] Configuration examples are up to date
 - [ ] Breaking changes are documented with migration guide
-- [ ] CHANGELOG.md is updated
+- [ ] [CHANGELOG.md](../../CHANGELOG.md) is updated
 - [ ] Links are valid and not broken
 - [ ] Installation instructions are current
 - [ ] Environment variables are documented

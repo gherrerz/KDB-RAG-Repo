@@ -64,9 +64,9 @@ flowchart LR
 
 | Journey | Entrada | Salida | Referencia |
 |---|---|---|---|
-| Ingesta | POST /repos/ingest | Job con estado y logs | docs/ARCHITECTURE.md |
-| Query con LLM | POST /query | Answer con citas + diagnostics | docs/API_REFERENCE.md |
-| Query retrieval-only | POST /query/retrieval | Chunks + citations + stats | docs/API_REFERENCE.md |
+| Ingesta | POST /repos/ingest | Job con estado y logs | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Query con LLM | POST /query | Answer con citas + diagnostics | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) |
+| Query retrieval-only | POST /query/retrieval | Chunks + citations + stats | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) |
 
 ## API Rapida
 
@@ -86,14 +86,14 @@ Rutas principales:
 
 Referencia completa por journeys y contratos:
 
-- docs/API_REFERENCE.md
+- [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
 
 ## Errores HTTP frecuentes
 
 Si recibes errores durante ingesta o consulta:
 
-- Revisa guia de troubleshooting: docs/TROUBLESHOOTING.md
-- Revisa matriz de accion recomendada: docs/API_REFERENCE.md#matriz-de-accion-recomendada
+- Revisa guia de troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- Revisa matriz de accion recomendada: [docs/API_REFERENCE.md#matriz-de-accion-recomendada](docs/API_REFERENCE.md#matriz-de-accion-recomendada)
 
 Atajo de diagnostico:
 
@@ -137,21 +137,21 @@ Invoke-RestMethod -Method Delete -Uri http://127.0.0.1:8000/repos/mall
 
 ## Documentacion
 
-- Instalacion: docs/INSTALLATION.md
-- Configuracion: docs/CONFIGURATION.md
-- Arquitectura y secuencias Mermaid: docs/ARCHITECTURE.md
-- API detallada: docs/API_REFERENCE.md
-- Troubleshooting: docs/TROUBLESHOOTING.md
-- Extractores de simbolos: docs/SYMBOL_EXTRACTORS.md
-- Guia de contribucion: docs/CONTRIBUTING.md
-- Migraciones: docs/migration-guides/README.md
-- Historial de cambios: CHANGELOG.md
+- Instalacion: [docs/INSTALLATION.md](docs/INSTALLATION.md)
+- Configuracion: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+- Arquitectura y secuencias Mermaid: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- API detallada: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
+- Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- Extractores de simbolos: [docs/SYMBOL_EXTRACTORS.md](docs/SYMBOL_EXTRACTORS.md)
+- Guia de contribucion: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+- Migraciones: [docs/migration-guides/README.md](docs/migration-guides/README.md)
+- Historial de cambios: [CHANGELOG.md](CHANGELOG.md)
 
 ## Ejemplos Ejecutables
 
-- Python: examples/python/
-- Curl: examples/curl/
-- PowerShell: examples/powershell/
+- Python: [examples/python/](examples/python/)
+- Curl: [examples/curl/](examples/curl/)
+- PowerShell: [examples/powershell/](examples/powershell/)
 
 Resultado esperado de los ejemplos:
 
