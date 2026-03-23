@@ -35,32 +35,35 @@ LLM o salida retrieval-only segun endpoint y condiciones operativas.
 ```mermaid
 flowchart TB
     subgraph L1[Layer 1 - Experience]
-        UI[PySide6 Desktop UI]
+        UI[PySide6<br/>Desktop UI]
     end
 
     subgraph L2[Layer 2 - API and Application]
-        API[FastAPI - coderag/api/server.py]
-        QS[Query Service - coderag/api/query_service.py]
+        API[FastAPI<br/>coderag/api/server.py]
+        QS[Query Service<br/>coderag/api/query_service.py]
     end
 
     subgraph L3[Layer 3 - Domain and Orchestration]
-        JM[JobManager - coderag/jobs/worker.py]
-        ING[Ingestion Pipeline - coderag/ingestion/*]
-        RET[Retrieval Pipeline - coderag/retrieval/*]
-        HEALTH[Storage Health - coderag/core/storage_health.py]
+        JM[JobManager<br/>coderag/jobs/worker.py]
+        ING[Ingestion Pipeline<br/>coderag/ingestion/*]
+        RET[Retrieval Pipeline<br/>coderag/retrieval/*]
+        HEALTH[Storage Health<br/>coderag/core/storage_health.py]
     end
 
     subgraph L4[Layer 4 - AI and Model Integration]
-        LLM[LLM Clients - coderag/llm/*]
-        EMB[Embedding Clients - coderag/ingestion/embedding.py]
+        LLM[LLM Clients<br/>coderag/llm/*]
+        EMB[Embedding Clients<br/>coderag/ingestion/embedding.py]
     end
 
     subgraph L5[Layer 5 - Data and Infrastructure]
+        IDX[(Retrieval Stores)]
+        OPS[(Operational Stores)]
+
         CH[(ChromaDB)]
         BM[(BM25 in-memory)]
         NEO[(Neo4j)]
-        META[(SQLite metadata.db)]
-        WS[(Workspace local clones)]
+        META[(SQLite<br/>metadata.db)]
+        WS[(Workspace<br/>local clones)]
     end
 
     UI --> API
@@ -73,14 +76,15 @@ flowchart TB
     ING --> EMB
     QS --> LLM
 
-    ING --> CH
-    ING --> BM
-    ING --> NEO
-    JM --> META
-    JM --> WS
-    RET --> CH
-    RET --> BM
-    RET --> NEO
+    ING --> IDX
+    RET --> IDX
+    JM --> OPS
+
+    IDX --> CH
+    IDX --> BM
+    IDX --> NEO
+    OPS --> META
+    OPS --> WS
 ```
 
 ### Notas sobre las capas
