@@ -34,6 +34,11 @@ BENCH_CODE = dedent(
         original_hybrid = qs.hybrid_search
         original_rerank = qs.rerank
         original_expand = qs.expand_with_graph
+        original_expand_with_diagnostics = getattr(
+            qs,
+            "expand_with_graph_with_diagnostics",
+            None,
+        )
         original_discover = qs._discover_repo_modules
         original_is_module = qs._is_module_query
         original_assemble = qs.assemble_context
@@ -41,8 +46,20 @@ BENCH_CODE = dedent(
 
         class _Client:
             enabled = False
+            provider = "none"
+            answer_model = "none"
+            verifier_model = "none"
 
-        def fake_hybrid(repo_id: str, query: str, top_n: int):
+            def __init__(self, *args, **kwargs):
+                return None
+
+        def fake_hybrid(*args, **kwargs):
+            top_n = int(kwargs.get("top_n", 20))
+            if len(args) >= 3:
+                try:
+                    top_n = int(args[2])
+                except Exception:
+                    top_n = int(kwargs.get("top_n", 20))
             sleep(0.06)
             return [
                 RetrievalChunk(
@@ -54,25 +71,45 @@ BENCH_CODE = dedent(
                 for idx in range(max(1, min(top_n, 20)))
             ]
 
-        def fake_rerank(chunks, top_k: int):
+        def fake_rerank(chunks, top_k: int = 15, *args, **kwargs):
+            try:
+                effective_top_k = int(kwargs.get("top_k", top_k))
+            except Exception:
+                effective_top_k = top_k
             sleep(0.02)
-            return chunks[: max(1, min(top_k, len(chunks)))]
+            return chunks[: max(1, min(effective_top_k, len(chunks)))]
 
         def fake_expand(chunks):
             sleep(0.08)
             return [{"seed": "id-1", "labels": ["Symbol"], "props": {"name": "x"}}]
 
-        def fake_discover(repo_id: str):
+        def fake_expand_with_diagnostics(chunks):
+            sleep(0.08)
+            return (
+                [{"seed": "id-1", "labels": ["Symbol"], "props": {"name": "x"}}],
+                {
+                    "semantic_query_enabled": False,
+                    "semantic_relation_types": [],
+                    "semantic_edges_used": 0,
+                    "semantic_nodes_used": 0,
+                    "semantic_expand_ms": 80.0,
+                    "semantic_pruned_edges": 0,
+                },
+            )
+
+        def fake_discover(*_args, **_kwargs):
             sleep(0.07)
             return ["core", "api"]
 
-        def fake_assemble(chunks, graph_records, max_tokens: int):
+        def fake_assemble(chunks, graph_records, max_tokens: int = 2000, *args, **kwargs):
             return "ctx"
 
         try:
             qs.hybrid_search = fake_hybrid
             qs.rerank = fake_rerank
             qs.expand_with_graph = fake_expand
+            if hasattr(qs, "expand_with_graph_with_diagnostics"):
+                qs.expand_with_graph_with_diagnostics = fake_expand_with_diagnostics
             qs._discover_repo_modules = fake_discover
             qs._is_module_query = (lambda q: module_query)
             qs.assemble_context = fake_assemble
@@ -93,6 +130,8 @@ BENCH_CODE = dedent(
             qs.hybrid_search = original_hybrid
             qs.rerank = original_rerank
             qs.expand_with_graph = original_expand
+            if original_expand_with_diagnostics is not None:
+                qs.expand_with_graph_with_diagnostics = original_expand_with_diagnostics
             qs._discover_repo_modules = original_discover
             qs._is_module_query = original_is_module
             qs.assemble_context = original_assemble
@@ -108,13 +147,16 @@ BENCH_CODE = dedent(
         original_bm25 = hs.GLOBAL_BM25
 
         class FakeEmbeddingClient:
-            def __init__(self):
+            def __init__(self, *args, **kwargs):
                 self.client = object()
 
             def embed_texts(self, texts):
                 return [[0.1] * 4 for _ in texts]
 
         class FakeChromaIndex:
+            def __init__(self, *args, **kwargs):
+                return None
+
             def query(self, collection_name, query_embedding, top_n, where=None):
                 sleep(0.05)
                 return {
@@ -125,6 +167,9 @@ BENCH_CODE = dedent(
                 }
 
         class FakeBM25:
+            def ensure_repo_loaded(self, repo_id):
+                return None
+
             def query(self, repo_id, text, top_n=50):
                 sleep(0.04)
                 return [
@@ -229,8 +274,16 @@ def run_bench(python_exe: str, repo_path: Path) -> dict[str, dict[str, float]]:
         cwd=str(repo_path),
         capture_output=True,
         text=True,
-        check=True,
     )
+    if completed.returncode != 0:
+        stdout_tail = "\n".join(completed.stdout.strip().splitlines()[-20:])
+        stderr_tail = "\n".join(completed.stderr.strip().splitlines()[-20:])
+        raise RuntimeError(
+            "Benchmark embebido falló "
+            f"(repo_path={repo_path}, returncode={completed.returncode}).\n"
+            f"STDOUT tail:\n{stdout_tail}\n\n"
+            f"STDERR tail:\n{stderr_tail}"
+        )
     raw = completed.stdout.strip().splitlines()[-1]
     return json.loads(raw)
 

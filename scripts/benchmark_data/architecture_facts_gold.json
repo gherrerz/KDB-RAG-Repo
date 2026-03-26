@@ -1,0 +1,104 @@
+{
+  "queries": [
+    {
+      "query": "explica la arquitectura general del sistema y sus capas principales",
+      "expected_facts": [
+        "api",
+        "ingestion",
+        "retrieval",
+        "storage",
+        "llm"
+      ]
+    },
+    {
+      "query": "describe como fluye una consulta desde la API hasta la generacion de respuesta",
+      "expected_facts": [
+        "query_service",
+        "hybrid_search",
+        "graph_expand",
+        "assemble_context",
+        "answerclient"
+      ]
+    },
+    {
+      "query": "que modulos participan en ingestion, retrieval y llm y como se conectan",
+      "expected_facts": [
+        "pipeline",
+        "graph_builder",
+        "hybrid_search",
+        "rerank",
+        "openai_client"
+      ]
+    },
+    {
+      "query": "describe la relacion entre query_service, hybrid_search y graph_expand",
+      "expected_facts": [
+        "query_service",
+        "hybrid_search",
+        "graph_expand",
+        "diagnostics",
+        "citations"
+      ]
+    },
+    {
+      "query": "como se integra el pipeline de inventory con el resto de la arquitectura",
+      "expected_facts": [
+        "inventory",
+        "query_service",
+        "graph_builder",
+        "inventory_target",
+        "citations"
+      ]
+    },
+    {
+      "query": "explica como se gestionan providers y modelos en la arquitectura",
+      "expected_facts": [
+        "settings",
+        "provider",
+        "model",
+        "capabilities",
+        "resolve"
+      ]
+    },
+    {
+      "query": "que componentes sostienen trazabilidad y citas en respuestas de query",
+      "expected_facts": [
+        "citations",
+        "path",
+        "start_line",
+        "end_line",
+        "diagnostics"
+      ]
+    },
+    {
+      "query": "describe el manejo de fallback cuando falla la verificacion o el modelo",
+      "expected_facts": [
+        "fallback_reason",
+        "verification_failed",
+        "generation_error",
+        "not_configured",
+        "time_budget_exhausted"
+      ]
+    },
+    {
+      "query": "como se controla presupuesto de tiempo y diagnosticos por etapa en query",
+      "expected_facts": [
+        "query_budget_seconds",
+        "stage_timings_ms",
+        "hybrid_search_ms",
+        "graph_expand_ms",
+        "llm_answer_ms"
+      ]
+    },
+    {
+      "query": "explica el rol de settings y feature flags semanticos en tiempo de ejecucion",
+      "expected_facts": [
+        "semantic_graph_query_enabled",
+        "semantic_relation_types",
+        "semantic_graph_query_max_edges",
+        "semantic_graph_query_max_nodes",
+        "semantic_graph_query_fallback_to_structural"
+      ]
+    }
+  ]
+}

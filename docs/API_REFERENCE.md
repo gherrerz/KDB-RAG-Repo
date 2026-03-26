@@ -176,8 +176,36 @@ Limpia todo el estado indexado.
 | `logs` | `list[str]` | sí | Líneas de log |
 | `repo_id` | `str | null` | sí | Se completa cuando aplica |
 | `error` | `str | null` | sí | Error si falla |
+| `diagnostics` | `dict[str, Any]` | sí | Diagnósticos estructurados de ingesta |
 | `created_at` | `datetime` | sí | Timestamp UTC |
 | `updated_at` | `datetime` | sí | Timestamp UTC |
+
+Notas de `diagnostics` en jobs de ingesta con grafo semántico habilitado:
+
+- `semantic_graph.enabled`: `true|false`
+- `semantic_graph.status`: `ok|fallback|disabled`
+- `semantic_graph.relation_counts`: total de relaciones semánticas extraídas
+- `semantic_graph.relation_counts_by_type`: conteos por tipo (`CALLS`, `IMPORTS`, `EXTENDS`, `IMPLEMENTS`)
+- `semantic_graph.java_cross_file_resolved_count`: relaciones Java resueltas hacia símbolos en archivos distintos
+- `semantic_graph.java_cross_file_resolved_by_type`: desglose por tipo de relación Java resuelta cross-file
+- `semantic_graph.java_resolution_source_counts`: desglose por origen de resolución Java (`local`, `import`, `import_wildcard`, `static_import_member`, `static_import_wildcard`, `same_package`, `global_unique`, `fqcn`)
+- `semantic_graph.typescript_resolution_source_counts`: desglose por origen de resolución TypeScript (ej. `local`, `global_unique`, `unresolved`)
+- `semantic_graph.unresolved_count`: cantidad de relaciones con target no resuelto
+- `semantic_graph.unresolved_by_type`: desglose de no resueltos por tipo de relación
+- `semantic_graph.unresolved_ratio`: proporción de targets no resueltos
+- `semantic_graph.semantic_extraction_ms`: latencia de extracción semántica
+
+Notas de `diagnostics` en respuestas de query/retrieval con expansión semántica habilitada:
+
+- `semantic_query_enabled`: indica si se activó ruta de expansión semántica en query
+- `semantic_relation_types`: tipos de relación usados para expansión (`SEMANTIC_RELATION_TYPES`)
+- `semantic_edges_used`: aristas efectivamente usadas por expansión
+- `semantic_nodes_used`: nodos de grafo efectivamente incorporados
+- `semantic_expand_ms`: latencia de expansión semántica
+- `semantic_pruned_edges`: aristas podadas por budgets de query
+- `semantic_noise_ratio`: proporción de aristas podadas sobre total evaluado
+- `semantic_fallback_used`: indica si se activó degradación a expansión estructural
+- `semantic_fallback_reason`: causa de fallback (`semantic_budget_pruned_all`, `semantic_exception`)
 
 ### QueryRequest
 

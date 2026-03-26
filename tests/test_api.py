@@ -73,6 +73,74 @@ def test_get_job_supports_logs_tail(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["logs"] == ["l3", "l4"]
+    assert payload["diagnostics"] == {}
+
+
+def test_get_job_exposes_semantic_diagnostics_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retorna métricas semánticas por tipo dentro de diagnostics en jobs."""
+
+    def fake_get_job(_job_id: str) -> JobInfo:
+        return JobInfo(
+            id="job-2",
+            status=JobStatus.completed,
+            progress=1.0,
+            logs=["Ingesta finalizada"],
+            diagnostics={
+                "semantic_graph": {
+                    "enabled": True,
+                    "status": "ok",
+                    "relation_counts": 7,
+                    "relation_counts_by_type": {
+                        "CALLS": 4,
+                        "IMPORTS": 2,
+                        "EXTENDS": 1,
+                    },
+                    "java_cross_file_resolved_count": 3,
+                    "java_cross_file_resolved_by_type": {
+                        "CALLS": 2,
+                        "IMPLEMENTS": 1,
+                    },
+                    "java_resolution_source_counts": {
+                        "import": 2,
+                        "static_import_member": 1,
+                        "same_package": 1,
+                    },
+                    "unresolved_count": 2,
+                    "unresolved_by_type": {
+                        "IMPORTS": 2,
+                    },
+                    "unresolved_ratio": 0.2857,
+                    "semantic_extraction_ms": 19.4,
+                }
+            },
+        )
+
+    monkeypatch.setattr(server.jobs, "get_job", fake_get_job)
+    client = TestClient(app)
+
+    response = client.get("/jobs/job-2")
+    assert response.status_code == 200
+    payload = response.json()
+    semantic = payload["diagnostics"]["semantic_graph"]
+
+    assert semantic["relation_counts_by_type"] == {
+        "CALLS": 4,
+        "IMPORTS": 2,
+        "EXTENDS": 1,
+    }
+    assert semantic["java_cross_file_resolved_count"] == 3
+    assert semantic["java_cross_file_resolved_by_type"] == {
+        "CALLS": 2,
+        "IMPLEMENTS": 1,
+    }
+    assert semantic["java_resolution_source_counts"] == {
+        "import": 2,
+        "static_import_member": 1,
+        "same_package": 1,
+    }
+    assert semantic["unresolved_by_type"] == {"IMPORTS": 2}
 
 
 def test_admin_reset_returns_summary(monkeypatch) -> None:

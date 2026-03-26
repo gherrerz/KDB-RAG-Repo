@@ -30,7 +30,7 @@ from coderag.api.query_diagnostics import (
 from coderag.ingestion.graph_builder import GraphBuilder
 from coderag.llm.openai_client import AnswerClient
 from coderag.retrieval.context_assembler import assemble_context
-from coderag.retrieval.graph_expand import expand_with_graph
+from coderag.retrieval.graph_expand import expand_with_graph, expand_with_graph_with_diagnostics
 from coderag.retrieval.hybrid_search import hybrid_search
 from coderag.retrieval.reranker import rerank
 
@@ -1505,11 +1505,13 @@ def _safe_discover_repo_modules(repo_id: str, query: str) -> list[str]:
         return []
 
 
-def _timed_graph_expand(chunks: list[RetrievalChunk]) -> tuple[list[dict], float]:
-    """Ejecuta expansión de grafo y devuelve resultado junto con latencia en ms."""
+def _timed_graph_expand(
+    chunks: list[RetrievalChunk],
+) -> tuple[list[dict], float, dict[str, object]]:
+    """Ejecuta expansión de grafo y devuelve resultado/latencia/diagnostics."""
     started_at = monotonic()
-    result = expand_with_graph(chunks=chunks)
-    return result, _elapsed_milliseconds(started_at)
+    result, semantic_diagnostics = expand_with_graph_with_diagnostics(chunks=chunks)
+    return result, _elapsed_milliseconds(started_at), semantic_diagnostics
 
 
 def _timed_module_discovery(repo_id: str, query: str) -> tuple[list[str], float]:
@@ -1829,7 +1831,9 @@ def run_retrieval_query(
     stage_timings["rerank_ms"] = _elapsed_milliseconds(rerank_started_at)
 
     graph_started_at = monotonic()
-    graph_context = expand_with_graph(chunks=reranked)
+    graph_context, semantic_expand_diagnostics = expand_with_graph_with_diagnostics(
+        chunks=reranked
+    )
     stage_timings["graph_expand_ms"] = _elapsed_milliseconds(graph_started_at)
 
     context: str | None = None
@@ -1895,6 +1899,7 @@ def run_retrieval_query(
         ),
         stage_timings=stage_timings,
         fallback_reason=None,
+        semantic_diagnostics=semantic_expand_diagnostics,
     )
 
     return RetrievalQueryResponse(
@@ -1995,7 +2000,7 @@ def run_query(
     with ThreadPoolExecutor(max_workers=2) as executor:
         graph_future = executor.submit(_timed_graph_expand, reranked)
         modules_future = executor.submit(_timed_module_discovery, repo_id, query)
-        graph_context, graph_ms = graph_future.result()
+        graph_context, graph_ms, semantic_expand_diagnostics = graph_future.result()
         discovered_modules, module_ms = modules_future.result()
     stage_timings["graph_expand_ms"] = graph_ms
     stage_timings["module_discovery_ms"] = module_ms
@@ -2150,5 +2155,6 @@ def run_query(
         inventory_intent=inventory_intent,
         inventory_target=inventory_target,
         llm_error=llm_error,
+        semantic_diagnostics=semantic_expand_diagnostics,
     )
     return QueryResponse(answer=answer, citations=citations, diagnostics=diagnostics)

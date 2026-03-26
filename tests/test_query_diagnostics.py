@@ -48,6 +48,10 @@ def test_build_query_diagnostics_includes_optional_llm_error() -> None:
         inventory_intent=True,
         inventory_target=None,
         llm_error="timeout",
+        semantic_diagnostics={
+            "semantic_query_enabled": True,
+            "semantic_edges_used": 4,
+        },
     )
 
     assert diagnostics["retrieved"] == 2
@@ -62,6 +66,8 @@ def test_build_query_diagnostics_includes_optional_llm_error() -> None:
         "dimension": 1536,
     }
     assert diagnostics["llm_error"] == "timeout"
+    assert diagnostics["semantic_query_enabled"] is True
+    assert diagnostics["semantic_edges_used"] == 4
 
 
 def test_build_query_diagnostics_defaults_capabilities_to_empty() -> None:
@@ -99,3 +105,32 @@ def test_build_query_diagnostics_defaults_capabilities_to_empty() -> None:
     assert diagnostics["llm_capabilities"] == {}
     assert diagnostics["embedding_capabilities"] == {}
     assert "llm_error" not in diagnostics
+
+
+def test_build_retrieval_diagnostics_merges_semantic_payload() -> None:
+    """Incluye diagnostics semánticos en el payload retrieval-only."""
+    from coderag.api.query_diagnostics import build_retrieval_diagnostics
+
+    diagnostics = build_retrieval_diagnostics(
+        settings=_SettingsWithoutCapabilities(),
+        retrieved_count=2,
+        reranked_count=1,
+        graph_nodes_count=1,
+        context_chars=0,
+        raw_citations_count=1,
+        filtered_citations_count=1,
+        returned_citations_count=1,
+        embedding_provider="openai",
+        embedding_model="text-embedding-3-small",
+        budget_seconds=10.0,
+        budget_exhausted=False,
+        stage_timings={"graph_expand_ms": 5.0},
+        fallback_reason=None,
+        semantic_diagnostics={
+            "semantic_query_enabled": True,
+            "semantic_nodes_used": 3,
+        },
+    )
+
+    assert diagnostics["semantic_query_enabled"] is True
+    assert diagnostics["semantic_nodes_used"] == 3

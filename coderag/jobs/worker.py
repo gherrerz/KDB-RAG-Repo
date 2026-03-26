@@ -126,6 +126,8 @@ class JobManager:
             from coderag.ingestion.pipeline import ingest_repository
             from coderag.core.storage_health import get_repo_query_status
 
+            ingest_diagnostics: dict[str, object] = {}
+
             repo_id = ingest_repository(
                 repo_url=request.repo_url,
                 branch=request.branch,
@@ -133,8 +135,10 @@ class JobManager:
                 embedding_provider=request.embedding_provider,
                 embedding_model=request.embedding_model,
                 logger=logger,
+                diagnostics_sink=ingest_diagnostics,
             )
             job.repo_id = repo_id
+            job.diagnostics = ingest_diagnostics
             self.store.upsert_repo_runtime(
                 repo_id=repo_id,
                 repo_url=request.repo_url,

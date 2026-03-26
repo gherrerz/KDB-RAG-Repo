@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -75,6 +75,13 @@ class JobInfo(BaseModel):
     error: str | None = Field(
         default=None,
         description="Detalle de error si el job finaliza en estado failed.",
+    )
+    diagnostics: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Diagnósticos estructurados de ingesta (por ejemplo, métricas "
+            "semánticas) cuando estén disponibles."
+        ),
     )
     created_at: datetime = Field(
         default_factory=datetime.utcnow,
@@ -411,6 +418,24 @@ class SymbolChunk(BaseModel):
     start_line: int
     end_line: int
     snippet: str
+
+
+SemanticRelationType = Literal["CALLS", "IMPORTS", "EXTENDS", "IMPLEMENTS"]
+
+
+class SemanticRelation(BaseModel):
+    """Relación semántica extraída entre símbolos o referencias externas."""
+
+    repo_id: str
+    source_symbol_id: str
+    relation_type: SemanticRelationType
+    target_symbol_id: str | None = None
+    target_ref: str
+    target_kind: str
+    path: str
+    line: int
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    language: str
 
 
 class RetrievalChunk(BaseModel):

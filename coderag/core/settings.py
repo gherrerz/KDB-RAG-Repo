@@ -94,6 +94,46 @@ class Settings(BaseSettings):
         default=True,
         alias="SYMBOL_EXTRACTOR_V2_ENABLED",
     )
+    semantic_graph_enabled: bool = Field(
+        default=False,
+        alias="SEMANTIC_GRAPH_ENABLED",
+    )
+    semantic_graph_java_enabled: bool = Field(
+        default=False,
+        alias="SEMANTIC_GRAPH_JAVA_ENABLED",
+    )
+    semantic_graph_typescript_enabled: bool = Field(
+        default=False,
+        alias="SEMANTIC_GRAPH_TYPESCRIPT_ENABLED",
+    )
+    semantic_graph_query_enabled: bool = Field(
+        default=False,
+        alias="SEMANTIC_GRAPH_QUERY_ENABLED",
+    )
+    semantic_relation_types: str = Field(
+        default="CALLS,IMPORTS,EXTENDS,IMPLEMENTS",
+        alias="SEMANTIC_RELATION_TYPES",
+    )
+    semantic_graph_query_max_edges: int = Field(
+        default=400,
+        alias="SEMANTIC_GRAPH_QUERY_MAX_EDGES",
+    )
+    semantic_graph_query_max_nodes: int = Field(
+        default=200,
+        alias="SEMANTIC_GRAPH_QUERY_MAX_NODES",
+    )
+    semantic_graph_query_max_ms: float = Field(
+        default=120.0,
+        alias="SEMANTIC_GRAPH_QUERY_MAX_MS",
+    )
+    semantic_relation_weights: str = Field(
+        default="CALLS:1.0,IMPORTS:0.7,EXTENDS:1.1,IMPLEMENTS:1.0",
+        alias="SEMANTIC_RELATION_WEIGHTS",
+    )
+    semantic_graph_query_fallback_to_structural: bool = Field(
+        default=True,
+        alias="SEMANTIC_GRAPH_QUERY_FALLBACK_TO_STRUCTURAL",
+    )
     health_check_strict: bool = Field(default=True, alias="HEALTH_CHECK_STRICT")
     health_check_timeout_seconds: float = Field(
         default=5.0,
@@ -150,6 +190,59 @@ class Settings(BaseSettings):
         if candidate in {"l2", "cosine"}:
             return candidate  # type: ignore[return-value]
         return "cosine"
+
+    def resolve_semantic_relation_types(
+        self,
+        override: str | None = None,
+    ) -> list[str]:
+        """Resuelve tipos de relación semántica válidos para query expansion."""
+        raw_value = (override or self.semantic_relation_types or "").strip()
+        allowed = {"CALLS", "IMPORTS", "EXTENDS", "IMPLEMENTS"}
+        values: list[str] = []
+        seen: set[str] = set()
+        for token in raw_value.split(","):
+            normalized = token.strip().upper()
+            if not normalized or normalized not in allowed:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            values.append(normalized)
+        return values
+
+    def resolve_semantic_relation_weights(
+        self,
+        override: str | None = None,
+    ) -> dict[str, float]:
+        """Resuelve pesos por tipo de relación semántica para scoring en query."""
+        defaults = {
+            "CALLS": 1.0,
+            "IMPORTS": 0.7,
+            "EXTENDS": 1.1,
+            "IMPLEMENTS": 1.0,
+        }
+        raw_value = (override or self.semantic_relation_weights or "").strip()
+        if not raw_value:
+            return defaults
+
+        parsed = dict(defaults)
+        allowed = set(defaults)
+        for token in raw_value.split(","):
+            entry = token.strip()
+            if not entry or ":" not in entry:
+                continue
+            relation_type, raw_weight = entry.split(":", maxsplit=1)
+            normalized_type = relation_type.strip().upper()
+            if normalized_type not in allowed:
+                continue
+            try:
+                weight = float(raw_weight.strip())
+            except ValueError:
+                continue
+            if weight <= 0:
+                continue
+            parsed[normalized_type] = weight
+        return parsed
 
     def resolve_embedding_model(self, provider: ProviderName, override: str | None = None) -> str:
         """Resuelve el modelo de embeddings manteniendo fallback legado OpenAI."""

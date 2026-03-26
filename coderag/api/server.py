@@ -152,6 +152,7 @@ def get_job(
         logs=selected_logs,
         repo_id=job.repo_id,
         error=job.error,
+        diagnostics=job.diagnostics,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )

@@ -1,9 +1,11 @@
 """Orquestador de canalización de ingesta de alto nivel."""
 
+from collections import Counter
 from collections import defaultdict
+from time import perf_counter
 from typing import Callable
 
-from coderag.core.models import ScannedFile, SymbolChunk
+from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
 from coderag.core.settings import get_settings
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.embedding import EmbeddingClient
@@ -12,6 +14,9 @@ from coderag.ingestion.graph_builder import GraphBuilder
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import ChromaIndex
 from coderag.ingestion.repo_scanner import scan_repository_with_stats
+from coderag.ingestion.semantic_java import extract_java_semantic_relations
+from coderag.ingestion.semantic_python import extract_python_semantic_relations
+from coderag.ingestion.semantic_typescript import extract_typescript_semantic_relations
 from coderag.ingestion.summarizer import summarize_file, summarize_modules
 
 LoggerFn = Callable[[str], None]
@@ -157,6 +162,7 @@ def ingest_repository(
     logger: LoggerFn,
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
+    diagnostics_sink: dict[str, object] | None = None,
 ) -> str:
     """Ejecute la ingesta completa del repositorio y devuelva el identificador del repositorio."""
     settings = get_settings()
@@ -230,7 +236,13 @@ def ingest_repository(
 
     logger("Construyendo grafo Neo4j...")
     try:
-        _index_graph(repo_id, scanned_files, symbol_chunks)
+        _index_graph(
+            repo_id,
+            scanned_files,
+            symbol_chunks,
+            logger=logger,
+            diagnostics_sink=diagnostics_sink,
+        )
     except Exception as exc:
         logger(f"Advertencia: grafo Neo4j no disponible ({exc})")
 
@@ -415,14 +427,150 @@ def _index_graph(
     repo_id: str,
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
+    logger: LoggerFn | None = None,
+    diagnostics_sink: dict[str, object] | None = None,
 ) -> None:
     """Llene el almacén de gráficos Neo4j con relaciones archivo-símbolo."""
+    settings = get_settings()
+    semantic_enabled = bool(getattr(settings, "semantic_graph_enabled", False))
+    java_semantic_enabled = bool(
+        getattr(settings, "semantic_graph_java_enabled", False)
+    )
+    typescript_semantic_enabled = bool(
+        getattr(settings, "semantic_graph_typescript_enabled", False)
+    )
+    semantic_relations: list[SemanticRelation] = []
+
+    if semantic_enabled:
+        started_at = perf_counter()
+        extraction_failed = False
+        extraction_error: str | None = None
+        java_resolution_source_counts: dict[str, int] = {}
+        typescript_resolution_source_counts: dict[str, int] = {}
+        try:
+            python_relations = extract_python_semantic_relations(
+                repo_id=repo_id,
+                scanned_files=scanned_files,
+                symbols=symbols,
+            )
+            semantic_relations.extend(python_relations)
+
+            if java_semantic_enabled:
+                java_relations = extract_java_semantic_relations(
+                    repo_id=repo_id,
+                    scanned_files=scanned_files,
+                    symbols=symbols,
+                    resolution_stats_sink=java_resolution_source_counts,
+                )
+                semantic_relations.extend(java_relations)
+            if typescript_semantic_enabled:
+                typescript_relations = extract_typescript_semantic_relations(
+                    repo_id=repo_id,
+                    scanned_files=scanned_files,
+                    symbols=symbols,
+                    resolution_stats_sink=typescript_resolution_source_counts,
+                )
+                semantic_relations.extend(typescript_relations)
+        except Exception as exc:
+            extraction_failed = True
+            extraction_error = str(exc)
+            if logger is not None:
+                logger(
+                    "Advertencia: extracción semántica deshabilitada por error "
+                    f"({exc})"
+                )
+            semantic_relations = []
+        elapsed_ms = round((perf_counter() - started_at) * 1000.0, 2)
+        relation_counts_by_type = dict(
+            Counter(item.relation_type for item in semantic_relations)
+        )
+        symbol_path_by_id = {item.id: item.path for item in symbols}
+        java_cross_file_relations = [
+            item
+            for item in semantic_relations
+            if item.language == "java"
+            and item.target_symbol_id is not None
+            and symbol_path_by_id.get(item.target_symbol_id, item.path) != item.path
+        ]
+        java_cross_file_resolved_by_type = dict(
+            Counter(item.relation_type for item in java_cross_file_relations)
+        )
+        java_cross_file_resolved_count = len(java_cross_file_relations)
+        unresolved_by_type = dict(
+            Counter(
+                item.relation_type
+                for item in semantic_relations
+                if item.target_symbol_id is None
+            )
+        )
+        unresolved_count = sum(
+            1 for item in semantic_relations if item.target_symbol_id is None
+        )
+        unresolved_ratio = (
+            round(unresolved_count / len(semantic_relations), 4)
+            if semantic_relations
+            else 0.0
+        )
+        if logger is not None:
+            logger(
+                "Observabilidad semántica: "
+                f"enabled=true, "
+                f"relation_counts={len(semantic_relations)}, "
+                f"relation_counts_by_type={relation_counts_by_type}, "
+                f"java_cross_file_resolved_count={java_cross_file_resolved_count}, "
+                f"java_cross_file_resolved_by_type={java_cross_file_resolved_by_type}, "
+                f"java_resolution_source_counts={java_resolution_source_counts}, "
+                f"typescript_resolution_source_counts={typescript_resolution_source_counts}, "
+                f"unresolved_count={unresolved_count}, "
+                f"unresolved_by_type={unresolved_by_type}, "
+                f"unresolved_ratio={unresolved_ratio}, "
+                f"semantic_extraction_ms={elapsed_ms}"
+            )
+        if diagnostics_sink is not None:
+            semantic_payload: dict[str, object] = {
+                "enabled": True,
+                "status": "fallback" if extraction_failed else "ok",
+                "relation_counts": len(semantic_relations),
+                "relation_counts_by_type": relation_counts_by_type,
+                "java_cross_file_resolved_count": java_cross_file_resolved_count,
+                "java_cross_file_resolved_by_type": (
+                    java_cross_file_resolved_by_type
+                ),
+                "java_resolution_source_counts": java_resolution_source_counts,
+                "typescript_resolution_source_counts": (
+                    typescript_resolution_source_counts
+                ),
+                "unresolved_count": unresolved_count,
+                "unresolved_by_type": unresolved_by_type,
+                "unresolved_ratio": unresolved_ratio,
+                "semantic_extraction_ms": elapsed_ms,
+            }
+            if extraction_error:
+                semantic_payload["error"] = extraction_error
+            diagnostics_sink["semantic_graph"] = semantic_payload
+    elif diagnostics_sink is not None:
+        diagnostics_sink["semantic_graph"] = {
+            "enabled": False,
+            "status": "disabled",
+            "relation_counts": 0,
+            "relation_counts_by_type": {},
+            "java_cross_file_resolved_count": 0,
+            "java_cross_file_resolved_by_type": {},
+            "java_resolution_source_counts": {},
+            "typescript_resolution_source_counts": {},
+            "unresolved_count": 0,
+            "unresolved_by_type": {},
+            "unresolved_ratio": 0.0,
+            "semantic_extraction_ms": 0.0,
+        }
+
     graph = GraphBuilder()
     try:
         graph.upsert_repo_graph(
             repo_id=repo_id,
             scanned_files=scanned_files,
             symbols=symbols,
+            semantic_relations=semantic_relations,
         )
     finally:
         graph.close()

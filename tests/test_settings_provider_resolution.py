@@ -94,3 +94,57 @@ def test_chroma_hnsw_space_rejects_invalid_values() -> None:
     """Rechaza valores no soportados para CHROMA_HNSW_SPACE."""
     with pytest.raises(ValueError):
         Settings(CHROMA_HNSW_SPACE="ip", _env_file=None)
+
+
+def test_semantic_graph_java_flag_defaults_to_false() -> None:
+    """Mantiene deshabilitada la extracción semántica Java por defecto."""
+    settings = Settings(_env_file=None)
+
+    assert settings.semantic_graph_java_enabled is False
+
+
+def test_semantic_graph_typescript_flag_defaults_to_false() -> None:
+    """Mantiene deshabilitada la extracción semántica TypeScript por defecto."""
+    settings = Settings(_env_file=None)
+
+    assert settings.semantic_graph_typescript_enabled is False
+
+
+def test_semantic_graph_query_flags_defaults() -> None:
+    """Configura por defecto la expansión semántica de query desactivada."""
+    settings = Settings(_env_file=None)
+
+    assert settings.semantic_graph_query_enabled is False
+    assert settings.semantic_graph_query_max_edges == 400
+    assert settings.semantic_graph_query_max_nodes == 200
+    assert settings.semantic_graph_query_max_ms == 120.0
+    assert settings.semantic_graph_query_fallback_to_structural is True
+
+
+def test_resolve_semantic_relation_types_filters_invalid_and_duplicates() -> None:
+    """Normaliza tipos válidos y elimina entradas inválidas/duplicadas."""
+    settings = Settings(
+        SEMANTIC_RELATION_TYPES="calls,IMPORTS,foo,implements,calls",
+        _env_file=None,
+    )
+
+    assert settings.resolve_semantic_relation_types() == [
+        "CALLS",
+        "IMPORTS",
+        "IMPLEMENTS",
+    ]
+
+
+def test_resolve_semantic_relation_weights_parses_and_falls_back() -> None:
+    """Acepta pesos válidos y conserva defaults ante entradas inválidas."""
+    settings = Settings(
+        SEMANTIC_RELATION_WEIGHTS="CALLS:1.4,IMPORTS:abc,EXTENDS:1.2,foo:3,IMPLEMENTS:-1",
+        _env_file=None,
+    )
+
+    weights = settings.resolve_semantic_relation_weights()
+
+    assert weights["CALLS"] == 1.4
+    assert weights["EXTENDS"] == 1.2
+    assert weights["IMPORTS"] == 0.7
+    assert weights["IMPLEMENTS"] == 1.0

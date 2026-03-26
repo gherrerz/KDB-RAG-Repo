@@ -1,11 +1,13 @@
 """Integración de Neo4j para la construcción de gráficos de conocimiento de código."""
 
+import hashlib
+from collections import defaultdict
 from threading import Lock
 from typing import Any
 
 from neo4j import GraphDatabase
 
-from coderag.core.models import ScannedFile, SymbolChunk
+from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
 from coderag.core.settings import get_settings
 
 
@@ -47,6 +49,7 @@ class GraphBuilder:
         repo_id: str,
         scanned_files: list[ScannedFile],
         symbols: list[SymbolChunk],
+        semantic_relations: list[SemanticRelation] | None = None,
     ) -> None:
         """Inserte nodos, archivos, módulos y símbolos del gráfico del repositorio."""
         file_query = """
@@ -61,7 +64,8 @@ class GraphBuilder:
         MERGE (r:Repo {id: $repo_id})
         MERGE (f:File {repo_id: $repo_id, path: $path})
         MERGE (s:Symbol {id: $symbol_id})
-        SET s.name = $symbol_name,
+        SET s.repo_id = $repo_id,
+            s.name = $symbol_name,
             s.name_lc = toLower($symbol_name),
             s.type = $symbol_type,
             s.start_line = $start_line,
@@ -89,6 +93,96 @@ class GraphBuilder:
                     start_line=symbol.start_line,
                     end_line=symbol.end_line,
                 )
+            self._upsert_semantic_relations(
+                session=session,
+                repo_id=repo_id,
+                semantic_relations=semantic_relations or [],
+            )
+
+    def _upsert_semantic_relations(
+        self,
+        session: Any,
+        repo_id: str,
+        semantic_relations: list[SemanticRelation],
+    ) -> None:
+        """Inserta relaciones semánticas en lotes con idempotencia por relación."""
+        if not semantic_relations:
+            return
+
+        resolved_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        unresolved_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        supported_types = {"CALLS", "IMPORTS", "EXTENDS", "IMPLEMENTS"}
+
+        for relation in semantic_relations:
+            relation_type = relation.relation_type.strip().upper()
+            if relation_type not in supported_types:
+                continue
+            row = {
+                "source_symbol_id": relation.source_symbol_id,
+                "target_symbol_id": relation.target_symbol_id,
+                "target_ref": relation.target_ref,
+                "target_kind": relation.target_kind,
+                "path": relation.path,
+                "line": relation.line,
+                "confidence": relation.confidence,
+                "language": relation.language,
+                "relation_id": self._relation_id(relation),
+            }
+            if relation.target_symbol_id:
+                resolved_by_type[relation_type].append(row)
+            else:
+                unresolved_by_type[relation_type].append(row)
+
+        for relation_type, rows in resolved_by_type.items():
+            session.run(
+                f"""
+                UNWIND $rows AS row
+                MATCH (s:Symbol {{id: row.source_symbol_id}})
+                MATCH (t:Symbol {{id: row.target_symbol_id}})
+                MERGE (s)-[r:{relation_type} {{repo_id: $repo_id, relation_id: row.relation_id}}]->(t)
+                SET r.path = row.path,
+                    r.line = row.line,
+                    r.confidence = row.confidence,
+                    r.target_ref = row.target_ref,
+                    r.target_kind = row.target_kind,
+                    r.language = row.language
+                """,
+                repo_id=repo_id,
+                rows=rows,
+            )
+
+        for relation_type, rows in unresolved_by_type.items():
+            session.run(
+                f"""
+                UNWIND $rows AS row
+                MATCH (s:Symbol {{id: row.source_symbol_id}})
+                MERGE (t:ExternalSymbol {{
+                    repo_id: $repo_id,
+                    ref: row.target_ref,
+                    language: row.language
+                }})
+                MERGE (s)-[r:{relation_type} {{repo_id: $repo_id, relation_id: row.relation_id}}]->(t)
+                SET r.path = row.path,
+                    r.line = row.line,
+                    r.confidence = row.confidence,
+                    r.target_ref = row.target_ref,
+                    r.target_kind = row.target_kind,
+                    r.language = row.language
+                """,
+                repo_id=repo_id,
+                rows=rows,
+            )
+
+    @staticmethod
+    def _relation_id(relation: SemanticRelation) -> str:
+        """Construye un ID determinista para evitar duplicados de relaciones."""
+        payload = (
+            f"{relation.repo_id}|{relation.source_symbol_id}|"
+            f"{relation.relation_type}|{relation.target_symbol_id or ''}|"
+            f"{relation.target_ref}|{relation.path}|{relation.line}|"
+            f"{relation.language}"
+        )
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
     def has_repo_data(self, repo_id: str) -> bool:
         """Indica si existen nodos asociados al repositorio en Neo4j."""
@@ -253,17 +347,44 @@ class GraphBuilder:
             )
             return [record.data() for record in records]
 
-    def expand_symbols(self, symbol_ids: list[str], hops: int = 2) -> list[dict[str, Any]]:
-        """Expanda la vecindad del gráfico para símbolos usando una ruta de longitud variable."""
-        query = """
+    def expand_symbols(
+        self,
+        symbol_ids: list[str],
+        hops: int = 2,
+        relation_types: list[str] | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Expanda vecindad de símbolos con filtros opcionales de relación."""
+        safe_hops = max(1, int(hops))
+        query = f"""
         MATCH (s:Symbol)
         WHERE s.id IN $symbol_ids
-        MATCH p=(s)-[*1..$hops]-(n)
+        MATCH p=(s)-[*1..{safe_hops}]-(n)
+        WHERE (
+            $relation_types IS NULL OR
+            size($relation_types) = 0 OR
+            all(rel IN relationships(p) WHERE type(rel) IN $relation_types)
+        )
         RETURN DISTINCT s.id as seed,
                labels(n) as labels,
-               properties(n) as props
-        LIMIT 200
+               properties(n) as props,
+             size(relationships(p)) as edge_count,
+             [rel IN relationships(p) | type(rel)] as relation_types,
+             CASE size(relationships(p))
+                  WHEN 0 THEN 1.0
+                  ELSE reduce(
+                   confidence = 0.0,
+                   rel IN relationships(p) |
+                   confidence + toFloat(coalesce(rel.confidence, 1.0))
+                  ) / toFloat(size(relationships(p)))
+             END as relation_confidence_avg
+        LIMIT $limit
         """
         with self.driver.session() as session:
-            records = session.run(query, symbol_ids=symbol_ids, hops=hops)
+            records = session.run(
+                query,
+                symbol_ids=symbol_ids,
+                relation_types=relation_types,
+                limit=max(1, int(limit)),
+            )
             return [record.data() for record in records]

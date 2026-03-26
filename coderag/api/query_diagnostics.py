@@ -47,6 +47,7 @@ def build_query_diagnostics(
     inventory_intent: bool,
     inventory_target: str | None,
     llm_error: str | None,
+    semantic_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the diagnostics payload for query responses."""
     diagnostics: dict[str, Any] = {
@@ -95,6 +96,8 @@ def build_query_diagnostics(
     }
     if llm_error is not None:
         diagnostics["llm_error"] = llm_error
+    if semantic_diagnostics:
+        diagnostics.update(semantic_diagnostics)
     return diagnostics
 
 
@@ -167,9 +170,10 @@ def build_retrieval_diagnostics(
     budget_exhausted: bool,
     stage_timings: dict[str, float],
     fallback_reason: str | None,
+    semantic_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build diagnostics payload for retrieval-only query execution."""
-    return {
+    diagnostics = {
         "retrieved": retrieved_count,
         "reranked": reranked_count,
         "graph_nodes": graph_nodes_count,
@@ -191,3 +195,6 @@ def build_retrieval_diagnostics(
         "fallback_reason": fallback_reason,
         "mode": "retrieval_only",
     }
+    if semantic_diagnostics:
+        diagnostics.update(semantic_diagnostics)
+    return diagnostics

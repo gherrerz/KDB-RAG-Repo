@@ -7,6 +7,14 @@ de codigo con evidencia verificable (archivos y lineas).
 
 - Ingesta repositorios Git en segundo plano con seguimiento por job.
 - Construye indices complementarios: vectorial, lexico y grafo.
+- Permite habilitar grafo semantico Python (CALLS, IMPORTS, EXTENDS) con
+  flag de entorno y fallback seguro.
+- Permite habilitar grafo semantico Java fase 1 (IMPORTS,
+  EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
+- Permite habilitar grafo semantico TypeScript fase 1 (IMPORTS,
+  EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
+- Permite habilitar expansion semantica en query con filtros por tipo de
+  relacion y budgets de nodos/aristas/latencia.
 - Responde consultas por dos rutas:
   - Query con LLM y verificacion.
   - Retrieval-only sin sintesis LLM.
@@ -154,6 +162,8 @@ Invoke-RestMethod -Method Delete -Uri http://127.0.0.1:8000/repos/mall
 - Arquitectura y secuencias Mermaid: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - API detallada: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
 - Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- Runbook rollout/rollback semántico: [docs/SEMANTIC_GRAPH_RUNBOOK.md](docs/SEMANTIC_GRAPH_RUNBOOK.md)
+- Benchmark Sprint 3: [docs/SPRINT3_BENCHMARK.md](docs/SPRINT3_BENCHMARK.md)
 - Extractores de simbolos: [docs/SYMBOL_EXTRACTORS.md](docs/SYMBOL_EXTRACTORS.md)
 - Guia de contribucion: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 - Migraciones: [docs/migration-guides/README.md](docs/migration-guides/README.md)
@@ -177,6 +187,18 @@ Resultado esperado de los ejemplos:
 .\.venv\Scripts\python scripts/docs/validate_docs.py
 .\.venv\Scripts\python scripts/docs/validate_links.py
 .\.venv\Scripts\python scripts/docs/validate_examples.py
+```
+
+## Benchmarking
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_compare_pre_post.py ..\KDB-RAG-Repo-pre-s3
+.\.venv\Scripts\python.exe scripts\benchmark_api_live.py --base-url http://127.0.0.1:8000 --repo-id kdb-rag-repo --iterations 20 --warmup 2 --top-n 60 --top-k 15
+.\.venv\Scripts\python.exe scripts\benchmark_architecture_queries.py --base-url http://127.0.0.1:8000 --repo-id kdb-rag-repo --top-n 60 --top-k 15
+.\.venv\Scripts\python.exe scripts\benchmark_architecture_quality.py --base-url http://127.0.0.1:8000 --repo-id kdb-rag-repo --top-n 60 --top-k 15
+.\.venv\Scripts\python.exe scripts\benchmark_architecture_facts.py --base-url http://127.0.0.1:8000 --repo-id kdb-rag-repo --gold-file scripts/benchmark_data/architecture_facts_gold.json --top-n 60 --top-k 15
+.\.venv\Scripts\python.exe scripts\benchmark_facts_gate.py --on-report benchmark_reports/architecture_facts_eval_20260324_223605.json --off-report benchmark_reports/architecture_facts_eval_20260324_224016.json --review-csv scripts/benchmark_data/architecture_facts_review_template.csv --min-uplift 0.15 --min-reviewed-ratio 0.90 --min-correct-ratio 0.85
+.\.venv\Scripts\python.exe scripts\benchmark_rollback_simulation.py --repo-id kdb-rag-repo --host 127.0.0.1 --port 8013
 ```
 
 ## Testing

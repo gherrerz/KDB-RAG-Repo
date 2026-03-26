@@ -1,6 +1,7 @@
 """Almacén de metadatos en SQLite para repositorios y trabajos."""
 
 import datetime
+import json
 import sqlite3
 from pathlib import Path
 
@@ -54,6 +55,24 @@ class MetadataStore:
                 """
             )
             self._ensure_repo_runtime_columns(connection)
+            self._ensure_job_columns(connection)
+
+    @staticmethod
+    def _ensure_job_columns(connection: sqlite3.Connection) -> None:
+        """Garantiza columnas nuevas de jobs para bases existentes."""
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+        }
+        required_columns = {
+            "diagnostics": "TEXT",
+        }
+        for column_name, column_type in required_columns.items():
+            if column_name in columns:
+                continue
+            connection.execute(
+                f"ALTER TABLE jobs ADD COLUMN {column_name} {column_type}"
+            )
 
     @staticmethod
     def _ensure_repo_runtime_columns(connection: sqlite3.Connection) -> None:
@@ -81,8 +100,8 @@ class MetadataStore:
                 """
                 INSERT OR REPLACE INTO jobs (
                     id, status, progress, logs, repo_id, error,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    diagnostics, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job.id,
@@ -91,6 +110,7 @@ class MetadataStore:
                     "\n".join(job.logs),
                     job.repo_id,
                     job.error,
+                    json.dumps(job.diagnostics, ensure_ascii=True),
                     job.created_at.isoformat(),
                     job.updated_at.isoformat(),
                 ),
@@ -143,6 +163,15 @@ class MetadataStore:
             return None
 
         logs = row["logs"].splitlines() if row["logs"] else []
+        diagnostics_raw = row["diagnostics"] if "diagnostics" in row.keys() else None
+        diagnostics: dict = {}
+        if diagnostics_raw:
+            try:
+                loaded = json.loads(diagnostics_raw)
+                if isinstance(loaded, dict):
+                    diagnostics = loaded
+            except Exception:
+                diagnostics = {}
         return JobInfo(
             id=row["id"],
             status=JobStatus(row["status"]),
@@ -150,6 +179,7 @@ class MetadataStore:
             logs=logs,
             repo_id=row["repo_id"],
             error=row["error"],
+            diagnostics=diagnostics,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

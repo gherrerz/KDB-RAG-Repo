@@ -95,10 +95,34 @@ def test_job_manager_marks_completed_when_repo_query_ready(
     import coderag.ingestion.pipeline as pipeline_module
     import coderag.core.storage_health as health_module
 
+    def _fake_ingest_repository(
+        repo_url,
+        branch,
+        commit,
+        logger,
+        **kwargs,
+    ) -> str:
+        diagnostics_sink = kwargs.get("diagnostics_sink")
+        if isinstance(diagnostics_sink, dict):
+            diagnostics_sink["semantic_graph"] = {
+                "enabled": True,
+                "status": "ok",
+                "relation_counts": 5,
+                "relation_counts_by_type": {"CALLS": 3, "IMPORTS": 2},
+                "java_cross_file_resolved_count": 1,
+                "java_cross_file_resolved_by_type": {"CALLS": 1},
+                "java_resolution_source_counts": {"import": 1, "same_package": 1},
+                "unresolved_count": 1,
+                "unresolved_by_type": {"IMPORTS": 1},
+                "unresolved_ratio": 0.2,
+                "semantic_extraction_ms": 12.5,
+            }
+        return "repo-ready"
+
     monkeypatch.setattr(
         pipeline_module,
         "ingest_repository",
-        lambda repo_url, branch, commit, logger, **kwargs: "repo-ready",
+        _fake_ingest_repository,
     )
     monkeypatch.setattr(
         health_module,
@@ -122,6 +146,24 @@ def test_job_manager_marks_completed_when_repo_query_ready(
     job = manager.get_job(created.id)
     assert job is not None
     assert job.status == JobStatus.completed
+    assert job.diagnostics["semantic_graph"]["enabled"] is True
+    assert job.diagnostics["semantic_graph"]["relation_counts"] == 5
+    assert job.diagnostics["semantic_graph"]["relation_counts_by_type"] == {
+        "CALLS": 3,
+        "IMPORTS": 2,
+    }
+    assert job.diagnostics["semantic_graph"]["java_cross_file_resolved_count"] == 1
+    assert job.diagnostics["semantic_graph"]["java_cross_file_resolved_by_type"] == {
+        "CALLS": 1
+    }
+    assert job.diagnostics["semantic_graph"]["java_resolution_source_counts"] == {
+        "import": 1,
+        "same_package": 1,
+    }
+    assert job.diagnostics["semantic_graph"]["unresolved_count"] == 1
+    assert job.diagnostics["semantic_graph"]["unresolved_by_type"] == {
+        "IMPORTS": 1
+    }
 
     runtime = manager.get_repo_runtime("repo-ready")
     assert runtime is not None

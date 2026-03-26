@@ -1,0 +1,11 @@
+query,fact,is_correct,reviewer,notes
+"explica la arquitectura general del sistema y sus capas principales",api,,,
+"explica la arquitectura general del sistema y sus capas principales",ingestion,,,
+"explica la arquitectura general del sistema y sus capas principales",retrieval,,,
+"explica la arquitectura general del sistema y sus capas principales",storage,,,
+"explica la arquitectura general del sistema y sus capas principales",llm,,,
+"describe como fluye una consulta desde la API hasta la generacion de respuesta",query_service,,,
+"describe como fluye una consulta desde la API hasta la generacion de respuesta",hybrid_search,,,
+"describe como fluye una consulta desde la API hasta la generacion de respuesta",graph_expand,,,
+"describe como fluye una consulta desde la API hasta la generacion de respuesta",assemble_context,,,
+"describe como fluye una consulta desde la API hasta la generacion de respuesta",answerclient,,,
