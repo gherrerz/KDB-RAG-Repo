@@ -1,6 +1,6 @@
-"""Pruebas del bloque CSS compartido para feedback de providers."""
+﻿"""Pruebas del bloque CSS compartido para feedback de providers."""
 
-from coderag.ui.provider_styles import PROVIDER_FEEDBACK_STYLES
+from src.coderag.ui.provider_styles import PROVIDER_FEEDBACK_STYLES
 
 
 def test_provider_feedback_styles_contains_expected_selectors() -> None:

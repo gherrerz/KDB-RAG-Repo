@@ -1,4 +1,4 @@
-"""Simula rollback semantico reiniciando API y mide tiempos reales."""
+﻿"""Simula rollback semantico reiniciando API y mide tiempos reales."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def start_api_process(
             python_exe,
             "-m",
             "uvicorn",
-            "coderag.api.server:app",
+            "src.coderag.api.server:app",
             "--host",
             host,
             "--port",

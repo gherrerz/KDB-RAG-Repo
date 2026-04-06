@@ -1,8 +1,8 @@
-"""Tests for modular symbol extractors and full-span behavior."""
+﻿"""Tests for modular symbol extractors and full-span behavior."""
 
-from coderag.ingestion.extractors.java_brace import JavaBraceExtractor
-from coderag.ingestion.extractors.javascript_brace import JavaScriptBraceExtractor
-from coderag.ingestion.extractors.python_ast import PythonAstExtractor
+from src.coderag.ingestion.extractors.java_brace import JavaBraceExtractor
+from src.coderag.ingestion.extractors.javascript_brace import JavaScriptBraceExtractor
+from src.coderag.ingestion.extractors.python_ast import PythonAstExtractor
 
 
 def test_python_ast_extractor_resolves_full_function_span() -> None:

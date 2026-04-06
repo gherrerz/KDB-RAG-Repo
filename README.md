@@ -1,4 +1,4 @@
-# RAG Hybrid Response Validator
+﻿# RAG Hybrid Response Validator
 
 Plataforma de analisis de repositorios con Hybrid RAG para responder preguntas
 de codigo con evidencia verificable (archivos y lineas).
@@ -45,7 +45,7 @@ copy .env.example .env
 
 ```powershell
 ./scripts/compose_neo4j.ps1 up
-.\.venv\Scripts\python -m uvicorn coderag.api.server:app
+.\.venv\Scripts\python -m uvicorn src.coderag.api.server:app
 ```
 
 3. Inicia una ingesta.

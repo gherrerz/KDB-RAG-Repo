@@ -1,4 +1,4 @@
-"""Compara latencia sintética pre/post entre HEAD y el árbol de trabajo actual."""
+﻿"""Compara latencia sintética pre/post entre HEAD y el árbol de trabajo actual."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ BENCH_CODE = dedent(
 
 
     def bench_run_query(module_query: bool, iterations: int = 14) -> dict[str, float]:
-        import coderag.api.query_service as qs
-        from coderag.core.models import RetrievalChunk
+        import src.coderag.api.query_service as qs
+        from src.coderag.core.models import RetrievalChunk
 
         original_hybrid = qs.hybrid_search
         original_rerank = qs.rerank
@@ -139,8 +139,8 @@ BENCH_CODE = dedent(
 
 
     def bench_hybrid_search(iterations: int = 14) -> dict[str, float]:
-        import coderag.retrieval.hybrid_search as hs
-        from coderag.core.models import RetrievalChunk
+        import src.coderag.retrieval.hybrid_search as hs
+        from src.coderag.core.models import RetrievalChunk
 
         original_embedder = hs.EmbeddingClient
         original_chroma = hs.ChromaIndex
@@ -199,7 +199,7 @@ BENCH_CODE = dedent(
 
 
     def bench_storage_preflight(iterations: int = 12) -> dict[str, float]:
-        import coderag.core.storage_health as sh
+        import src.coderag.core.storage_health as sh
 
         class FakeSettings:
             health_check_strict = True

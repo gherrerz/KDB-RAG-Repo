@@ -1,11 +1,11 @@
-"""Pruebas unitarias para operaciones de limpieza en GraphBuilder."""
+﻿"""Pruebas unitarias para operaciones de limpieza en GraphBuilder."""
 
 from typing import Any
 
 import pytest
 
-from coderag.core.models import SemanticRelation
-from coderag.ingestion.graph_builder import GraphBuilder
+from src.coderag.core.models import SemanticRelation
+from src.coderag.ingestion.graph_builder import GraphBuilder
 
 
 class _FakeCounters:

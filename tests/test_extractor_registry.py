@@ -1,7 +1,7 @@
-"""Tests for language extractor registry extensibility and fallback behavior."""
+﻿"""Tests for language extractor registry extensibility and fallback behavior."""
 
-from coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
-from coderag.ingestion.extractors.registry import LanguageExtractorRegistry
+from src.coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
+from src.coderag.ingestion.extractors.registry import LanguageExtractorRegistry
 
 
 class _DummyExtractor:

@@ -1,14 +1,14 @@
-"""Pruebas de prioridad de espacio UI para los módulos de Consulta e Ingesta."""
+﻿"""Pruebas de prioridad de espacio UI para los módulos de Consulta e Ingesta."""
 
 import sys
 
 import pytest
 from PySide6.QtWidgets import QApplication
 
-import coderag.ui.ingestion_view as ingestion_view_module
-import coderag.ui.query_view as query_view_module
-from coderag.ui.ingestion_view import IngestionView
-from coderag.ui.query_view import QueryView
+import src.coderag.ui.ingestion_view as ingestion_view_module
+import src.coderag.ui.query_view as query_view_module
+from src.coderag.ui.ingestion_view import IngestionView
+from src.coderag.ui.query_view import QueryView
 
 
 @pytest.fixture

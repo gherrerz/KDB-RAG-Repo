@@ -1,11 +1,11 @@
-"""Pruebas de comportamiento de procesamiento por lotes del índice Chroma."""
+﻿"""Pruebas de comportamiento de procesamiento por lotes del índice Chroma."""
 
 from typing import Any
 
 import pytest
 from chromadb.errors import InvalidDimensionException
 
-from coderag.ingestion.index_chroma import ChromaIndex
+from src.coderag.ingestion.index_chroma import ChromaIndex
 
 
 class _FakeCollection:
@@ -95,7 +95,7 @@ def test_upsert_is_split_by_chroma_max_batch_size(monkeypatch: pytest.MonkeyPatc
     """Divide los upserts en múltiples llamadas que respetan el tamaño máximo de lote."""
     fake_client = _FakeClient()
 
-    import coderag.ingestion.index_chroma as module
+    import src.coderag.ingestion.index_chroma as module
 
     monkeypatch.setattr(
         module.chromadb,
@@ -123,7 +123,7 @@ def test_collections_are_created_with_configured_hnsw_space(
     """Propaga CHROMA_HNSW_SPACE al crear/abrir colecciones gestionadas."""
     fake_client = _FakeClient()
 
-    import coderag.ingestion.index_chroma as module
+    import src.coderag.ingestion.index_chroma as module
 
     monkeypatch.setattr(
         module.chromadb,
@@ -156,7 +156,7 @@ def test_upsert_recovers_from_dimension_message_error(
         )
     )
 
-    import coderag.ingestion.index_chroma as module
+    import src.coderag.ingestion.index_chroma as module
 
     monkeypatch.setattr(
         module.chromadb,
@@ -185,7 +185,7 @@ def test_delete_by_repo_id_removes_documents_from_all_collections(
     """Elimina documentos filtrados por repo_id y devuelve conteo total agregado."""
     fake_client = _FakeClient()
 
-    import coderag.ingestion.index_chroma as module
+    import src.coderag.ingestion.index_chroma as module
 
     monkeypatch.setattr(
         module.chromadb,

@@ -1,11 +1,11 @@
-"""Pruebas de integración unitaria para flujos REST de Vertex AI."""
+﻿"""Pruebas de integración unitaria para flujos REST de Vertex AI."""
 
 from types import SimpleNamespace
 
 import pytest
 
-from coderag.ingestion.embedding import EmbeddingClient
-from coderag.llm.openai_client import AnswerClient
+from src.coderag.ingestion.embedding import EmbeddingClient
+from src.coderag.llm.openai_client import AnswerClient
 
 
 def test_embedding_vertex_uses_predict_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,7 +43,7 @@ def test_embedding_vertex_uses_predict_endpoint(monkeypatch: pytest.MonkeyPatch)
             },
         )
 
-    import coderag.ingestion.embedding as module
+    import src.coderag.ingestion.embedding as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     monkeypatch.setattr(module.requests, "post", fake_post)
@@ -81,7 +81,7 @@ def test_answer_client_vertex_enabled_requires_project(monkeypatch: pytest.Monke
         def is_vertex_ai_configured(self) -> bool:
             return bool(self.vertex_ai_api_key and self.vertex_ai_project_id)
 
-    import coderag.llm.openai_client as module
+    import src.coderag.llm.openai_client as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     client = AnswerClient(provider="vertex_ai")

@@ -1,8 +1,8 @@
-"""Pruebas para filtros de escaneo del repositorio en la ingesta."""
+﻿"""Pruebas para filtros de escaneo del repositorio en la ingesta."""
 
 from pathlib import Path
 
-from coderag.ingestion.repo_scanner import scan_repository, scan_repository_with_stats
+from src.coderag.ingestion.repo_scanner import scan_repository, scan_repository_with_stats
 
 
 def test_scan_repository_excludes_dirs_extensions_and_large_files(tmp_path: Path) -> None:

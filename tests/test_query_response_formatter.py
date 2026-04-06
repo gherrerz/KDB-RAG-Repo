@@ -1,6 +1,6 @@
-"""Pruebas unitarias para formateadores de respuesta de consulta UI."""
+﻿"""Pruebas unitarias para formateadores de respuesta de consulta UI."""
 
-from coderag.ui.query_response_formatter import (
+from src.coderag.ui.query_response_formatter import (
     build_query_answer_text,
     build_repo_not_ready_message,
 )

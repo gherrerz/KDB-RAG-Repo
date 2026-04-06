@@ -1,6 +1,6 @@
-"""Pruebas de capacidades por provider para embeddings y LLM."""
+﻿"""Pruebas de capacidades por provider para embeddings y LLM."""
 
-from coderag.core.settings import Settings
+from src.coderag.core.settings import Settings
 
 
 def test_embedding_capabilities_vertex_requires_project() -> None:

@@ -1,4 +1,4 @@
-# Installation
+﻿# Installation
 
 Guia de instalacion y arranque local.
 
@@ -41,13 +41,13 @@ copy .env.example .env
 4. Levantar API.
 
 ```powershell
-.\.venv\Scripts\python -m uvicorn coderag.api.server:app
+.\.venv\Scripts\python -m uvicorn src.coderag.api.server:app
 ```
 
 5. Levantar UI (opcional).
 
 ```powershell
-.\.venv\Scripts\python -m coderag.ui.main_window
+.\.venv\Scripts\python -m src.coderag.ui.main_window
 ```
 
 ## Modos recomendados

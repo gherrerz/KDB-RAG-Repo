@@ -1,8 +1,8 @@
-"""Pruebas de prioridad de resolución provider/modelo en Settings."""
+﻿"""Pruebas de prioridad de resolución provider/modelo en Settings."""
 
 import pytest
 
-from coderag.core.settings import Settings
+from src.coderag.core.settings import Settings
 
 
 def test_embedding_resolution_priority_override_over_env_and_legacy() -> None:

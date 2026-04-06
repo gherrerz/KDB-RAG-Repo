@@ -1,4 +1,4 @@
-"""Pruebas de guardrails preventivos con opción Forzar fallback."""
+﻿"""Pruebas de guardrails preventivos con opción Forzar fallback."""
 
 import sys
 
@@ -6,7 +6,7 @@ import pytest
 import requests
 from PySide6.QtWidgets import QApplication
 
-from coderag.ui.main_window import MainWindow
+from src.coderag.ui.main_window import MainWindow
 
 
 class _FakeResponse:
@@ -41,7 +41,7 @@ def _build_window(monkeypatch: pytest.MonkeyPatch) -> MainWindow:
             return _FakeResponse({"query_ready": True, "warnings": []})
         return _FakeResponse({})
 
-    import coderag.ui.main_window as module
+    import src.coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "get", _fake_get)
     return MainWindow()
@@ -71,7 +71,7 @@ def test_query_blocks_when_provider_not_ready_without_force(
         called["post"] = True
         return _FakeResponse({"answer": "ok", "citations": [], "diagnostics": {}})
 
-    import coderag.ui.main_window as module
+    import src.coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "post", _fake_post)
 
@@ -108,7 +108,7 @@ def test_query_allows_when_force_fallback_enabled(
         called["post"] = True
         return _FakeResponse({"answer": "ok", "citations": [], "diagnostics": {}})
 
-    import coderag.ui.main_window as module
+    import src.coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "post", _fake_post)
 
@@ -203,7 +203,7 @@ def test_query_profile_profundo_uses_expanded_payload_and_timeout(
         captured["timeout"] = timeout
         return _FakeResponse({"answer": "ok", "citations": [], "diagnostics": {}})
 
-    import coderag.ui.main_window as module
+    import src.coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "post", _fake_post)
 
@@ -253,7 +253,7 @@ def test_query_payload_uses_top_n_top_k_values_edited_in_ui(
         captured["json"] = json
         return _FakeResponse({"answer": "ok", "citations": [], "diagnostics": {}})
 
-    import coderag.ui.main_window as module
+    import src.coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "post", _fake_post)
 
@@ -283,7 +283,7 @@ def test_query_profile_rapido_timeout_retries_then_reports_error(
         called["count"] += 1
         raise requests.Timeout("simulated timeout")
 
-    import coderag.ui.main_window as module
+    import src.coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "post", _fake_post)
 
@@ -314,7 +314,7 @@ def test_query_profile_balanceado_retries_with_reduced_scope(
             {"answer": "ok", "citations": [], "diagnostics": {}}
         )
 
-    import coderag.ui.main_window as module
+    import src.coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "post", _fake_post)
 
@@ -351,7 +351,7 @@ def test_query_status_preflight_sends_selected_embedding_configuration(
             return _FakeResponse({"query_ready": True, "warnings": []})
         return _FakeResponse({})
 
-    import coderag.ui.main_window as module
+    import src.coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "get", _fake_get)
     window = MainWindow()
@@ -404,7 +404,7 @@ def test_query_retrieval_mode_routes_to_retrieval_endpoint_with_context_flag(
             }
         )
 
-    import coderag.ui.main_window as module
+    import src.coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "post", _fake_post)
 
@@ -462,7 +462,7 @@ def test_query_retrieval_mode_allows_missing_llm_without_force_fallback(
             }
         )
 
-    import coderag.ui.main_window as module
+    import src.coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "post", _fake_post)
 

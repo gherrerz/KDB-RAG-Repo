@@ -1,10 +1,10 @@
-# API Reference
+﻿# API Reference
 
 Fuente de verdad de la API HTTP expuesta por el servicio.
 
-- Implementación: `coderag/api/server.py`
-- Modelos: `coderag/core/models.py`
-- Servicios de consulta: `coderag/api/query_service.py`
+- Implementación: `src/coderag/api/server.py`
+- Modelos: `src/coderag/core/models.py`
+- Servicios de consulta: `src/coderag/api/query_service.py`
 
 ## Base URL y OpenAPI
 
@@ -450,7 +450,7 @@ Response:
       "id": "chunk-1",
       "text": "NEO4J_URI=bolt://localhost:7687",
       "score": 0.88,
-      "path": "coderag/core/settings.py",
+      "path": "src/coderag/core/settings.py",
       "start_line": 10,
       "end_line": 40,
       "kind": "code_chunk",
@@ -459,7 +459,7 @@ Response:
   ],
   "citations": [
     {
-      "path": "coderag/core/settings.py",
+      "path": "src/coderag/core/settings.py",
       "start_line": 10,
       "end_line": 40,
       "score": 0.88,

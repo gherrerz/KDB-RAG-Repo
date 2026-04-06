@@ -16,6 +16,9 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 ### Changed
 - README reestructurado como portal corto de navegacion.
 - API reference reorganizada por journeys y operaciones.
+- Estructura del paquete movida de `coderag/` a `src/coderag/`.
+- Imports y entrypoints actualizados a `src.coderag.*` para API, UI,
+  scripts y tests.
 
 ### Fixed
 - Cobertura explicita de DELETE /repos/{repo_id} en documentacion de API.

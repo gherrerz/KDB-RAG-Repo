@@ -1,7 +1,7 @@
-"""Unit tests for reusable citation filtering helpers."""
+﻿"""Unit tests for reusable citation filtering helpers."""
 
-from coderag.api.citation_filters import build_inventory_citations, is_noisy_path
-from coderag.core.models import InventoryItem
+from src.coderag.api.citation_filters import build_inventory_citations, is_noisy_path
+from src.coderag.core.models import InventoryItem
 
 
 def test_is_noisy_path_detects_known_noise_tokens() -> None:
@@ -18,7 +18,7 @@ def test_build_inventory_citations_filters_noise_and_maps_fields() -> None:
     items = [
         InventoryItem(
             label="Settings",
-            path="coderag/core/settings.py",
+            path="src/coderag/core/settings.py",
             kind="file",
             start_line=1,
             end_line=22,
@@ -35,7 +35,7 @@ def test_build_inventory_citations_filters_noise_and_maps_fields() -> None:
     citations = build_inventory_citations(items)
 
     assert len(citations) == 1
-    assert citations[0].path == "coderag/core/settings.py"
+    assert citations[0].path == "src/coderag/core/settings.py"
     assert citations[0].start_line == 1
     assert citations[0].end_line == 22
     assert citations[0].reason == "inventory_graph_match"

@@ -1,6 +1,6 @@
-"""Unit tests for query diagnostics helper payload construction."""
+﻿"""Unit tests for query diagnostics helper payload construction."""
 
-from coderag.api.query_diagnostics import build_query_diagnostics
+from src.coderag.api.query_diagnostics import build_query_diagnostics
 
 
 class _SettingsWithCapabilities:
@@ -109,7 +109,7 @@ def test_build_query_diagnostics_defaults_capabilities_to_empty() -> None:
 
 def test_build_retrieval_diagnostics_merges_semantic_payload() -> None:
     """Incluye diagnostics semánticos en el payload retrieval-only."""
-    from coderag.api.query_diagnostics import build_retrieval_diagnostics
+    from src.coderag.api.query_diagnostics import build_retrieval_diagnostics
 
     diagnostics = build_retrieval_diagnostics(
         settings=_SettingsWithoutCapabilities(),

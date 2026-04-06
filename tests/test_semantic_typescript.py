@@ -1,8 +1,8 @@
-"""Tests for TypeScript semantic relation extraction phase 1."""
+﻿"""Tests for TypeScript semantic relation extraction phase 1."""
 
-from coderag.core.models import ScannedFile
-from coderag.ingestion.chunker import extract_symbol_chunks
-from coderag.ingestion.semantic_typescript import extract_typescript_semantic_relations
+from src.coderag.core.models import ScannedFile
+from src.coderag.ingestion.chunker import extract_symbol_chunks
+from src.coderag.ingestion.semantic_typescript import extract_typescript_semantic_relations
 
 
 def test_extract_typescript_semantic_relations_core_types() -> None:

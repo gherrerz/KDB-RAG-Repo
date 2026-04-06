@@ -1,4 +1,4 @@
-# Architecture and Customer Journeys
+﻿# Architecture and Customer Journeys
 
 Documento de referencia para entender la interaccion entre usuario, UI,
 API, pipeline de ingesta, retrieval y LLM.
@@ -40,8 +40,8 @@ flowchart TB
 
     subgraph L2[Layer 2 - API and Application]
         direction TB
-        API[FastAPI<br/>coderag/api/server.py]
-        QS[Query Service<br/>coderag/api/query_service.py]
+        API[FastAPI<br/>src/coderag/api/server.py]
+        QS[Query Service<br/>src/coderag/api/query_service.py]
     end
 
     subgraph L3[Layer 3 - Domain and Orchestration]
@@ -49,21 +49,21 @@ flowchart TB
 
         subgraph L3L[ ]
             direction TB
-            HEALTH[Storage Health<br/>coderag/core/storage_health.py]
-            JM[JobManager<br/>coderag/jobs/worker.py]
+            HEALTH[Storage Health<br/>src/coderag/core/storage_health.py]
+            JM[JobManager<br/>src/coderag/jobs/worker.py]
         end
 
         subgraph L3R[ ]
             direction TB
-            ING[Ingestion Pipeline<br/>coderag/ingestion/*]
-            RET[Retrieval Pipeline<br/>coderag/retrieval/*]
+            ING[Ingestion Pipeline<br/>src/coderag/ingestion/*]
+            RET[Retrieval Pipeline<br/>src/coderag/retrieval/*]
         end
     end
 
     subgraph L4[Layer 4 - AI and Model Integration]
         direction TB
-        EMB[Embedding Clients<br/>coderag/ingestion/embedding.py]
-        LLM[LLM Clients<br/>coderag/llm/*]
+        EMB[Embedding Clients<br/>src/coderag/ingestion/embedding.py]
+        LLM[LLM Clients<br/>src/coderag/llm/*]
     end
 
     subgraph L5[Layer 5 - Data and Infrastructure]

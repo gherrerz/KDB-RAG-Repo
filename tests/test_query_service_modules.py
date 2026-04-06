@@ -1,11 +1,11 @@
-"""Pruebas de soporte de descubrimiento de módulos en el servicio de consultas."""
+﻿"""Pruebas de soporte de descubrimiento de módulos en el servicio de consultas."""
 
 from pathlib import Path
 
 import pytest
 
-import coderag.api.query_service as query_service
-from coderag.core.models import Citation, InventoryItem, InventoryQueryResponse, RetrievalChunk
+import src.coderag.api.query_service as query_service
+from src.coderag.core.models import Citation, InventoryItem, InventoryQueryResponse, RetrievalChunk
 
 
 def test_is_module_query_detects_spanish_and_english_terms() -> None:
@@ -341,7 +341,7 @@ def test_resolve_module_scope_prefers_nested_repo_directory(
 ) -> None:
     """Resuelve el token del módulo en una ruta canónica anidada cuando se encuentra de forma única."""
     repo_id = "repo1"
-    (tmp_path / repo_id / "coderag" / "core").mkdir(parents=True)
+    (tmp_path / repo_id / "src" / "coderag" / "core").mkdir(parents=True)
 
     class _Settings:
         workspace_path = tmp_path
@@ -349,7 +349,7 @@ def test_resolve_module_scope_prefers_nested_repo_directory(
     monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
 
     scope = query_service._resolve_module_scope(repo_id=repo_id, module_name="core")
-    assert scope == "coderag/core"
+    assert scope == "src/coderag/core"
 
 
 def test_extractive_fallback_limits_non_inventory_results() -> None:
@@ -564,14 +564,14 @@ def test_run_inventory_query_includes_component_purposes_when_requested(
     discovered = [
         {
             "label": "Settings",
-            "path": "coderag/core/settings.py",
+            "path": "src/coderag/core/settings.py",
             "kind": "file",
             "start_line": 1,
             "end_line": 30,
         },
         {
             "label": "Models",
-            "path": "coderag/core/models.py",
+            "path": "src/coderag/core/models.py",
             "kind": "file",
             "start_line": 1,
             "end_line": 30,
@@ -1020,7 +1020,7 @@ def test_run_retrieval_query_inventory_includes_context_when_enabled(
 def test_is_literal_code_query_detection() -> None:
     """Detecta solicitudes explícitas de código literal completo."""
     assert query_service._is_literal_code_query(
-        "dame el codigo completo de coderag/retrieval/hybrid_search.py"
+        "dame el codigo completo de src/coderag/retrieval/hybrid_search.py"
     )
     assert query_service._is_literal_code_query(
         "show me the full code of app/main.py"
@@ -1034,7 +1034,7 @@ def test_run_query_literal_code_returns_live_file_content(
 ) -> None:
     """En modo literal devuelve contenido real del archivo con cita exacta."""
     repo_id = "repo1"
-    target_path = tmp_path / repo_id / "coderag" / "retrieval"
+    target_path = tmp_path / repo_id / "src" / "coderag" / "retrieval"
     target_path.mkdir(parents=True)
     file_path = target_path / "hybrid_search.py"
     file_path.write_text(
@@ -1055,7 +1055,7 @@ def test_run_query_literal_code_returns_live_file_content(
 
     result = query_service.run_query(
         repo_id=repo_id,
-        query="dame el codigo completo de coderag/retrieval/hybrid_search.py",
+        query="dame el codigo completo de src/coderag/retrieval/hybrid_search.py",
         top_n=20,
         top_k=5,
     )
@@ -1064,7 +1064,7 @@ def test_run_query_literal_code_returns_live_file_content(
     assert result.diagnostics["literal_exact_match"] is True
     assert "def hybrid_search()" in result.answer
     assert len(result.citations) == 1
-    assert result.citations[0].path == "coderag/retrieval/hybrid_search.py"
+    assert result.citations[0].path == "src/coderag/retrieval/hybrid_search.py"
     assert result.citations[0].start_line == 1
 
 
@@ -1106,7 +1106,7 @@ def test_run_retrieval_query_literal_code_returns_live_file_content(
 ) -> None:
     """En retrieval-only devuelve contenido literal exacto cuando hay match único."""
     repo_id = "repo1"
-    target_path = tmp_path / repo_id / "coderag" / "retrieval"
+    target_path = tmp_path / repo_id / "src" / "coderag" / "retrieval"
     target_path.mkdir(parents=True)
     (target_path / "hybrid_search.py").write_text(
         "def hybrid_search() -> str:\n"
@@ -1127,7 +1127,7 @@ def test_run_retrieval_query_literal_code_returns_live_file_content(
 
     result = query_service.run_retrieval_query(
         repo_id=repo_id,
-        query="dame el codigo completo de coderag/retrieval/hybrid_search.py",
+        query="dame el codigo completo de src/coderag/retrieval/hybrid_search.py",
         top_n=20,
         top_k=5,
         include_context=False,
@@ -1137,7 +1137,7 @@ def test_run_retrieval_query_literal_code_returns_live_file_content(
     assert result.diagnostics["literal_mode"] is True
     assert result.diagnostics["literal_exact_match"] is True
     assert len(result.chunks) == 1
-    assert result.chunks[0].path == "coderag/retrieval/hybrid_search.py"
+    assert result.chunks[0].path == "src/coderag/retrieval/hybrid_search.py"
     assert len(result.citations) == 1
     assert "def hybrid_search()" in result.answer
     assert result.context is None
@@ -1182,7 +1182,7 @@ def test_run_retrieval_query_literal_code_respects_include_context_flag(
 ) -> None:
     """Incluye contexto literal solo cuando include_context=true en modo literal."""
     repo_id = "repo1"
-    target_path = tmp_path / repo_id / "coderag"
+    target_path = tmp_path / repo_id / "src" / "coderag"
     target_path.mkdir(parents=True)
     content = "print('ok')\n"
     (target_path / "tool.py").write_text(content, encoding="utf-8")
@@ -1195,14 +1195,14 @@ def test_run_retrieval_query_literal_code_respects_include_context_flag(
 
     with_context = query_service.run_retrieval_query(
         repo_id=repo_id,
-        query="dame el codigo completo de coderag/tool.py",
+        query="dame el codigo completo de src/coderag/tool.py",
         top_n=20,
         top_k=5,
         include_context=True,
     )
     without_context = query_service.run_retrieval_query(
         repo_id=repo_id,
-        query="dame el codigo completo de coderag/tool.py",
+        query="dame el codigo completo de src/coderag/tool.py",
         top_n=20,
         top_k=5,
         include_context=False,
@@ -1218,7 +1218,7 @@ def test_run_query_literal_code_exact_symbol_returns_symbol_span(
 ) -> None:
     """Devuelve solo el símbolo exacto cuando se solicita código completo por función."""
     repo_id = "repo1"
-    target_path = tmp_path / repo_id / "coderag"
+    target_path = tmp_path / repo_id / "src" / "coderag"
     target_path.mkdir(parents=True)
     (target_path / "tool.py").write_text(
         "def helper() -> int:\n"
@@ -1255,7 +1255,7 @@ def test_run_retrieval_query_literal_code_exact_symbol_returns_symbol_chunk(
 ) -> None:
     """En retrieval-only retorna chunk literal de símbolo exacto único."""
     repo_id = "repo1"
-    target_path = tmp_path / repo_id / "coderag"
+    target_path = tmp_path / repo_id / "src" / "coderag"
     target_path.mkdir(parents=True)
     (target_path / "tool.py").write_text(
         "def alpha() -> int:\n"

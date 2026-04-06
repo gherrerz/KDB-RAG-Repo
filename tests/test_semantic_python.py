@@ -1,8 +1,8 @@
-"""Tests for Python semantic relation extraction."""
+﻿"""Tests for Python semantic relation extraction."""
 
-from coderag.core.models import ScannedFile
-from coderag.ingestion.chunker import extract_symbol_chunks
-from coderag.ingestion.semantic_python import extract_python_semantic_relations
+from src.coderag.core.models import ScannedFile
+from src.coderag.ingestion.chunker import extract_symbol_chunks
+from src.coderag.ingestion.semantic_python import extract_python_semantic_relations
 
 
 def test_extract_python_semantic_relations_intrafile_resolution() -> None:

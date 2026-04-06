@@ -1,6 +1,6 @@
-"""Unit tests for inventory diagnostics helper payload construction."""
+﻿"""Unit tests for inventory diagnostics helper payload construction."""
 
-from coderag.api.query_diagnostics import (
+from src.coderag.api.query_diagnostics import (
     build_inventory_diagnostics,
     build_inventory_missing_target_diagnostics,
 )
@@ -11,7 +11,7 @@ def test_build_inventory_missing_target_diagnostics_shape() -> None:
     diagnostics = build_inventory_missing_target_diagnostics(
         explain_inventory=True,
         module_name_raw="core",
-        module_name="coderag/core",
+        module_name="src/coderag/core",
         budget_seconds=9.0,
         stage_timings={"parse_ms": 1.2},
     )
@@ -21,7 +21,7 @@ def test_build_inventory_missing_target_diagnostics_shape() -> None:
     assert diagnostics["inventory_count"] == 0
     assert diagnostics["inventory_explain"] is True
     assert diagnostics["module_name_raw"] == "core"
-    assert diagnostics["module_name_resolved"] == "coderag/core"
+    assert diagnostics["module_name_resolved"] == "src/coderag/core"
     assert diagnostics["query_budget_seconds"] == 9.0
     assert diagnostics["budget_exhausted"] is False
     assert diagnostics["fallback_reason"] == "inventory_target_missing"

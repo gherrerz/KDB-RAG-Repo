@@ -1,9 +1,9 @@
-"""Tests for graph expansion semantic query budgets and diagnostics."""
+﻿"""Tests for graph expansion semantic query budgets and diagnostics."""
 
 import pytest
 
-from coderag.core.models import RetrievalChunk
-from coderag.retrieval import graph_expand
+from src.coderag.core.models import RetrievalChunk
+from src.coderag.retrieval import graph_expand
 
 
 def test_expand_with_graph_with_diagnostics_semantic_budgets(

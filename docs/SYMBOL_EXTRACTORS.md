@@ -1,4 +1,4 @@
-# Extractores de Simbolos por Lenguaje
+﻿# Extractores de Simbolos por Lenguaje
 
 Este documento describe el framework modular de extraccion de simbolos usado por la ingesta.
 
@@ -10,8 +10,8 @@ Este documento describe el framework modular de extraccion de simbolos usado por
 
 ## Componentes
 
-- Contrato base: `coderag/ingestion/extractors/base.py`
-- Registry: `coderag/ingestion/extractors/registry.py`
+- Contrato base: `src/coderag/ingestion/extractors/base.py`
+- Registry: `src/coderag/ingestion/extractors/registry.py`
 - Extractores incluidos:
   - `PythonAstExtractor`
   - `JavaBraceExtractor`
@@ -41,8 +41,8 @@ La variable se lee desde `Settings.symbol_extractor_v2_enabled`.
 `LanguageExtractorRegistry` permite registrar estrategias nuevas:
 
 ```python
-from coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
-from coderag.ingestion.extractors.registry import DEFAULT_LANGUAGE_EXTRACTOR_REGISTRY
+from src.coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
+from src.coderag.ingestion.extractors.registry import DEFAULT_LANGUAGE_EXTRACTOR_REGISTRY
 
 
 class RubyExtractor:

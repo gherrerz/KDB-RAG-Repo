@@ -1,8 +1,8 @@
-"""Pruebas unitarias para descubrimiento de modelos por provider."""
+﻿"""Pruebas unitarias para descubrimiento de modelos por provider."""
 
 from __future__ import annotations
 
-from coderag.llm import model_discovery
+from src.coderag.llm import model_discovery
 
 
 class _Settings:

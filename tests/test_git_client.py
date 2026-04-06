@@ -1,11 +1,11 @@
-"""Pruebas de resiliencia a la clonación de repositorios."""
+﻿"""Pruebas de resiliencia a la clonación de repositorios."""
 
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from coderag.ingestion.git_client import build_repo_id, clone_repository
+from src.coderag.ingestion.git_client import build_repo_id, clone_repository
 
 
 def test_build_repo_id_uses_url_tail_for_https_url() -> None:
