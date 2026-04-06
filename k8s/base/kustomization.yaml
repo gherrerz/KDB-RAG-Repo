@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: coderag
+resources:
+  - namespace.yaml
+  - api-configmap.yaml
+  - api-secret.yaml
+  - neo4j-secret.yaml
+  - api-pvc.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - neo4j-services.yaml
+  - neo4j-statefulset.yaml

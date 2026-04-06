@@ -1,0 +1,30 @@
+# VCS and editor metadata
+.git
+.gitignore
+.vscode
+.idea
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Local environments
+.venv/
+venv/
+.venv_py310_backup_20260324_122826/
+
+# Runtime/data generated locally
+storage/
+benchmark_reports/
+
+# Docs and examples are not required in runtime image
+docs/
+examples/
+
+# Misc
+*.log
+*.tmp

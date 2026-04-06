@@ -90,7 +90,45 @@ SCAN_EXCLUDED_EXTENSIONS=.png,.jpg,.jpeg,.gif,.pdf,.zip,.jar,.class,.dll,.exe
   GET /repos/{repo_id}/status antes de consultar.
 - Para provider catalog, usa GET /providers/models.
 
+## Despliegue con Docker Compose completo
+
+- `docker-compose.yml` define API + Neo4j y un perfil opcional para Redis.
+- API se conecta a Neo4j por DNS interno (`bolt://neo4j:7687`).
+- Storage persistente de API se monta en `/app/storage`.
+- Redis se activa con perfil `redis` y requiere `HEALTH_CHECK_REDIS=true`
+  cuando se quiera volver crítico en preflight.
+
+Variables relevantes en compose:
+
+- `API_IMAGE` (tag/registry de la imagen API)
+- `NEO4J_USER`, `NEO4J_PASSWORD`
+- `HEALTH_CHECK_OPENAI`, `HEALTH_CHECK_REDIS`
+
+## Despliegue con Kubernetes
+
+Estructura sugerida:
+
+- `k8s/base`: API + Neo4j + PVC + configuración común.
+- `k8s/addons/redis`: Redis opcional.
+- `k8s/overlays/cloud`: base + ingress + patch de imagen API.
+- `k8s/overlays/cloud-with-redis`: cloud + addon Redis.
+
+Mapeo de configuración:
+
+- Config no sensible en `ConfigMap` (`coderag-api-config`).
+- Secrets en `Secret` (`coderag-api-secret`, `neo4j-auth`).
+- Persistencia:
+  - API: PVC `coderag-api-storage` montado en `/app/storage`.
+  - Neo4j: `volumeClaimTemplates` en StatefulSet.
+
+Antes de desplegar en cloud:
+
+1. Cambia la imagen en `k8s/overlays/cloud/patch-api-deployment.yaml`.
+2. Sustituye placeholders en secrets.
+3. Ajusta host/TLS del ingress según tu dominio.
+
 ## Referencias
 
 - Flujos de consulta y fallback: docs/ARCHITECTURE.md.
 - Contratos API: docs/API_REFERENCE.md.
+- Guía de despliegue Kubernetes: k8s/README.md.

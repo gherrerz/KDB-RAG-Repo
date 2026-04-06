@@ -7,6 +7,7 @@ Guia de instalacion y arranque local.
 - Python 3.12.3 recomendado (compatibilidad verificada)
 - Git
 - Rancher Desktop con nerdctl compose o Docker Desktop con docker compose
+- kubectl y Kustomize (opcional para despliegue cloud en Kubernetes)
 
 Requisito adicional en Windows (solo si falla instalacion de dependencias nativas):
 
@@ -32,22 +33,28 @@ py -3.12 -m venv .venv
 copy .env.example .env
 ```
 
-3. Levantar Neo4j.
+3. Levantar stack local con Docker Compose (API + Neo4j).
 
 ```powershell
-./scripts/compose_neo4j.ps1 up
+./scripts/start_compose.ps1
 ```
 
-4. Levantar API.
+Opcional con Redis:
 
 ```powershell
-.\.venv\Scripts\python -m uvicorn src.coderag.api.server:app
+./scripts/start_compose.ps1 -WithRedis
 ```
 
-5. Levantar UI (opcional).
+4. Levantar UI (opcional, desktop local).
 
 ```powershell
 .\.venv\Scripts\python -m src.coderag.ui.main_window
+```
+
+5. Detener stack compose cuando termines.
+
+```powershell
+./scripts/stop_compose.ps1
 ```
 
 ## Modos recomendados
@@ -63,6 +70,23 @@ copy .env.example .env
 ```powershell
 ./scripts/start_dev.ps1
 ```
+
+## Kubernetes (manifests nativos)
+
+- Base cloud (API + Neo4j):
+
+```powershell
+kubectl apply -k k8s/overlays/cloud
+```
+
+- Cloud con Redis opcional:
+
+```powershell
+kubectl apply -k k8s/overlays/cloud-with-redis
+```
+
+Antes de aplicar en cloud, ajusta la imagen en
+`k8s/overlays/cloud/patch-api-deployment.yaml`.
 
 ## Verificacion
 

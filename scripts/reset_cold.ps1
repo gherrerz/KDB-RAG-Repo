@@ -61,7 +61,7 @@ New-Item -ItemType Directory -Path $bm25Path -Force | Out-Null
 New-Item -ItemType Directory -Path $workspacePath -Force | Out-Null
 
 Write-Host "[3/7] Levantando Neo4j (compose helper)..."
-& ./scripts/compose_neo4j.ps1 up
+& ./scripts/compose_neo4j.ps1 up -Services neo4j
 
 Write-Host "[4/7] Limpiando grafo Neo4j..."
 $pythonExe = Join-Path $root ".venv/Scripts/python.exe"

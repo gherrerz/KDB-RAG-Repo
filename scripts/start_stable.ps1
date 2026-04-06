@@ -50,7 +50,7 @@ function Wait-Port {
 }
 
 Write-Host "[1/5] Levantando Neo4j (compose helper)..."
-& ./scripts/compose_neo4j.ps1 up
+& ./scripts/compose_neo4j.ps1 up -Services neo4j
 
 Write-Host "[2/5] Esperando Neo4j (bolt 17687)..."
 if (-not (Wait-Port -Port 17687 -Retries 45 -DelaySeconds 1)) {

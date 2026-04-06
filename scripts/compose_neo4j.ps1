@@ -1,7 +1,9 @@
 param(
     [ValidateSet("up", "down", "ps", "logs")]
     [string]$Action = "up",
-    [switch]$NoDetach
+    [switch]$NoDetach,
+    [string[]]$Services = @(),
+    [switch]$WithRedis
 )
 
 Set-StrictMode -Version Latest
@@ -63,19 +65,35 @@ switch ($Action) {
         if (-not $NoDetach) {
             $actionArgs += "-d"
         }
+        if ($WithRedis) {
+            $actionArgs = @("--profile", "redis") + $actionArgs
+        }
     }
     "down" {
         $actionArgs = @("down")
+        if ($WithRedis) {
+            $actionArgs = @("--profile", "redis") + $actionArgs
+        }
     }
     "ps" {
         $actionArgs = @("ps")
+        if ($WithRedis) {
+            $actionArgs = @("--profile", "redis") + $actionArgs
+        }
     }
     "logs" {
-        $actionArgs = @("logs", "--tail", "200", "neo4j")
+        if ($Services.Count -gt 0) {
+            $actionArgs = @("logs", "--tail", "200") + $Services
+        } else {
+            $actionArgs = @("logs", "--tail", "200", "neo4j", "api")
+        }
     }
 }
 
 $composeArgs = @("compose", "--file", $composeFile) + $actionArgs
+if ($Services.Count -gt 0 -and $Action -ne "logs") {
+    $composeArgs += $Services
+}
 
 if ($canUseNerdctl) {
     Write-Host "Using Rancher Desktop runtime via nerdctl compose..."

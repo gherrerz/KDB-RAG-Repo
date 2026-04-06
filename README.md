@@ -25,13 +25,13 @@ de codigo con evidencia verificable (archivos y lineas).
 - Python 3.12.3 recomendado (compatibilidad verificada)
 - Git
 - Rancher Desktop con nerdctl compose o Docker Desktop con docker compose
+- kubectl y Kustomize (opcional para despliegue en Kubernetes)
 
 Nota Windows: si `pip install -r requirements.txt` falla al compilar
 `chroma-hnswlib`, instala Visual Studio 2022 Build Tools con workload C++
 (`Microsoft.VisualStudio.Workload.VCTools`).
 
 ## Quick Start
-
 1. Instala dependencias y crea entorno.
 
 ```powershell
@@ -41,11 +41,22 @@ py -3.12 -m venv .venv
 copy .env.example .env
 ```
 
-2. Levanta Neo4j y API.
+2. Levanta stack local con Docker Compose (API + Neo4j).
 
 ```powershell
-./scripts/compose_neo4j.ps1 up
-.\.venv\Scripts\python -m uvicorn src.coderag.api.server:app
+./scripts/start_compose.ps1
+```
+
+Opcional con Redis:
+
+```powershell
+./scripts/start_compose.ps1 -WithRedis
+```
+
+Alternativa para desarrollo local (API/UI fuera de contenedor):
+
+```powershell
+./scripts/start_stable.ps1
 ```
 
 3. Inicia una ingesta.
@@ -65,6 +76,23 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/repos/ingest -ContentT
 ```powershell
 Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/jobs/<job_id>?logs_tail=200"
 ```
+
+## Kubernetes (Cloud)
+
+Despliegue base (API + Neo4j):
+
+```powershell
+kubectl apply -k k8s/overlays/cloud
+```
+
+Despliegue con Redis opcional:
+
+```powershell
+kubectl apply -k k8s/overlays/cloud-with-redis
+```
+
+Nota: actualiza la imagen en `k8s/overlays/cloud/patch-api-deployment.yaml`
+con tu registry/tag antes de aplicar en entornos gestionados.
 
 ## Customer Journeys
 
@@ -163,6 +191,7 @@ Invoke-RestMethod -Method Delete -Uri http://127.0.0.1:8000/repos/mall
 - API detallada: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
 - Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 - Runbook rollout/rollback semántico: [docs/SEMANTIC_GRAPH_RUNBOOK.md](docs/SEMANTIC_GRAPH_RUNBOOK.md)
+- Guía de despliegue Kubernetes: [k8s/README.md](k8s/README.md)
 - Benchmark Sprint 3: [docs/SPRINT3_BENCHMARK.md](docs/SPRINT3_BENCHMARK.md)
 - Extractores de simbolos: [docs/SYMBOL_EXTRACTORS.md](docs/SYMBOL_EXTRACTORS.md)
 - Guia de contribucion: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)

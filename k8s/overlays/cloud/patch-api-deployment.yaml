@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coderag-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/your-org/kdb-rag-api:latest
+          imagePullPolicy: Always

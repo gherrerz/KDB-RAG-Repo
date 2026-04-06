@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coderag-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coderag-api
+  template:
+    metadata:
+      labels:
+        app: coderag-api
+    spec:
+      containers:
+        - name: api
+          image: kdb-rag-api:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: coderag-api-config
+            - secretRef:
+                name: coderag-api-secret
+          volumeMounts:
+            - name: api-storage
+              mountPath: /app/storage
+          startupProbe:
+            httpGet:
+              path: /health/storage
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/storage
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          livenessProbe:
+            httpGet:
+              path: /health/storage
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+      volumes:
+        - name: api-storage
+          persistentVolumeClaim:
+            claimName: coderag-api-storage

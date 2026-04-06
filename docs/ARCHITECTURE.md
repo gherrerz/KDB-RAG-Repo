@@ -28,6 +28,30 @@ LLM o salida retrieval-only segun endpoint y condiciones operativas.
 - Capa LLM: clientes multi-provider para answer/verify.
 - Persistencia: Chroma, BM25, Neo4j, SQLite y workspace local.
 
+## Topología de despliegue
+
+### Local con Docker Compose
+
+```mermaid
+flowchart LR
+    UI[UI Desktop local] --> API[API container :8000]
+    API --> NEO[Neo4j container :17687]
+    API -. opcional .-> REDIS[Redis container :16379]
+    API --> ST[(storage volume)]
+```
+
+### Cloud con Kubernetes
+
+```mermaid
+flowchart LR
+    UI[UI Desktop local] --> ING[Ingress]
+    ING --> API[Deployment coderag-api]
+    API --> NEO[StatefulSet neo4j]
+    API -. opcional .-> REDIS[StatefulSet redis]
+    API --> APIPVC[(PVC api storage)]
+    NEO --> NEOPVC[(PVC neo4j)]
+```
+
 ## Arquitectura por capas
 
 ### Vista tecnológica por capas

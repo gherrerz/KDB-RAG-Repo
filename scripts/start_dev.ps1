@@ -10,7 +10,7 @@ if (-not (Test-Path $pythonExe)) {
 }
 
 Write-Host "[1/3] Levantando Neo4j (compose helper)..."
-& ./scripts/compose_neo4j.ps1 up
+& ./scripts/compose_neo4j.ps1 up -Services neo4j
 
 Write-Host "[2/3] Levantando API en modo desarrollo (--reload)..."
 $env:HEALTH_CHECK_OPENAI = "false"
