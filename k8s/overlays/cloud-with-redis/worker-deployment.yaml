@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coderag-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coderag-worker
+  template:
+    metadata:
+      labels:
+        app: coderag-worker
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/your-org/kdb-rag-api:latest
+          imagePullPolicy: Always
+          command:
+            - python
+            - -m
+            - src.coderag.jobs.rq_worker
+          envFrom:
+            - configMapRef:
+                name: coderag-api-config
+            - secretRef:
+                name: coderag-api-secret
+          volumeMounts:
+            - name: api-storage
+              mountPath: /app/storage
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+      volumes:
+        - name: api-storage
+          persistentVolumeClaim:
+            claimName: coderag-api-storage

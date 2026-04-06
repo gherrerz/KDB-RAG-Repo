@@ -1,10 +1,17 @@
 ﻿"""Pruebas de estados operativos del JobManager durante la ingesta."""
 
 import datetime
+from contextlib import contextmanager, nullcontext
 from uuid import uuid4
 
+import pytest
+
 from src.coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
-from src.coderag.jobs.worker import JobManager
+from src.coderag.jobs.worker import (
+    IngestionConflictError,
+    JobManager,
+    run_ingest_job_task,
+)
 
 
 def test_job_manager_marks_partial_when_repo_not_query_ready(
@@ -206,3 +213,257 @@ def test_job_manager_recovers_interrupted_running_jobs(
     assert recovered.status == JobStatus.failed
     assert recovered.error is not None
     assert "interrumpido" in recovered.error.lower()
+
+
+def test_job_manager_enqueues_job_when_rq_mode_enabled(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Encola jobs en backend RQ cuando el modo de ejecución lo requiere."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+        ingestion_execution_mode = "rq"
+        redis_url = "redis://localhost:6379/0"
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import src.coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    manager = JobManager()
+
+    called: dict[str, str] = {}
+
+    def _fake_enqueue(*, job, request) -> None:
+        called["job_id"] = job.id
+        called["repo_url"] = request.repo_url
+
+    monkeypatch.setattr(manager, "_repo_enqueue_lock", lambda repo_id: nullcontext())
+    monkeypatch.setattr(manager, "_enqueue_ingest_job", _fake_enqueue)
+
+    request = RepoIngestRequest(
+        provider="github",
+        repo_url="https://github.com/acme/rq-demo.git",
+        branch="main",
+        token=None,
+        commit=None,
+    )
+    created = manager.create_ingest_job(request)
+
+    assert created.status == JobStatus.queued
+    assert called["job_id"] == created.id
+    assert called["repo_url"] == request.repo_url
+
+
+def test_job_manager_get_job_prefers_store_in_rq_mode(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """En modo RQ, get_job debe reflejar estado persistido y no caché obsoleta."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+        ingestion_execution_mode = "rq"
+        redis_url = "redis://localhost:6379/0"
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import src.coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    manager = JobManager()
+
+    job = JobInfo(id=str(uuid4()), status=JobStatus.queued)
+    manager._jobs[job.id] = job
+
+    job.status = JobStatus.running
+    manager.store.upsert_job(job)
+
+    retrieved = manager.get_job(job.id)
+    assert retrieved is not None
+    assert retrieved.status == JobStatus.running
+
+
+def test_job_manager_rejects_duplicate_active_repo_ingest(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Evita crear una segunda ingesta activa para el mismo repo_id."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+        ingestion_execution_mode = "rq"
+        redis_url = "redis://localhost:6379/0"
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import src.coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    manager = JobManager()
+
+    first = JobInfo(
+        id=str(uuid4()),
+        status=JobStatus.running,
+        repo_id="dup-repo",
+    )
+    manager.store.upsert_job(first)
+
+    monkeypatch.setattr(manager, "_repo_enqueue_lock", lambda repo_id: nullcontext())
+
+    request = RepoIngestRequest(
+        provider="github",
+        repo_url="https://github.com/acme/dup-repo.git",
+        branch="main",
+        token=None,
+        commit=None,
+    )
+
+    with pytest.raises(IngestionConflictError):
+        manager.create_ingest_job(request)
+
+
+def test_job_manager_uses_repo_lock_in_rq_mode(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """En modo RQ debe envolver creación en lock distribuido por repo."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+        ingestion_execution_mode = "rq"
+        redis_url = "redis://localhost:6379/0"
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import src.coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    manager = JobManager()
+
+    captured: dict[str, str] = {}
+
+    @contextmanager
+    def _fake_lock(repo_id: str):
+        captured["repo_id"] = repo_id
+        yield
+
+    monkeypatch.setattr(manager, "_repo_enqueue_lock", _fake_lock)
+    monkeypatch.setattr(manager, "_enqueue_ingest_job", lambda **kwargs: None)
+
+    request = RepoIngestRequest(
+        provider="github",
+        repo_url="https://github.com/acme/locked-repo.git",
+        branch="main",
+        token=None,
+        commit=None,
+    )
+    created = manager.create_ingest_job(request)
+
+    assert created.repo_id == "locked-repo"
+    assert captured["repo_id"] == "locked-repo"
+
+
+def test_run_ingest_job_task_raises_when_final_status_is_failed(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Debe propagar error para que RQ aplique política de reintentos."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+        ingestion_retry_transient_only = True
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import src.coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+
+    def _fake_execute(*, job, request, store, workspace_path):
+        del request, store, workspace_path
+        job.status = JobStatus.failed
+        job.error = "fallo transitorio"
+        job.diagnostics["retryable_error"] = True
+        return job
+
+    monkeypatch.setattr(module, "_execute_ingest_job", _fake_execute)
+
+    payload = {
+        "provider": "github",
+        "repo_url": "https://github.com/acme/retry-demo.git",
+        "branch": "main",
+    }
+
+    with pytest.raises(RuntimeError):
+        run_ingest_job_task(str(uuid4()), payload)
+
+
+def test_run_ingest_job_task_does_not_raise_for_non_retryable_failure(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Con retry transitorio, no relanza errores permanentes."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+        ingestion_retry_transient_only = True
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import src.coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+
+    def _fake_execute(*, job, request, store, workspace_path):
+        del request, store, workspace_path
+        job.status = JobStatus.failed
+        job.error = "repository not found"
+        job.diagnostics["retryable_error"] = False
+        return job
+
+    monkeypatch.setattr(module, "_execute_ingest_job", _fake_execute)
+
+    payload = {
+        "provider": "github",
+        "repo_url": "https://github.com/acme/missing.git",
+        "branch": "main",
+    }
+
+    assert run_ingest_job_task(str(uuid4()), payload) == ""
+
+
+def test_run_ingest_job_task_raises_when_retry_all_enabled(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Con retry-all habilitado, cualquier fallo debe relanzarse."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+        ingestion_retry_transient_only = False
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import src.coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+
+    def _fake_execute(*, job, request, store, workspace_path):
+        del request, store, workspace_path
+        job.status = JobStatus.failed
+        job.error = "repository not found"
+        job.diagnostics["retryable_error"] = False
+        return job
+
+    monkeypatch.setattr(module, "_execute_ingest_job", _fake_execute)
+
+    payload = {
+        "provider": "github",
+        "repo_url": "https://github.com/acme/missing.git",
+        "branch": "main",
+    }
+
+    with pytest.raises(RuntimeError):
+        run_ingest_job_task(str(uuid4()), payload)

@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ProviderName = Literal["openai", "anthropic", "gemini", "vertex_ai"]
 HnswSpaceName = Literal["l2", "cosine"]
+IngestionExecutionMode = Literal["thread", "rq"]
 
 
 class Settings(BaseSettings):
@@ -58,6 +59,46 @@ class Settings(BaseSettings):
     neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
     neo4j_password: str = Field(default="password", alias="NEO4J_PASSWORD")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    ingestion_execution_mode: IngestionExecutionMode = Field(
+        default="thread",
+        alias="INGESTION_EXECUTION_MODE",
+    )
+    ingestion_queue_name: str = Field(
+        default="ingestion",
+        alias="INGESTION_QUEUE_NAME",
+    )
+    ingestion_job_timeout_seconds: int = Field(
+        default=7200,
+        alias="INGESTION_JOB_TIMEOUT_SECONDS",
+    )
+    ingestion_result_ttl_seconds: int = Field(
+        default=86400,
+        alias="INGESTION_RESULT_TTL_SECONDS",
+    )
+    ingestion_failure_ttl_seconds: int = Field(
+        default=604800,
+        alias="INGESTION_FAILURE_TTL_SECONDS",
+    )
+    ingestion_retry_max: int = Field(
+        default=3,
+        alias="INGESTION_RETRY_MAX",
+    )
+    ingestion_retry_intervals: str = Field(
+        default="30,120,300",
+        alias="INGESTION_RETRY_INTERVALS",
+    )
+    ingestion_retry_transient_only: bool = Field(
+        default=True,
+        alias="INGESTION_RETRY_TRANSIENT_ONLY",
+    )
+    ingestion_enqueue_lock_seconds: int = Field(
+        default=30,
+        alias="INGESTION_ENQUEUE_LOCK_SECONDS",
+    )
+    ingestion_enqueue_lock_wait_seconds: int = Field(
+        default=5,
+        alias="INGESTION_ENQUEUE_LOCK_WAIT_SECONDS",
+    )
     workspace_path: Path = Field(
         default=Path("./storage/workspace"),
         alias="WORKSPACE_PATH",
@@ -262,6 +303,26 @@ class Settings(BaseSettings):
         if provider in {"openai", "anthropic", "gemini", "vertex_ai"}:
             return provider  # type: ignore[return-value]
         return "openai"
+
+    def resolve_ingestion_retry_intervals(self) -> list[int]:
+        """Resuelve intervalos válidos de reintento para jobs de ingesta."""
+        raw_value = (self.ingestion_retry_intervals or "").strip()
+        if not raw_value:
+            return []
+
+        intervals: list[int] = []
+        for token in raw_value.split(","):
+            piece = token.strip()
+            if not piece:
+                continue
+            try:
+                seconds = int(piece)
+            except ValueError:
+                continue
+            if seconds <= 0:
+                continue
+            intervals.append(seconds)
+        return intervals
 
     def resolve_answer_model(self, provider: ProviderName, override: str | None = None) -> str:
         """Resuelve el modelo answer con fallback a configuración actual."""

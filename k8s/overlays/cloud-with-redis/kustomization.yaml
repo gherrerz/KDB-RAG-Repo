@@ -3,5 +3,7 @@ kind: Kustomization
 resources:
   - ../cloud
   - ../../addons/redis
+  - worker-deployment.yaml
 patches:
   - path: patch-api-configmap-redis.yaml
+  - path: patch-api-deployment-replicas.yaml

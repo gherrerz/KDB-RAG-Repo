@@ -28,7 +28,7 @@ from src.coderag.core.storage_health import (
     get_repo_query_status,
     run_storage_preflight,
 )
-from src.coderag.jobs.worker import JobManager
+from src.coderag.jobs.worker import IngestionConflictError, JobManager
 from src.coderag.llm.model_discovery import discover_models
 
 
@@ -103,7 +103,24 @@ def ingest_repo(request: RepoIngestRequest) -> JobInfo:
                 "health": exc.report,
             },
         ) from exc
-    return jobs.create_ingest_job(request)
+    try:
+        return jobs.create_ingest_job(request)
+    except IngestionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Ya existe una ingesta activa para el repositorio.",
+                "error": str(exc),
+            },
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "No se pudo iniciar la ingesta asíncrona.",
+                "error": str(exc),
+            },
+        ) from exc
 
 
 @app.get(

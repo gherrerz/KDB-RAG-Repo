@@ -15,6 +15,8 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Dockerfile multi-stage y `.dockerignore` para empaquetar la API.
 - Manifests Kubernetes nativos (`k8s/base`, overlays cloud y addon Redis opcional).
 - Scripts `start_compose.ps1` y `stop_compose.ps1` para operar stack local completo.
+- Worker RQ dedicado para ingesta asíncrona distribuida (modo `INGESTION_EXECUTION_MODE=rq`).
+- Lock distribuido por `repo_id` para serializar encolado de ingestas en modo RQ.
 
 ### Changed
 - README reestructurado como portal corto de navegacion.
@@ -23,8 +25,15 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Imports y entrypoints actualizados a `src.coderag.*` para API, UI,
   scripts y tests.
 - `docker-compose.yml` evolucionó de solo Neo4j a stack completo API + Neo4j, con perfil opcional Redis.
+- `docker-compose.yml` ahora incluye servicio `worker` al activar perfil `redis`.
 - Scripts `start_dev`, `start_stable` y `reset_cold` mantienen modo local iniciando solo Neo4j desde Compose.
+- API de ingesta retorna `503` cuando falla el encolado asíncrono.
+- API de ingesta retorna `409` si ya existe ingesta activa para el mismo repositorio.
+- Worker RQ ahora propaga fallas para activar la política de reintentos configurada.
+- Política de reintentos configurable para relanzar solo errores transitorios.
 
 ### Fixed
 - Cobertura explicita de DELETE /repos/{repo_id} en documentacion de API.
 - Cobertura de parametro logs_tail en GET /jobs/{job_id}.
+- Imagen runtime ahora incluye `git` para permitir clonación durante ingestas en API/worker.
+- `start_compose.ps1` aplica `HEALTH_CHECK_OPENAI=false` por defecto si no está definido.

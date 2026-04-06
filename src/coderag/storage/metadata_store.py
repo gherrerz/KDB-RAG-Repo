@@ -198,6 +198,29 @@ class MetadataStore:
             ).fetchall()
         return [str(row["repo_id"]) for row in rows if row["repo_id"]]
 
+    def list_active_job_ids(self, repo_id: str | None = None) -> list[str]:
+        """Lista jobs activos (queued/running), opcionalmente filtrados por repo."""
+        params: list[str] = [
+            JobStatus.queued.value,
+            JobStatus.running.value,
+        ]
+        query = """
+            SELECT id
+            FROM jobs
+            WHERE status IN (?, ?)
+        """
+
+        normalized_repo_id = (repo_id or "").strip()
+        if normalized_repo_id:
+            query += " AND repo_id = ?"
+            params.append(normalized_repo_id)
+
+        query += " ORDER BY created_at ASC"
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+
+        return [str(row["id"]) for row in rows if row["id"]]
+
     def upsert_repo_runtime(
         self,
         *,

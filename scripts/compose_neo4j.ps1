@@ -85,7 +85,19 @@ switch ($Action) {
         if ($Services.Count -gt 0) {
             $actionArgs = @("logs", "--tail", "200") + $Services
         } else {
-            $actionArgs = @("logs", "--tail", "200", "neo4j", "api")
+            if ($WithRedis) {
+                $actionArgs = @(
+                    "logs",
+                    "--tail",
+                    "200",
+                    "neo4j",
+                    "api",
+                    "redis",
+                    "worker"
+                )
+            } else {
+                $actionArgs = @("logs", "--tail", "200", "neo4j", "api")
+            }
         }
     }
 }

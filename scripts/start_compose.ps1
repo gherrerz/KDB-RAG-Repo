@@ -8,6 +8,10 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+if (-not $env:HEALTH_CHECK_OPENAI) {
+    $env:HEALTH_CHECK_OPENAI = "false"
+}
+
 function Wait-Port {
     param(
         [Parameter(Mandatory = $true)][int]$Port,
@@ -27,7 +31,7 @@ function Wait-Port {
 
 Write-Host "[1/3] Levantando stack compose (api + neo4j" -NoNewline
 if ($WithRedis) {
-    Write-Host " + redis)..."
+    Write-Host " + redis + worker)..."
     & ./scripts/compose_neo4j.ps1 up -WithRedis
 } else {
     Write-Host ")..."

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from src.coderag.api import server
 from src.coderag.core.models import JobInfo, JobStatus
 from src.coderag.core.storage_health import StoragePreflightError
+from src.coderag.jobs.worker import IngestionConflictError
 from src.coderag.llm.model_discovery import ModelDiscoveryResult
 
 app = server.app
@@ -232,6 +233,58 @@ def test_list_repos_returns_repo_id_catalog(monkeypatch) -> None:
     response = client.get("/repos")
     assert response.status_code == 200
     assert response.json()["repo_ids"] == ["mall", "api-service"]
+
+
+def test_ingest_repo_returns_503_when_enqueue_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retorna 503 cuando no es posible iniciar el job asíncrono."""
+
+    def fake_create_ingest_job(_request) -> JobInfo:
+        raise RuntimeError("No se pudo encolar en Redis")
+
+    monkeypatch.setattr(server.jobs, "create_ingest_job", fake_create_ingest_job)
+    client = TestClient(app)
+
+    response = client.post(
+        "/repos/ingest",
+        json={
+            "provider": "github",
+            "repo_url": "https://github.com/acme/fail.git",
+            "branch": "main",
+        },
+    )
+
+    assert response.status_code == 503
+    payload = response.json()["detail"]
+    assert payload["message"] == "No se pudo iniciar la ingesta asíncrona."
+    assert "encolar" in payload["error"].lower()
+
+
+def test_ingest_repo_returns_409_when_same_repo_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retorna 409 cuando ya existe ingesta activa del mismo repositorio."""
+
+    def fake_create_ingest_job(_request) -> JobInfo:
+        raise IngestionConflictError("Ya existe una ingesta activa para 'mall'.")
+
+    monkeypatch.setattr(server.jobs, "create_ingest_job", fake_create_ingest_job)
+    client = TestClient(app)
+
+    response = client.post(
+        "/repos/ingest",
+        json={
+            "provider": "github",
+            "repo_url": "https://github.com/acme/mall.git",
+            "branch": "main",
+        },
+    )
+
+    assert response.status_code == 409
+    payload = response.json()["detail"]
+    assert payload["message"] == "Ya existe una ingesta activa para el repositorio."
+    assert "ingesta activa" in payload["error"].lower()
 
 
 def test_provider_models_endpoint_returns_catalog(monkeypatch) -> None:

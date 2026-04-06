@@ -31,6 +31,10 @@ WORKDIR /app
 RUN groupadd --system app \
     && useradd --system --gid app --create-home app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /wheels /wheels
 COPY requirements.txt ./
 

@@ -53,6 +53,13 @@ Opcional con Redis:
 ./scripts/start_compose.ps1 -WithRedis
 ```
 
+Para ingesta asíncrona distribuida (API encola + worker procesa):
+
+```powershell
+$env:INGESTION_EXECUTION_MODE = 'rq'
+./scripts/start_compose.ps1 -WithRedis
+```
+
 Alternativa para desarrollo local (API/UI fuera de contenedor):
 
 ```powershell

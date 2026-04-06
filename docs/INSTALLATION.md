@@ -45,6 +45,13 @@ Opcional con Redis:
 ./scripts/start_compose.ps1 -WithRedis
 ```
 
+Para ingesta distribuida con worker RQ en local (recomendado con Redis):
+
+```powershell
+$env:INGESTION_EXECUTION_MODE = "rq"
+./scripts/start_compose.ps1 -WithRedis
+```
+
 4. Levantar UI (opcional, desktop local).
 
 ```powershell
@@ -84,6 +91,8 @@ kubectl apply -k k8s/overlays/cloud
 ```powershell
 kubectl apply -k k8s/overlays/cloud-with-redis
 ```
+
+El overlay `cloud-with-redis` habilita modo `rq` y despliega worker dedicado.
 
 Antes de aplicar en cloud, ajusta la imagen en
 `k8s/overlays/cloud/patch-api-deployment.yaml`.

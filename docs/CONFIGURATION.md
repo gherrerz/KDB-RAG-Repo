@@ -31,6 +31,19 @@ Guia de configuracion de entorno y providers.
 - NEO4J_PASSWORD
 - WORKSPACE_PATH
 
+### Ingesta asíncrona distribuida
+
+- INGESTION_EXECUTION_MODE: thread o rq
+- INGESTION_QUEUE_NAME: nombre de cola Redis/RQ
+- INGESTION_JOB_TIMEOUT_SECONDS: timeout de ejecución por job
+- INGESTION_RESULT_TTL_SECONDS: retención de resultado en cola
+- INGESTION_FAILURE_TTL_SECONDS: retención de jobs fallidos
+- INGESTION_RETRY_MAX: máximo de reintentos para errores transitorios
+- INGESTION_RETRY_INTERVALS: intervalos de reintento en segundos (CSV)
+- INGESTION_RETRY_TRANSIENT_ONLY: si es true, solo relanza errores transitorios
+- INGESTION_ENQUEUE_LOCK_SECONDS: TTL del lock distribuido por repo_id
+- INGESTION_ENQUEUE_LOCK_WAIT_SECONDS: espera máxima al adquirir lock
+
 ### Escaneo de ingesta (obligatorias)
 
 - SCAN_MAX_FILE_SIZE_BYTES
@@ -92,7 +105,9 @@ SCAN_EXCLUDED_EXTENSIONS=.png,.jpg,.jpeg,.gif,.pdf,.zip,.jar,.class,.dll,.exe
 
 ## Despliegue con Docker Compose completo
 
-- `docker-compose.yml` define API + Neo4j y un perfil opcional para Redis.
+- `docker-compose.yml` define API + Neo4j y perfil opcional `redis`.
+- Al activar perfil `redis`, también se levanta `worker` para ejecutar
+  ingestas por cola Redis/RQ.
 - API se conecta a Neo4j por DNS interno (`bolt://neo4j:7687`).
 - Storage persistente de API se monta en `/app/storage`.
 - Redis se activa con perfil `redis` y requiere `HEALTH_CHECK_REDIS=true`
@@ -103,6 +118,7 @@ Variables relevantes en compose:
 - `API_IMAGE` (tag/registry de la imagen API)
 - `NEO4J_USER`, `NEO4J_PASSWORD`
 - `HEALTH_CHECK_OPENAI`, `HEALTH_CHECK_REDIS`
+- `INGESTION_EXECUTION_MODE`, `INGESTION_QUEUE_NAME`
 
 ## Despliegue con Kubernetes
 
@@ -112,6 +128,11 @@ Estructura sugerida:
 - `k8s/addons/redis`: Redis opcional.
 - `k8s/overlays/cloud`: base + ingress + patch de imagen API.
 - `k8s/overlays/cloud-with-redis`: cloud + addon Redis.
+
+Comportamiento de ingesta sugerido:
+
+- `cloud`: mantener `INGESTION_EXECUTION_MODE=thread` (single replica API).
+- `cloud-with-redis`: usar `INGESTION_EXECUTION_MODE=rq` y worker dedicado.
 
 Mapeo de configuración:
 

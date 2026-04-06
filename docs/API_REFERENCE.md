@@ -24,6 +24,8 @@ Crea un job asíncrono de ingesta de repositorio.
 - Request schema: `RepoIngestRequest`
 - Response schema: `JobInfo`
 - Error responses:
+  - `409`: ya existe ingesta activa para el mismo repositorio (`detail` es objeto)
+  - `503`: error al iniciar encolado asíncrono (`detail` es objeto)
   - `503`: preflight de storage falló antes de ingest (`detail` es objeto)
 
 #### GET /jobs/{job_id}
@@ -418,7 +420,7 @@ Response:
   "status": "queued",
   "progress": 0.0,
   "logs": [],
-  "repo_id": null,
+  "repo_id": "mall",
   "error": null,
   "created_at": "2026-03-23T12:00:00Z",
   "updated_at": "2026-03-23T12:00:00Z"

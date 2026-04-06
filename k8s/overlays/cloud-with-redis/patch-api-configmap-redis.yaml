@@ -3,4 +3,6 @@ kind: ConfigMap
 metadata:
   name: coderag-api-config
 data:
+  INGESTION_EXECUTION_MODE: rq
+  INGESTION_QUEUE_NAME: ingestion
   HEALTH_CHECK_REDIS: "true"
