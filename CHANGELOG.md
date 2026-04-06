@@ -21,7 +21,7 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Nueva guia `KUBERNETES.md` con despliegue, secretos, probes, persistencia, rollback y validacion funcional.
 
 ### Changed
-- `chromadb` se actualiza a `0.5.23` para mejorar compatibilidad frente a deprecaciones en stack FastAPI/Pydantic.
+- `chromadb` se actualiza a `1.5.5` para alinear el stack vectorial con versiones recientes del ecosistema.
 - README reestructurado como portal corto de navegacion.
 - API reference reorganizada por journeys y operaciones.
 - Estructura del paquete movida de `coderag/` a `src/coderag/`.
