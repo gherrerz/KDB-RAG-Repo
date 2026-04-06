@@ -1,10 +1,15 @@
 """Modelos de datos de Pydantic para solicitudes, trabajos y objetos de recuperación."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+def utc_now() -> datetime:
+    """Retorna fecha/hora actual en UTC con timezone explícito."""
+    return datetime.now(UTC)
 
 
 class JobStatus(str, Enum):
@@ -84,11 +89,11 @@ class JobInfo(BaseModel):
         ),
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=utc_now,
         description="Fecha/hora de creación del job (UTC).",
     )
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=utc_now,
         description="Fecha/hora de última actualización del job (UTC).",
     )
 

@@ -21,6 +21,7 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Nueva guia `KUBERNETES.md` con despliegue, secretos, probes, persistencia, rollback y validacion funcional.
 
 ### Changed
+- `chromadb` se actualiza a `0.5.23` para mejorar compatibilidad frente a deprecaciones en stack FastAPI/Pydantic.
 - README reestructurado como portal corto de navegacion.
 - API reference reorganizada por journeys y operaciones.
 - Estructura del paquete movida de `coderag/` a `src/coderag/`.
@@ -39,6 +40,7 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Política de reintentos configurable para relanzar solo errores transitorios.
 
 ### Fixed
+- `datetime.utcnow` se reemplaza por timestamps UTC aware y se agregan filtros temporales de warnings de terceros en `pytest.ini`.
 - Cobertura explicita de DELETE /repos/{repo_id} en documentacion de API.
 - Cobertura de parametro logs_tail en GET /jobs/{job_id}.
 - Imagen runtime ahora incluye `git` para permitir clonación durante ingestas en API/worker.
