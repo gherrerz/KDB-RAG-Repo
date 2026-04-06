@@ -142,7 +142,7 @@ Rutas principales:
 - DELETE /repos/{repo_id}
 - GET /repos/{repo_id}/status
 - GET /providers/models
-- GET /health/storage
+- GET /health
 - POST /admin/reset
 
 Referencia completa por journeys y contratos:
@@ -159,7 +159,7 @@ Si recibes errores durante ingesta o consulta:
 Atajo de diagnostico:
 
 - Readiness por repo: GET /repos/{repo_id}/status
-- Salud de storage: GET /health/storage
+- Salud de storage: GET /health
 
 ## Comandos por Journey
 

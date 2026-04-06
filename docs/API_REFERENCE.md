@@ -102,7 +102,7 @@ Retorna catálogo de modelos por provider y kind.
 
 ### Admin
 
-#### GET /health/storage
+#### GET /health
 
 Retorna reporte consolidado de salud de storage.
 
@@ -142,7 +142,7 @@ Limpia todo el estado indexado.
 | GET | `/repos` | `JobManager.list_repo_ids` | N/A | `RepoCatalogResponse` |
 | GET | `/repos/{repo_id}/status` | `get_repo_query_status` | Path/query params | `RepoQueryStatusResponse` |
 | GET | `/providers/models` | `discover_models` | Query params | `ProviderModelCatalogResponse` |
-| GET | `/health/storage` | `run_storage_preflight` | N/A | `StorageHealthResponse` |
+| GET | `/health` | `run_storage_preflight` | N/A | `StorageHealthResponse` |
 | DELETE | `/repos/{repo_id}` | `JobManager.delete_repo` | Path params | `RepoDeleteResponse` |
 | POST | `/admin/reset` | `JobManager.reset_all_data` | N/A | `ResetResponse` |
 

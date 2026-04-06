@@ -484,7 +484,7 @@ def repo_status(
 
 
 @app.get(
-    "/health/storage",
+    "/health",
     response_model=StorageHealthResponse,
     tags=["Admin"],
     summary="Salud de storage",

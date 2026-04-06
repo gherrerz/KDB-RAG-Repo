@@ -5,7 +5,7 @@ Incidencias frecuentes y acciones sugeridas.
 ## API no inicia
 
 - Verifica que el entorno virtual este activo.
-- Ejecuta GET /health/storage para confirmar estado de storage.
+- Ejecuta GET /health para confirmar estado de storage.
 - Valida conectividad Neo4j y credenciales.
 
 ## Repo no listo para consultas (422)
@@ -44,7 +44,7 @@ Si durante `pip install -r requirements.txt` aparece un error en
 
 - 404 en jobs: valida job_id y reintenta ingesta si aplica.
 - 422 en query: consulta primero GET /repos/{repo_id}/status.
-- 503 en ingesta/query: revisa GET /health/storage antes de reintentar.
+- 503 en ingesta/query: revisa GET /health antes de reintentar.
 - 409 en delete/reset: espera fin de jobs en ejecucion.
 
 Ver matriz completa de acciones:

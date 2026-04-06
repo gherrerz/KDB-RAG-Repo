@@ -45,5 +45,5 @@ if (-not (Wait-Port -Port 8000 -Retries 45 -DelaySeconds 1)) {
 
 Write-Host "[3/3] Stack compose listo."
 Write-Host "- OpenAPI: http://127.0.0.1:8000/docs"
-Write-Host "- Health storage: http://127.0.0.1:8000/health/storage"
+Write-Host "- Health storage: http://127.0.0.1:8000/health"
 Write-Host "- UI desktop opcional: .\.venv\Scripts\python -m src.coderag.ui.main_window"

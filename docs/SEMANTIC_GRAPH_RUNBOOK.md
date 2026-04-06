@@ -77,7 +77,7 @@ Rollback rapido (sin redeploy):
 2. Mantener SEMANTIC_GRAPH_QUERY_FALLBACK_TO_STRUCTURAL=true para degradacion limpia.
 3. Si el problema es de ingesta, poner SEMANTIC_GRAPH_ENABLED=false.
 4. Reiniciar API.
-5. Validar /health/storage y smoke queries.
+5. Validar /health y smoke queries.
 
 Validacion post-rollback:
 

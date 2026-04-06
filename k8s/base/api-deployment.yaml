@@ -29,14 +29,14 @@ spec:
               mountPath: /app/storage
           startupProbe:
             httpGet:
-              path: /health/storage
+              path: /health
               port: http
             failureThreshold: 30
             periodSeconds: 10
             timeoutSeconds: 5
           readinessProbe:
             httpGet:
-              path: /health/storage
+              path: /health
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
@@ -44,7 +44,7 @@ spec:
             failureThreshold: 4
           livenessProbe:
             httpGet:
-              path: /health/storage
+              path: /health
               port: http
             initialDelaySeconds: 30
             periodSeconds: 20

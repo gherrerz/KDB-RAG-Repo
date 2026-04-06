@@ -118,9 +118,9 @@ Este overlay hace:
 
 ### API (`coderag-api`)
 
-- `startupProbe`: `GET /health/storage`.
-- `readinessProbe`: `GET /health/storage`.
-- `livenessProbe`: `GET /health/storage`.
+- `startupProbe`: `GET /health`.
+- `readinessProbe`: `GET /health`.
+- `livenessProbe`: `GET /health`.
 - Puerto de servicio: `8000`.
 
 ### Neo4j (`neo4j`)
@@ -211,7 +211,7 @@ kubectl port-forward svc/coderag-api 8000:8000 -n coderag
 En otra terminal:
 
 ```bash
-curl -sS http://127.0.0.1:8000/health/storage
+curl -sS http://127.0.0.1:8000/health
 curl -sS http://127.0.0.1:8000/docs
 ```
 

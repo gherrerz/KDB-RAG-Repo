@@ -106,7 +106,7 @@ Antes de aplicar en cloud, ajusta la imagen en
 ## Verificacion
 
 - OpenAPI: http://127.0.0.1:8000/docs
-- Health storage: GET /health/storage
+- Health storage: GET /health
 
 ## Siguientes pasos
 

@@ -63,7 +63,7 @@ kubectl get ingress -n coderag
 
 Health endpoint (through ingress or service):
 
-- `GET /health/storage`
+- `GET /health`
 
 ## Notes
 

@@ -452,7 +452,7 @@ def test_inventory_query_endpoint_returns_paginated_payload(monkeypatch) -> None
 def test_storage_health_endpoint_returns_structured_payload() -> None:
     """Retorna estado estructurado de salud de almacenamiento."""
     client = TestClient(app)
-    response = client.get("/health/storage")
+    response = client.get("/health")
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True

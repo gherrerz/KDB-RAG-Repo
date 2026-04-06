@@ -49,9 +49,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def wait_for_health(base_url: str, timeout_seconds: float) -> bool:
-    """Espera hasta que /health/storage responda 200 o expire timeout."""
+    """Espera hasta que /health responda 200 o expire timeout."""
     deadline = time.time() + timeout_seconds
-    url = f"{base_url}/health/storage"
+    url = f"{base_url}/health"
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=3) as response:
