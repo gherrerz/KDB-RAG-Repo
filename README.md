@@ -66,6 +66,12 @@ Alternativa para desarrollo local (API/UI fuera de contenedor):
 ./scripts/start_stable.ps1
 ```
 
+Arranque directo de API (sin scripts):
+
+```powershell
+.\.venv\Scripts\python -m src.main --host 127.0.0.1 --port 8000
+```
+
 3. Inicia una ingesta.
 
 ```powershell

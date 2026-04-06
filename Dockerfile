@@ -55,4 +55,4 @@ USER app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "src.coderag.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "src.main", "--host", "0.0.0.0", "--port", "8000"]

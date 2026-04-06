@@ -79,8 +79,7 @@ def start_api_process(
         [
             python_exe,
             "-m",
-            "uvicorn",
-            "src.coderag.api.server:app",
+            "src.main",
             "--host",
             host,
             "--port",

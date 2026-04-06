@@ -78,6 +78,12 @@ $env:INGESTION_EXECUTION_MODE = "rq"
 ./scripts/start_dev.ps1
 ```
 
+- Arranque directo de API (sin scripts):
+
+```powershell
+.\.venv\Scripts\python -m src.main --host 127.0.0.1 --port 8000
+```
+
 ## Kubernetes (manifests nativos)
 
 - Base cloud (API + Neo4j):

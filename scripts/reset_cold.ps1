@@ -23,6 +23,7 @@ function Wait-Port {
 
 Write-Host "[1/6] Deteniendo procesos Python de API/UI..."
 $patterns = @(
+    "-m src.main",
     "src.coderag.api.server:app",
     "-m uvicorn",
     "-m src.coderag.ui.main_window",
@@ -146,7 +147,7 @@ if (Test-Path $dbPath) {
 Write-Host "[6/7] Levantando API..."
 $env:HEALTH_CHECK_OPENAI = "false"
 $env:CODERAG_API_BASE = "http://127.0.0.1:8000"
-Start-Process -FilePath $pythonExe -ArgumentList "-m uvicorn src.coderag.api.server:app --host 127.0.0.1 --port 8000" -WorkingDirectory $root | Out-Null
+Start-Process -FilePath $pythonExe -ArgumentList "-m src.main --host 127.0.0.1 --port 8000" -WorkingDirectory $root | Out-Null
 if (-not (Wait-Port -Port 8000 -Retries 30 -DelaySeconds 1)) {
     throw "API no quedó disponible en 127.0.0.1:8000 tras reset cold"
 }

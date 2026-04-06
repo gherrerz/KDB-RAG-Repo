@@ -15,7 +15,7 @@ Write-Host "[1/3] Levantando Neo4j (compose helper)..."
 Write-Host "[2/3] Levantando API en modo desarrollo (--reload)..."
 $env:HEALTH_CHECK_OPENAI = "false"
 $env:CODERAG_API_BASE = "http://127.0.0.1:8000"
-Start-Process -FilePath $pythonExe -ArgumentList "-m uvicorn src.coderag.api.server:app --host 127.0.0.1 --port 8000 --reload" -WorkingDirectory $root | Out-Null
+Start-Process -FilePath $pythonExe -ArgumentList "-m src.main --host 127.0.0.1 --port 8000 --reload" -WorkingDirectory $root | Out-Null
 
 Write-Host "[3/3] Levantando UI..."
 Start-Process -FilePath $pythonExe -ArgumentList "-m src.coderag.ui.main_window" -WorkingDirectory $root | Out-Null

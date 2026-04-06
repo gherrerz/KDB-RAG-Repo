@@ -3,13 +3,14 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from src import main
 from src.coderag.api import server
 from src.coderag.core.models import JobInfo, JobStatus
 from src.coderag.core.storage_health import StoragePreflightError
 from src.coderag.jobs.worker import IngestionConflictError
 from src.coderag.llm.model_discovery import ModelDiscoveryResult
 
-app = server.app
+app = main.app
 
 
 @pytest.fixture(autouse=True)
