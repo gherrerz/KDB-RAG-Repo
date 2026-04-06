@@ -36,7 +36,7 @@ LLM o salida retrieval-only segun endpoint y condiciones operativas.
 flowchart LR
     UI[UI Desktop local] --> API[API container :8000]
     API --> NEO[Neo4j container :17687]
-    API -. opcional .-> REDIS[Redis container :16379]
+    API -. opcional .-> REDIS[Redis container 16379->6379]
     API --> ST[(storage volume)]
 ```
 

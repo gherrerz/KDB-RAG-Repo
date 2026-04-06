@@ -18,6 +18,7 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Worker RQ dedicado para ingesta asíncrona distribuida (modo `INGESTION_EXECUTION_MODE=rq`).
 - Lock distribuido por `repo_id` para serializar encolado de ingestas en modo RQ.
 - Nuevo entrypoint de API en `src/main.py` para arranque directo con `python -m src.main`.
+- Nueva guia `KUBERNETES.md` con despliegue, secretos, probes, persistencia, rollback y validacion funcional.
 
 ### Changed
 - README reestructurado como portal corto de navegacion.
@@ -29,6 +30,9 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - `docker-compose.yml` ahora incluye servicio `worker` al activar perfil `redis`.
 - Scripts `start_dev`, `start_stable` y `reset_cold` mantienen modo local iniciando solo Neo4j desde Compose.
 - Scripts locales, benchmark de rollback y Docker runtime migran a arranque de API por `src.main`.
+- Guia tecnica de configuracion ampliada para reflejar variables reales del runtime y defaults de health/model discovery.
+- Documentacion de arquitectura aclara mapeo de puerto Redis `16379->6379` en Compose local.
+- Requisitos de Python en README/INSTALLATION se normalizan a `3.12+` con referencia a version validada.
 - API de ingesta retorna `503` cuando falla el encolado asíncrono.
 - API de ingesta retorna `409` si ya existe ingesta activa para el mismo repositorio.
 - Worker RQ ahora propaga fallas para activar la política de reintentos configurada.

@@ -2,129 +2,164 @@
 
 Guia de configuracion de entorno y providers.
 
+Esta guia esta alineada con los defaults de `src/coderag/core/settings.py`.
+En `docker-compose.yml`, algunos valores pueden sobreescribirse para el
+escenario contenedorizado.
+
 ## Variables clave
 
-### LLM
+### LLM y proveedores
 
-- LLM_PROVIDER: openai, anthropic, gemini, vertex_ai
-- LLM_ANSWER_MODEL
-- LLM_VERIFIER_MODEL
-- LLM_VERIFY_ENABLED
+- `LLM_PROVIDER`: proveedor principal de LLM para answer/verify (`openai`, `anthropic`, `gemini`, `vertex_ai`). Default: `openai`.
+- `LLM_ANSWER_MODEL`: override del modelo de respuesta multi-provider. Default: vacio (se resuelve por provider).
+- `LLM_VERIFIER_MODEL`: override del modelo de verificacion multi-provider. Default: vacio (se resuelve por provider).
+- `LLM_VERIFY_ENABLED`: habilita la verificacion semantica de respuesta. Default: `true`.
+- `OPENAI_API_KEY`: credencial OpenAI. Default: vacio.
+- `OPENAI_ANSWER_MODEL`: fallback answer cuando provider efectivo es OpenAI. Default: `gpt-4.1-mini`.
+- `OPENAI_VERIFIER_MODEL`: fallback verifier cuando provider efectivo es OpenAI. Default: `gpt-4.1-mini`.
+- `OPENAI_VERIFY_ENABLED`: flag legacy para verificacion OpenAI. Default: `true`.
+- `OPENAI_TIMEOUT_SECONDS`: timeout de llamadas OpenAI. Default: `20`.
+- `ANTHROPIC_API_KEY`: credencial Anthropic. Default: vacio.
+- `GEMINI_API_KEY`: credencial Gemini. Default: vacio.
+- `VERTEX_AI_API_KEY`: credencial Vertex AI. Default: vacio.
+- `VERTEX_AI_PROJECT_ID`: proyecto de Vertex AI. Default: vacio.
+- `VERTEX_AI_LOCATION`: region de Vertex AI. Default: `us-central1`.
 
 ### Embeddings
 
-- EMBEDDING_PROVIDER: openai, anthropic, gemini, vertex_ai
-- EMBEDDING_MODEL
+- `EMBEDDING_PROVIDER`: proveedor de embeddings (`openai`, `anthropic`, `gemini`, `vertex_ai`). Default: `openai`.
+- `EMBEDDING_MODEL`: override del modelo de embedding. Default: vacio (aplica fallback por provider).
+- `OPENAI_EMBEDDING_MODEL`: fallback OpenAI para embeddings. Default: `text-embedding-3-small`.
 
-### Chroma y retrieval
+### Retrieval y limites de consulta
 
-- CHROMA_PATH
-- CHROMA_HNSW_SPACE: cosine o l2
-- MAX_CONTEXT_TOKENS
-- GRAPH_HOPS
-- QUERY_MAX_SECONDS
+- `CHROMA_PATH`: ruta fisica del indice vectorial. Default: `./storage/chroma`.
+- `CHROMA_HNSW_SPACE`: metrica del indice HNSW (`cosine` o `l2`). Default: `cosine`.
+- `MAX_CONTEXT_TOKENS`: limite superior de tokens de contexto armado para LLM. Default: `8000`.
+- `GRAPH_HOPS`: profundidad de expansion de grafo estructural. Default: `2`.
+- `QUERY_MAX_SECONDS`: limite global de latencia para query API. Default: `55`.
+- `UI_REQUEST_TIMEOUT_SECONDS`: timeout de request desde UI a API. Default: `90`.
 
-### Storage y workspace
+### Storage, metadata y workspace
 
-- NEO4J_URI
-- NEO4J_USER
-- NEO4J_PASSWORD
-- WORKSPACE_PATH
+- `WORKSPACE_PATH`: ruta de clones temporales y archivos operativos. Default: `./storage/workspace`.
+- `NEO4J_URI`: URI de conexion de grafo. Default: `bolt://localhost:7687`.
+- `NEO4J_USER`: usuario de Neo4j. Default: `neo4j`.
+- `NEO4J_PASSWORD`: password de Neo4j. Default: `password`.
+- `REDIS_URL`: URL de Redis para cola RQ. Default: `redis://localhost:6379/0`.
 
-### Ingesta asíncrona distribuida
+### Ingesta asincrona distribuida
 
-- INGESTION_EXECUTION_MODE: thread o rq
-- INGESTION_QUEUE_NAME: nombre de cola Redis/RQ
-- INGESTION_JOB_TIMEOUT_SECONDS: timeout de ejecución por job
-- INGESTION_RESULT_TTL_SECONDS: retención de resultado en cola
-- INGESTION_FAILURE_TTL_SECONDS: retención de jobs fallidos
-- INGESTION_RETRY_MAX: máximo de reintentos para errores transitorios
-- INGESTION_RETRY_INTERVALS: intervalos de reintento en segundos (CSV)
-- INGESTION_RETRY_TRANSIENT_ONLY: si es true, solo relanza errores transitorios
-- INGESTION_ENQUEUE_LOCK_SECONDS: TTL del lock distribuido por repo_id
-- INGESTION_ENQUEUE_LOCK_WAIT_SECONDS: espera máxima al adquirir lock
+- `INGESTION_EXECUTION_MODE`: modo de ejecucion de ingesta (`thread` o `rq`). Default: `thread`.
+- `INGESTION_QUEUE_NAME`: nombre de cola Redis/RQ. Default: `ingestion`.
+- `INGESTION_JOB_TIMEOUT_SECONDS`: timeout maximo por job de ingesta. Default: `7200`.
+- `INGESTION_RESULT_TTL_SECONDS`: retencion de jobs exitosos en cola. Default: `86400`.
+- `INGESTION_FAILURE_TTL_SECONDS`: retencion de jobs fallidos en cola. Default: `604800`.
+- `INGESTION_RETRY_MAX`: maximo de reintentos para errores transitorios. Default: `3`.
+- `INGESTION_RETRY_INTERVALS`: intervalos de reintento en segundos (CSV). Default: `30,120,300`.
+- `INGESTION_RETRY_TRANSIENT_ONLY`: restringe reintentos a fallas transitorias. Default: `true`.
+- `INGESTION_ENQUEUE_LOCK_SECONDS`: TTL del lock distribuido por `repo_id`. Default: `30`.
+- `INGESTION_ENQUEUE_LOCK_WAIT_SECONDS`: espera maxima para adquirir lock. Default: `5`.
 
-### Escaneo de ingesta (obligatorias)
+### Escaneo de ingesta
 
-- SCAN_MAX_FILE_SIZE_BYTES
-- SCAN_EXCLUDED_DIRS
-- SCAN_EXCLUDED_EXTENSIONS
-- SCAN_EXCLUDED_FILES (opcional)
+- `SCAN_MAX_FILE_SIZE_BYTES`: limite de bytes por archivo escaneable. Default en settings: `None`; default en compose: `200000`.
+- `SCAN_EXCLUDED_DIRS`: carpetas excluidas del escaneo. Default en settings: vacio; compose inyecta una lista recomendada.
+- `SCAN_EXCLUDED_EXTENSIONS`: extensiones binarias/no-texto excluidas. Default en settings: vacio; compose inyecta lista extensa.
+- `SCAN_EXCLUDED_FILES`: nombres de archivo excluidos puntualmente. Default en settings: vacio; compose: `.gitignore,.env`.
 
-### Grafo semántico (experimental)
+Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 
-- SEMANTIC_GRAPH_ENABLED: true o false (default false)
-- SEMANTIC_GRAPH_JAVA_ENABLED: true o false (default false)
-- SEMANTIC_GRAPH_TYPESCRIPT_ENABLED: true o false (default false)
-- SEMANTIC_GRAPH_QUERY_ENABLED: true o false (default false)
-- SEMANTIC_RELATION_TYPES: CSV de tipos de relación para expansión semántica
-  (CALLS,IMPORTS,EXTENDS,IMPLEMENTS)
-- SEMANTIC_RELATION_WEIGHTS: pesos por tipo para scoring semántico en query
-  (ej. CALLS:1.0,IMPORTS:0.7,EXTENDS:1.1,IMPLEMENTS:1.0)
-- SEMANTIC_GRAPH_QUERY_MAX_EDGES: presupuesto máximo de aristas por query
-- SEMANTIC_GRAPH_QUERY_MAX_NODES: presupuesto máximo de nodos por query
-- SEMANTIC_GRAPH_QUERY_MAX_MS: presupuesto máximo de latencia adicional en ms
-- SEMANTIC_GRAPH_QUERY_FALLBACK_TO_STRUCTURAL: activa degradación automática
-  a expansión estructural si la ruta semántica falla o poda todo
+`.png,.jpg,.jpeg,.gif,.webp,.ico,.mp3,.mp4,.wav,.ogg,.pdf,.zip,.tar,.gz,.7z,.rar,.jar,.war,.ear,.class,.dll,.exe,.so,.dylib,.o,.a,.bin,.sqlite,.db`
 
-## Ejemplo minimo recomendado
+### Grafo semantico (experimental)
+
+- `SEMANTIC_GRAPH_ENABLED`: activa extraccion semantica Python en ingesta. Default: `false`.
+- `SEMANTIC_GRAPH_JAVA_ENABLED`: activa extractor semantico Java fase 1. Default: `false`.
+- `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED`: activa extractor semantico TypeScript fase 1. Default: `false`.
+- `SEMANTIC_GRAPH_QUERY_ENABLED`: activa expansion semantica en query. Default: `false`.
+- `SEMANTIC_RELATION_TYPES`: tipos de relacion considerados en expansion semantica. Default: `CALLS,IMPORTS,EXTENDS,IMPLEMENTS`.
+- `SEMANTIC_RELATION_WEIGHTS`: pesos por tipo para scoring semantico. Default: `CALLS:1.0,IMPORTS:0.7,EXTENDS:1.1,IMPLEMENTS:1.0`.
+- `SEMANTIC_GRAPH_QUERY_MAX_EDGES`: tope de aristas por query semantica. Default: `400`.
+- `SEMANTIC_GRAPH_QUERY_MAX_NODES`: tope de nodos por query semantica. Default: `200`.
+- `SEMANTIC_GRAPH_QUERY_MAX_MS`: presupuesto extra de latencia para expansion semantica. Default: `120`.
+- `SEMANTIC_GRAPH_QUERY_FALLBACK_TO_STRUCTURAL`: fallback automatico a expansion estructural si la semantica falla o poda todo. Default: `true`.
+
+### Health checks y descubrimiento de modelos
+
+- `HEALTH_CHECK_STRICT`: falla startup si un check critico no pasa. Default: `true`.
+- `HEALTH_CHECK_TIMEOUT_SECONDS`: timeout por check de preflight. Default: `5`.
+- `HEALTH_CHECK_TTL_SECONDS`: cache de resultados de preflight en segundos. Default: `10`.
+- `HEALTH_CHECK_OPENAI`: incluye check de conectividad/model list OpenAI. Default en settings: `true`; en compose: `false`.
+- `HEALTH_CHECK_REDIS`: incluye check de Redis en preflight. Default: `false`.
+- `MODEL_DISCOVERY_TIMEOUT_SECONDS`: timeout de discovery de catalogo de modelos. Default: `8`.
+- `MODEL_DISCOVERY_CACHE_TTL_SECONDS`: cache de discovery en segundos. Default: `3600`.
+- `MODEL_DISCOVERY_MAX_RESULTS`: maximo de resultados de discovery. Default: `80`.
+- `MODEL_DISCOVERY_GEMINI_SDK_ENABLED`: habilita ruta de discovery via SDK Gemini. Default: `true`.
+
+### Inventario
+
+- `INVENTORY_PAGE_SIZE`: tamano de pagina por defecto en `/inventory/query`. Default: `80`.
+- `INVENTORY_MAX_PAGE_SIZE`: maximo permitido de pagina en inventario. Default: `300`.
+- `INVENTORY_ALIAS_LIMIT`: maximo de aliases por entidad en respuesta. Default: `8`.
+- `INVENTORY_ENTITY_LIMIT`: maximo de entidades devueltas por consulta de inventario. Default: `500`.
+- `SYMBOL_EXTRACTOR_V2_ENABLED`: activa extractor de simbolos v2. Default: `true`.
+
+## Ejemplo minimo recomendado (.env local)
 
 ```dotenv
 LLM_PROVIDER=openai
 EMBEDDING_PROVIDER=openai
 OPENAI_API_KEY=your_key
+HEALTH_CHECK_OPENAI=false
 NEO4J_URI=bolt://127.0.0.1:17687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=neo4jpassword
 SCAN_MAX_FILE_SIZE_BYTES=200000
 SCAN_EXCLUDED_DIRS=.git,node_modules,dist,build,.venv,__pycache__
-SCAN_EXCLUDED_EXTENSIONS=.png,.jpg,.jpeg,.gif,.pdf,.zip,.jar,.class,.dll,.exe
+SCAN_EXCLUDED_EXTENSIONS=.png,.jpg,.jpeg,.gif,.webp,.ico,.mp3,.mp4,.wav,.ogg,.pdf,.zip,.tar,.gz,.7z,.rar,.jar,.war,.ear,.class,.dll,.exe,.so,.dylib,.o,.a,.bin,.sqlite,.db
 ```
 
 ## Notas operativas
 
-- Si cambias CHROMA_HNSW_SPACE, haz reset y reingesta.
-- Si habilitas SEMANTIC_GRAPH_ENABLED, la ingesta agrega relaciones
-  CALLS/IMPORTS/EXTENDS para Python con fallback automático al grafo estructural
-  si falla la extracción semántica.
-- Si habilitas SEMANTIC_GRAPH_JAVA_ENABLED junto con SEMANTIC_GRAPH_ENABLED,
-  la ingesta agrega relaciones Java fase 1 (IMPORTS, EXTENDS/IMPLEMENTS,
-  CALLS básicos).
-- Si habilitas SEMANTIC_GRAPH_TYPESCRIPT_ENABLED junto con
-  SEMANTIC_GRAPH_ENABLED, la ingesta agrega relaciones TypeScript fase 1
-  (IMPORTS, EXTENDS/IMPLEMENTS, CALLS básicos).
-- Si habilitas SEMANTIC_GRAPH_QUERY_ENABLED, la expansión de grafo en query usa
-  SEMANTIC_RELATION_TYPES, aplica SEMANTIC_RELATION_WEIGHTS y respeta budgets
-  (MAX_EDGES, MAX_NODES, MAX_MS).
-- Si SEMANTIC_GRAPH_QUERY_FALLBACK_TO_STRUCTURAL=true, cuando la expansión
-  semántica se queda sin nodos por budget o falla por excepción, el sistema
-  degrada automáticamente a expansión estructural para no romper la respuesta.
-- Si cambias provider/modelo de embedding, valida compatibilidad del repo con
-  GET /repos/{repo_id}/status antes de consultar.
-- Para provider catalog, usa GET /providers/models.
+- Si cambias `CHROMA_HNSW_SPACE`, haz reset y reingesta.
+- Si cambias provider/modelo de embedding, valida readiness con
+  `GET /repos/{repo_id}/status` antes de consultar.
+- Para catálogo de modelos, usa `GET /providers/models`.
+- Si `SEMANTIC_GRAPH_ENABLED=true`, la ingesta agrega relaciones Python y usa
+  fallback automatico al grafo estructural si falla la extraccion semantica.
+- Si `SEMANTIC_GRAPH_JAVA_ENABLED=true` o
+  `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED=true`, se activan extractores fase 1 para
+  esos lenguajes.
+- Si `SEMANTIC_GRAPH_QUERY_ENABLED=true`, la expansion de grafo en query usa
+  `SEMANTIC_RELATION_TYPES` y `SEMANTIC_RELATION_WEIGHTS` respetando budgets.
+- `NEO4J_URI` cambia por entorno:
+  - Local sin contenedores: `bolt://localhost:7687`.
+  - Local con puerto mapeado: `bolt://127.0.0.1:17687`.
+  - API dentro de Compose: `bolt://neo4j:7687`.
 
 ## Despliegue con Docker Compose completo
 
 - `docker-compose.yml` define API + Neo4j y perfil opcional `redis`.
-- Al activar perfil `redis`, también se levanta `worker` para ejecutar
+- Al activar perfil `redis`, tambien se levanta `worker` para ejecutar
   ingestas por cola Redis/RQ.
 - API se conecta a Neo4j por DNS interno (`bolt://neo4j:7687`).
 - Storage persistente de API se monta en `/app/storage`.
-- Redis se activa con perfil `redis` y requiere `HEALTH_CHECK_REDIS=true`
-  cuando se quiera volver crítico en preflight.
+- Redis se activa con perfil `redis` y puede hacerse visible en preflight con
+  `HEALTH_CHECK_REDIS=true`.
 
-Variables relevantes en compose:
+Variables relevantes en Compose:
 
-- `API_IMAGE` (tag/registry de la imagen API)
-- `NEO4J_USER`, `NEO4J_PASSWORD`
-- `HEALTH_CHECK_OPENAI`, `HEALTH_CHECK_REDIS`
-- `INGESTION_EXECUTION_MODE`, `INGESTION_QUEUE_NAME`
+- `API_IMAGE` (tag/registry de la imagen API).
+- `NEO4J_USER`, `NEO4J_PASSWORD`.
+- `HEALTH_CHECK_OPENAI`, `HEALTH_CHECK_REDIS`.
+- `INGESTION_EXECUTION_MODE`, `INGESTION_QUEUE_NAME`.
 
 ## Despliegue con Kubernetes
 
 Estructura sugerida:
 
-- `k8s/base`: API + Neo4j + PVC + configuración común.
+- `k8s/base`: API + Neo4j + PVC + configuracion comun.
 - `k8s/addons/redis`: Redis opcional.
 - `k8s/overlays/cloud`: base + ingress + patch de imagen API.
 - `k8s/overlays/cloud-with-redis`: cloud + addon Redis.
@@ -134,22 +169,23 @@ Comportamiento de ingesta sugerido:
 - `cloud`: mantener `INGESTION_EXECUTION_MODE=thread` (single replica API).
 - `cloud-with-redis`: usar `INGESTION_EXECUTION_MODE=rq` y worker dedicado.
 
-Mapeo de configuración:
+Mapeo de configuracion:
 
 - Config no sensible en `ConfigMap` (`coderag-api-config`).
 - Secrets en `Secret` (`coderag-api-secret`, `neo4j-auth`).
 - Persistencia:
   - API: PVC `coderag-api-storage` montado en `/app/storage`.
-  - Neo4j: `volumeClaimTemplates` en StatefulSet.
+  - Neo4j: `volumeClaimTemplates` en `StatefulSet`.
 
 Antes de desplegar en cloud:
 
 1. Cambia la imagen en `k8s/overlays/cloud/patch-api-deployment.yaml`.
 2. Sustituye placeholders en secrets.
-3. Ajusta host/TLS del ingress según tu dominio.
+3. Ajusta host/TLS del ingress segun tu dominio.
 
 ## Referencias
 
-- Flujos de consulta y fallback: docs/ARCHITECTURE.md.
-- Contratos API: docs/API_REFERENCE.md.
-- Guía de despliegue Kubernetes: k8s/README.md.
+- Flujos de consulta y fallback: [docs/ARCHITECTURE.md](ARCHITECTURE.md).
+- Contratos API: [docs/API_REFERENCE.md](API_REFERENCE.md).
+- Guia de despliegue Kubernetes: [k8s/README.md](../k8s/README.md).
+- Guia Kubernetes consolidada: [KUBERNETES.md](KUBERNETES.md).

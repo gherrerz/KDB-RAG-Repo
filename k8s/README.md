@@ -1,5 +1,13 @@
 # Kubernetes Deployment Guide
 
+Documento tecnico consolidado:
+
+- [docs/KUBERNETES.md](../docs/KUBERNETES.md)
+
+Este README mantiene un resumen rapido; para procedimientos completos de build,
+secretos, deploy dev/prod, rollback y validacion funcional, usa
+[docs/KUBERNETES.md](../docs/KUBERNETES.md).
+
 This folder provides native Kubernetes manifests for deploying:
 
 - API (FastAPI)

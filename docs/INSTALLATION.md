@@ -4,7 +4,7 @@ Guia de instalacion y arranque local.
 
 ## Requisitos
 
-- Python 3.12.3 recomendado (compatibilidad verificada)
+- Python 3.12+ recomendado (compatibilidad verificada con 3.12.3)
 - Git
 - Rancher Desktop con nerdctl compose o Docker Desktop con docker compose
 - kubectl y Kustomize (opcional para despliegue cloud en Kubernetes)
@@ -113,3 +113,4 @@ Antes de aplicar en cloud, ajusta la imagen en
 - Configuracion de providers: ver docs/CONFIGURATION.md.
 - Flujos y arquitectura: ver docs/ARCHITECTURE.md.
 - Referencia de endpoints: ver docs/API_REFERENCE.md.
+- Despliegue Kubernetes detallado: ver [KUBERNETES.md](KUBERNETES.md).

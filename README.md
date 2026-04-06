@@ -22,7 +22,7 @@ de codigo con evidencia verificable (archivos y lineas).
 
 ## Requisitos
 
-- Python 3.12.3 recomendado (compatibilidad verificada)
+- Python 3.12+ recomendado (compatibilidad verificada con 3.12.3)
 - Git
 - Rancher Desktop con nerdctl compose o Docker Desktop con docker compose
 - kubectl y Kustomize (opcional para despliegue en Kubernetes)
@@ -205,6 +205,7 @@ Invoke-RestMethod -Method Delete -Uri http://127.0.0.1:8000/repos/mall
 - Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 - Runbook rollout/rollback semántico: [docs/SEMANTIC_GRAPH_RUNBOOK.md](docs/SEMANTIC_GRAPH_RUNBOOK.md)
 - Guía de despliegue Kubernetes: [k8s/README.md](k8s/README.md)
+- Guia Kubernetes consolidada: [docs/KUBERNETES.md](docs/KUBERNETES.md)
 - Benchmark Sprint 3: [docs/SPRINT3_BENCHMARK.md](docs/SPRINT3_BENCHMARK.md)
 - Extractores de simbolos: [docs/SYMBOL_EXTRACTORS.md](docs/SYMBOL_EXTRACTORS.md)
 - Guia de contribucion: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
