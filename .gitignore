@@ -58,3 +58,5 @@ benchmark_reports/
 
 # Local temporary scripts
 .tmp_ingest_smoke.py
+.tmp_openapi_check.py
+.tmp_ingest_smoke.out
