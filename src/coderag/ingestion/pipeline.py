@@ -1,23 +1,23 @@
-﻿"""Orquestador de canalización de ingesta de alto nivel."""
+"""Orquestador de canalización de ingesta de alto nivel."""
 
 from collections import Counter
 from collections import defaultdict
 from time import perf_counter
 from typing import Callable
 
-from src.coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
-from src.coderag.core.settings import get_settings
-from src.coderag.ingestion.chunker import extract_symbol_chunks
-from src.coderag.ingestion.embedding import EmbeddingClient
-from src.coderag.ingestion.git_client import clone_repository
-from src.coderag.ingestion.graph_builder import GraphBuilder
-from src.coderag.ingestion.index_bm25 import GLOBAL_BM25
-from src.coderag.ingestion.index_chroma import ChromaIndex
-from src.coderag.ingestion.repo_scanner import scan_repository_with_stats
-from src.coderag.ingestion.semantic_java import extract_java_semantic_relations
-from src.coderag.ingestion.semantic_python import extract_python_semantic_relations
-from src.coderag.ingestion.semantic_typescript import extract_typescript_semantic_relations
-from src.coderag.ingestion.summarizer import summarize_file, summarize_modules
+from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.core.settings import get_settings
+from coderag.ingestion.chunker import extract_symbol_chunks
+from coderag.ingestion.embedding import EmbeddingClient
+from coderag.ingestion.git_client import clone_repository
+from coderag.ingestion.graph_builder import GraphBuilder
+from coderag.ingestion.index_bm25 import GLOBAL_BM25
+from coderag.ingestion.index_chroma import ChromaIndex
+from coderag.ingestion.repo_scanner import scan_repository_with_stats
+from coderag.ingestion.semantic_java import extract_java_semantic_relations
+from coderag.ingestion.semantic_python import extract_python_semantic_relations
+from coderag.ingestion.semantic_typescript import extract_typescript_semantic_relations
+from coderag.ingestion.summarizer import summarize_file, summarize_modules
 
 LoggerFn = Callable[[str], None]
 

@@ -1,8 +1,8 @@
-﻿"""Python extractor backed by AST node positions."""
+"""Python extractor backed by AST node positions."""
 
 import ast
 
-from src.coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
+from coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
 
 
 class PythonAstExtractor:

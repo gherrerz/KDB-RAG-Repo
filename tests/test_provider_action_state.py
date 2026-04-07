@@ -1,6 +1,6 @@
-﻿"""Pruebas del evaluador puro de habilitación de acciones UI."""
+"""Pruebas del evaluador puro de habilitación de acciones UI."""
 
-from src.coderag.ui.provider_action_state import (
+from coderag.ui.provider_action_state import (
     evaluate_ingest_action,
     evaluate_query_action,
 )

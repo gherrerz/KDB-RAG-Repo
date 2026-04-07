@@ -1,6 +1,6 @@
-﻿"""Pruebas del bloque CSS base compartido para inputs y botones."""
+"""Pruebas del bloque CSS base compartido para inputs y botones."""
 
-from src.coderag.ui.base_styles import (
+from coderag.ui.base_styles import (
     BASE_BUTTON_STYLES,
     BASE_INPUT_STYLES,
     BASE_INPUT_STYLES_WITH_TEXTEDIT,

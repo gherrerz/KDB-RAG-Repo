@@ -19,7 +19,7 @@ spec:
           command:
             - python
             - -m
-            - src.coderag.jobs.rq_worker
+            - coderag.jobs.rq_worker
           envFrom:
             - configMapRef:
                 name: coderag-api-config

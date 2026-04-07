@@ -1,6 +1,6 @@
-﻿"""Estrategia de reclasificación para candidatos de recuperación."""
+"""Estrategia de reclasificación para candidatos de recuperación."""
 
-from src.coderag.core.models import RetrievalChunk
+from coderag.core.models import RetrievalChunk
 
 
 def rerank(chunks: list[RetrievalChunk], top_k: int = 10) -> list[RetrievalChunk]:

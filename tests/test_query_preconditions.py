@@ -1,6 +1,6 @@
-﻿"""Pruebas unitarias para validación local de precondiciones de consulta."""
+"""Pruebas unitarias para validación local de precondiciones de consulta."""
 
-from src.coderag.ui.query_preconditions import evaluate_local_query_preconditions
+from coderag.ui.query_preconditions import evaluate_local_query_preconditions
 
 
 def test_query_preconditions_blocks_provider_not_ready() -> None:

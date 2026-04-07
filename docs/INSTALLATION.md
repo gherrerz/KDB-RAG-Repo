@@ -1,4 +1,4 @@
-﻿# Installation
+# Installation
 
 Guia de instalacion y arranque local.
 
@@ -55,7 +55,7 @@ $env:INGESTION_EXECUTION_MODE = "rq"
 4. Levantar UI (opcional, desktop local).
 
 ```powershell
-.\.venv\Scripts\python -m src.coderag.ui.main_window
+.\.venv\Scripts\python -m coderag.ui.main_window
 ```
 
 5. Detener stack compose cuando termines.
@@ -81,7 +81,8 @@ $env:INGESTION_EXECUTION_MODE = "rq"
 - Arranque directo de API (sin scripts):
 
 ```powershell
-.\.venv\Scripts\python -m src.main --host 127.0.0.1 --port 8000
+$env:PYTHONPATH = 'src'
+.\.venv\Scripts\python -m main --host 127.0.0.1 --port 8000
 ```
 
 ## Kubernetes (manifests nativos)

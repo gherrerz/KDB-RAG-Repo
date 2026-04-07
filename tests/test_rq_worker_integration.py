@@ -8,9 +8,9 @@ from redis.exceptions import RedisError
 from rq import Queue, SimpleWorker
 from rq.timeouts import TimerDeathPenalty
 
-from src.coderag.core.models import JobInfo, JobStatus
-from src.coderag.jobs.worker import run_ingest_job_task
-from src.coderag.storage.metadata_store import MetadataStore
+from coderag.core.models import JobInfo, JobStatus
+from coderag.jobs.worker import run_ingest_job_task
+from coderag.storage.metadata_store import MetadataStore
 
 
 class _TestSimpleWorker(SimpleWorker):
@@ -44,7 +44,7 @@ def test_rq_worker_processes_ingest_job_end_to_end(monkeypatch, tmp_path) -> Non
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
 

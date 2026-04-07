@@ -1,6 +1,6 @@
-﻿"""Pruebas de helpers CSS compartidos para cards y chips de estado."""
+"""Pruebas de helpers CSS compartidos para cards y chips de estado."""
 
-from src.coderag.ui.card_styles import (
+from coderag.ui.card_styles import (
     frame_card_styles,
     status_chip_styles,
     title_subtitle_styles,

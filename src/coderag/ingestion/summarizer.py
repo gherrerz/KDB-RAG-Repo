@@ -1,8 +1,8 @@
-﻿"""Utilidades de resumen para archivos y módulos."""
+"""Utilidades de resumen para archivos y módulos."""
 
 from collections import defaultdict
 
-from src.coderag.core.models import ScannedFile
+from coderag.core.models import ScannedFile
 
 
 def summarize_file(file_obj: ScannedFile) -> str:

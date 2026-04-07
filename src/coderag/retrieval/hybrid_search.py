@@ -1,14 +1,14 @@
-﻿"""Recuperación híbrida que combina similitud de vectores y puntuaciones de BM25."""
+"""Recuperación híbrida que combina similitud de vectores y puntuaciones de BM25."""
 
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 import logging
 import unicodedata
 
-from src.coderag.core.models import RetrievalChunk
-from src.coderag.ingestion.embedding import EmbeddingClient
-from src.coderag.ingestion.index_bm25 import GLOBAL_BM25
-from src.coderag.ingestion.index_chroma import ChromaIndex
+from coderag.core.models import RetrievalChunk
+from coderag.ingestion.embedding import EmbeddingClient
+from coderag.ingestion.index_bm25 import GLOBAL_BM25
+from coderag.ingestion.index_chroma import ChromaIndex
 
 
 VECTOR_COLLECTIONS = ["code_symbols", "code_files", "code_modules"]

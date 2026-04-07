@@ -1,8 +1,8 @@
-﻿"""Pruebas para filtrado y priorización de la calidad de las citas."""
+"""Pruebas para filtrado y priorización de la calidad de las citas."""
 
-from src.coderag.api.citation_filters import is_noisy_path
-from src.coderag.api.query_service import _citation_priority
-from src.coderag.core.models import Citation
+from coderag.api.citation_filters import is_noisy_path
+from coderag.api.query_service import _citation_priority
+from coderag.core.models import Citation
 
 
 def test_is_noisy_path_filters_non_informative_paths() -> None:

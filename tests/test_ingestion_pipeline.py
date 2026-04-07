@@ -1,11 +1,11 @@
-﻿"""Pruebas para el comportamiento de orquestación de la canalización de ingesta."""
+"""Pruebas para el comportamiento de orquestación de la canalización de ingesta."""
 
 from pathlib import Path
 
 import pytest
 
-from src.coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
-from src.coderag.ingestion import pipeline
+from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.ingestion import pipeline
 
 
 def test_ingest_repository_continues_on_graph_failure(

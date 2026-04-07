@@ -1,8 +1,8 @@
-﻿"""Brace-aware span resolution for C-style languages."""
+"""Brace-aware span resolution for C-style languages."""
 
 from dataclasses import dataclass
 
-from src.coderag.ingestion.extractors.base import SymbolSpan
+from coderag.ingestion.extractors.base import SymbolSpan
 
 
 @dataclass(frozen=True)

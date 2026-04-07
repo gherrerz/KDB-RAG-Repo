@@ -1,4 +1,4 @@
-﻿"""Utilidades de generación de embeddings con OpenAI Responses."""
+"""Utilidades de generación de embeddings con OpenAI Responses."""
 
 import hashlib
 import logging
@@ -8,7 +8,7 @@ from collections.abc import Callable
 from openai import OpenAI
 import requests
 
-from src.coderag.core.settings import ProviderName, get_settings
+from coderag.core.settings import ProviderName, get_settings
 
 LOGGER = logging.getLogger(__name__)
 

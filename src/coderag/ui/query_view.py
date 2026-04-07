@@ -1,4 +1,4 @@
-﻿"""Widgets de vista de consultas para hacer preguntas sobre el repositorio."""
+"""Widgets de vista de consultas para hacer preguntas sobre el repositorio."""
 
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QFont
@@ -21,25 +21,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.coderag.core.settings import get_settings
-from src.coderag.ui.base_styles import (
+from coderag.core.settings import get_settings
+from coderag.ui.base_styles import (
     BASE_BUTTON_STYLES,
     BASE_INPUT_STYLES,
     BASE_WIDGET_TEXT_STYLES,
 )
-from src.coderag.ui.card_styles import (
+from coderag.ui.card_styles import (
     frame_card_styles,
     status_chip_styles,
     title_subtitle_styles,
     top_card_styles,
 )
-from src.coderag.ui.provider_feedback import (
+from coderag.ui.provider_feedback import (
     apply_status_chip,
 )
-from src.coderag.ui.model_catalog_client import fetch_models_for_provider
-from src.coderag.ui.model_catalog_client import should_show_remote_catalog_fallback_hint
-from src.coderag.ui.provider_styles import PROVIDER_FEEDBACK_STYLES
-from src.coderag.ui.provider_ui_state import (
+from coderag.ui.model_catalog_client import fetch_models_for_provider
+from coderag.ui.model_catalog_client import should_show_remote_catalog_fallback_hint
+from coderag.ui.provider_styles import PROVIDER_FEEDBACK_STYLES
+from coderag.ui.provider_ui_state import (
     resolve_embedding_ui_state,
     resolve_llm_ui_state,
 )

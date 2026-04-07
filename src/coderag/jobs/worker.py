@@ -1,4 +1,4 @@
-﻿"""Gestión de trabajos para ingesta con backend thread o Redis/RQ."""
+"""Gestión de trabajos para ingesta con backend thread o Redis/RQ."""
 
 import datetime
 from contextlib import contextmanager
@@ -6,10 +6,10 @@ from pathlib import Path
 from threading import Lock, Thread
 from uuid import uuid4
 
-from src.coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
-from src.coderag.core.settings import get_settings
-from src.coderag.ingestion.git_client import build_repo_id
-from src.coderag.storage.metadata_store import MetadataStore
+from coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
+from coderag.core.settings import get_settings
+from coderag.ingestion.git_client import build_repo_id
+from coderag.storage.metadata_store import MetadataStore
 
 
 class IngestionConflictError(RuntimeError):
@@ -82,8 +82,8 @@ def _execute_ingest_job(
         store.upsert_job(job)
 
     try:
-        from src.coderag.core.storage_health import get_repo_query_status
-        from src.coderag.ingestion.pipeline import ingest_repository
+        from coderag.core.storage_health import get_repo_query_status
+        from coderag.ingestion.pipeline import ingest_repository
 
         ingest_diagnostics: dict[str, object] = {}
 
@@ -204,7 +204,7 @@ class JobManager:
                 f"{joined}"
             )
 
-        from src.coderag.maintenance.reset_service import reset_all_storage
+        from coderag.maintenance.reset_service import reset_all_storage
 
         cleared, warnings = reset_all_storage()
         self._jobs.clear()
@@ -232,7 +232,7 @@ class JobManager:
                 f"No existe un repositorio registrado con id '{normalized_repo_id}'"
             )
 
-        from src.coderag.maintenance.reset_service import delete_repo_storage
+        from coderag.maintenance.reset_service import delete_repo_storage
 
         cleared, warnings, deleted_counts = delete_repo_storage(normalized_repo_id)
 

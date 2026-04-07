@@ -1,6 +1,6 @@
-﻿"""Pruebas unitarias para helpers REST internos del cliente LLM."""
+"""Pruebas unitarias para helpers REST internos del cliente LLM."""
 
-from src.coderag.llm.openai_client import (
+from coderag.llm.openai_client import (
     AnswerClient,
     _build_generate_content_payload,
     _extract_generative_text,
@@ -156,7 +156,7 @@ def test_call_openai_retries_without_temperature(monkeypatch) -> None:
         def __init__(self) -> None:
             self.chat = _Chat()
 
-    monkeypatch.setattr("src.coderag.llm.openai_client.get_settings", lambda: _Settings())
+    monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
 
     client = AnswerClient(provider="openai", answer_model="gpt-5-mini")
     client.client = _FakeClient()
@@ -237,7 +237,7 @@ def test_call_openai_falls_back_to_safe_model_when_selected_model_fails(monkeypa
             self.responses = _Responses()
             self.chat = _Chat()
 
-    monkeypatch.setattr("src.coderag.llm.openai_client.get_settings", lambda: _Settings())
+    monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
 
     client = AnswerClient(provider="openai", answer_model="gpt-5-pro")
     client.client = _FakeClient()
@@ -301,7 +301,7 @@ def test_call_openai_uses_responses_text_input_first(monkeypatch) -> None:
             self.responses = _Responses()
             self.chat = _Chat()
 
-    monkeypatch.setattr("src.coderag.llm.openai_client.get_settings", lambda: _Settings())
+    monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
 
     client = AnswerClient(provider="openai", answer_model="gpt-5-pro")
     client.client = _FakeClient()
@@ -359,9 +359,9 @@ def test_call_openai_uses_rest_responses_when_sdk_has_no_responses(monkeypatch) 
         def __init__(self) -> None:
             self.chat = _Chat()
 
-    monkeypatch.setattr("src.coderag.llm.openai_client.get_settings", lambda: _Settings())
+    monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
     monkeypatch.setattr(
-        "src.coderag.llm.openai_client.requests.post",
+        "coderag.llm.openai_client.requests.post",
         lambda *args, **kwargs: _FakeRestResponse(),
     )
 
@@ -422,15 +422,15 @@ def test_call_anthropic_falls_back_to_discovered_model(monkeypatch) -> None:
             {"error": {"message": f"model {model} is not available for this account"}},
         )
 
-    monkeypatch.setattr("src.coderag.llm.openai_client.get_settings", lambda: _Settings())
-    monkeypatch.setattr("src.coderag.llm.openai_client.requests.post", _fake_post)
+    monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
+    monkeypatch.setattr("coderag.llm.openai_client.requests.post", _fake_post)
 
     class _DiscoveryResult:
         def __init__(self) -> None:
             self.models = ["claude-sonnet-4-5"]
 
     monkeypatch.setattr(
-        "src.coderag.llm.openai_client.discover_models",
+        "coderag.llm.openai_client.discover_models",
         lambda provider, kind, force_refresh=False: _DiscoveryResult(),
     )
 
@@ -483,9 +483,9 @@ def test_call_anthropic_raises_rich_error_message(monkeypatch) -> None:
                 }
             }
 
-    monkeypatch.setattr("src.coderag.llm.openai_client.get_settings", lambda: _Settings())
+    monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
     monkeypatch.setattr(
-        "src.coderag.llm.openai_client.requests.post",
+        "coderag.llm.openai_client.requests.post",
         lambda *args, **kwargs: _FakeResponse(),
     )
 

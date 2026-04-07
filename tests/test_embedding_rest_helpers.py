@@ -1,6 +1,6 @@
-﻿"""Pruebas unitarias para helpers REST internos de embeddings."""
+"""Pruebas unitarias para helpers REST internos de embeddings."""
 
-from src.coderag.ingestion.embedding import (
+from coderag.ingestion.embedding import (
     _extract_gemini_embeddings,
     _extract_vertex_embeddings,
     _model_path,

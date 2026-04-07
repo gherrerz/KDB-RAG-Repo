@@ -1,4 +1,4 @@
-﻿"""Descubrimiento dinámico de modelos por provider con fallback local."""
+"""Descubrimiento dinámico de modelos por provider con fallback local."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from time import monotonic
 import requests
 from openai import OpenAI
 
-from src.coderag.core.provider_model_catalog import (
+from coderag.core.provider_model_catalog import (
     embedding_models_for_provider,
     llm_models_for_provider,
     normalize_provider_name,
 )
-from src.coderag.core.settings import ProviderName, get_settings
+from coderag.core.settings import ProviderName, get_settings
 
 
 ModelKind = str

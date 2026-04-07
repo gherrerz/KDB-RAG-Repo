@@ -1,10 +1,10 @@
-﻿"""Registry that resolves a symbol extractor for each language."""
+"""Registry that resolves a symbol extractor for each language."""
 
-from src.coderag.ingestion.extractors.base import SymbolExtractor
-from src.coderag.ingestion.extractors.generic_fallback import GenericFallbackExtractor
-from src.coderag.ingestion.extractors.java_brace import JavaBraceExtractor
-from src.coderag.ingestion.extractors.javascript_brace import JavaScriptBraceExtractor
-from src.coderag.ingestion.extractors.python_ast import PythonAstExtractor
+from coderag.ingestion.extractors.base import SymbolExtractor
+from coderag.ingestion.extractors.generic_fallback import GenericFallbackExtractor
+from coderag.ingestion.extractors.java_brace import JavaBraceExtractor
+from coderag.ingestion.extractors.javascript_brace import JavaScriptBraceExtractor
+from coderag.ingestion.extractors.python_ast import PythonAstExtractor
 
 
 class LanguageExtractorRegistry:

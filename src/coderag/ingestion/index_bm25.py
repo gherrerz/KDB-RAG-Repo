@@ -1,4 +1,4 @@
-﻿"""Ayudantes de indexación y recuperación BM25 para una coincidencia exacta de términos."""
+"""Ayudantes de indexación y recuperación BM25 para una coincidencia exacta de términos."""
 
 import json
 from pathlib import Path
@@ -7,7 +7,7 @@ import unicodedata
 
 from rank_bm25 import BM25Okapi
 
-from src.coderag.core.settings import get_settings
+from coderag.core.settings import get_settings
 
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_.\-/]+")

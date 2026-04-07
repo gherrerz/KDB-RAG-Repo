@@ -1,4 +1,4 @@
-﻿"""Envoltorio de cliente OpenAI para generación y validación de respuestas."""
+"""Envoltorio de cliente OpenAI para generación y validación de respuestas."""
 
 import re
 from threading import Lock
@@ -7,10 +7,10 @@ import unicodedata
 from openai import OpenAI
 import requests
 
-from src.coderag.core.provider_model_catalog import default_llm_model, llm_models_for_provider
-from src.coderag.core.settings import ProviderName, get_settings
-from src.coderag.llm.model_discovery import discover_models
-from src.coderag.llm.prompts import (
+from coderag.core.provider_model_catalog import default_llm_model, llm_models_for_provider
+from coderag.core.settings import ProviderName, get_settings
+from coderag.llm.model_discovery import discover_models
+from coderag.llm.prompts import (
     SYSTEM_PROMPT,
     build_answer_prompt,
     build_verify_prompt,

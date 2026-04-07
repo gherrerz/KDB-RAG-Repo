@@ -1,7 +1,7 @@
-﻿"""Language-specific symbol extraction strategies."""
+"""Language-specific symbol extraction strategies."""
 
-from src.coderag.ingestion.extractors.base import SymbolDetection, SymbolExtractor, SymbolSpan
-from src.coderag.ingestion.extractors.registry import (
+from coderag.ingestion.extractors.base import SymbolDetection, SymbolExtractor, SymbolSpan
+from coderag.ingestion.extractors.registry import (
     DEFAULT_LANGUAGE_EXTRACTOR_REGISTRY,
     LanguageExtractorRegistry,
 )

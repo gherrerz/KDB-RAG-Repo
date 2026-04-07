@@ -1,4 +1,4 @@
-﻿"""Utilidades de reinicio del sistema para borrar datos indexados y persistentes."""
+"""Utilidades de reinicio del sistema para borrar datos indexados y persistentes."""
 
 import gc
 import os
@@ -11,11 +11,11 @@ from pathlib import Path
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
-from src.coderag.core.settings import get_settings
-from src.coderag.ingestion.graph_builder import GraphBuilder
-from src.coderag.ingestion.index_bm25 import GLOBAL_BM25
-from src.coderag.ingestion.index_chroma import COLLECTIONS, ChromaIndex
-from src.coderag.storage.metadata_store import MetadataStore
+from coderag.core.settings import get_settings
+from coderag.ingestion.graph_builder import GraphBuilder
+from coderag.ingestion.index_bm25 import GLOBAL_BM25
+from coderag.ingestion.index_chroma import COLLECTIONS, ChromaIndex
+from coderag.storage.metadata_store import MetadataStore
 
 
 def _on_remove_error(func, path: str, exc_info) -> None:

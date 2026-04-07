@@ -1,11 +1,11 @@
-﻿"""Pruebas de soporte de descubrimiento de módulos en el servicio de consultas."""
+"""Pruebas de soporte de descubrimiento de módulos en el servicio de consultas."""
 
 from pathlib import Path
 
 import pytest
 
-import src.coderag.api.query_service as query_service
-from src.coderag.core.models import Citation, InventoryItem, InventoryQueryResponse, RetrievalChunk
+import coderag.api.query_service as query_service
+from coderag.core.models import Citation, InventoryItem, InventoryQueryResponse, RetrievalChunk
 
 
 def test_is_module_query_detects_spanish_and_english_terms() -> None:

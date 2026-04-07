@@ -24,7 +24,8 @@ FROM python:3.12-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app/src
 
 WORKDIR /app
 
@@ -55,4 +56,4 @@ USER app
 
 EXPOSE 8000
 
-CMD ["python", "-m", "src.main", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "main", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,11 +1,11 @@
-﻿"""Extracción semántica inicial para Python basada en AST."""
+"""Extracción semántica inicial para Python basada en AST."""
 
 from __future__ import annotations
 
 import ast
 from collections.abc import Iterable
 
-from src.coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
 
 
 def _build_symbol_lookup(

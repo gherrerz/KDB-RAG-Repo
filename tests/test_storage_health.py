@@ -1,12 +1,12 @@
-﻿"""Pruebas unitarias para validación de salud de storage."""
+"""Pruebas unitarias para validación de salud de storage."""
 
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from src.coderag.core import storage_health
-from src.coderag.core.storage_health import StoragePreflightError
+from coderag.core import storage_health
+from coderag.core.storage_health import StoragePreflightError
 
 
 def _fake_settings() -> SimpleNamespace:

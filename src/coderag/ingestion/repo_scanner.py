@@ -1,8 +1,8 @@
-﻿"""Escáner de repositorio para seleccionar archivos relevantes para la indexación."""
+"""Escáner de repositorio para seleccionar archivos relevantes para la indexación."""
 
 from pathlib import Path
 
-from src.coderag.core.models import ScannedFile
+from coderag.core.models import ScannedFile
 
 LANG_MAP = {
     ".py": "python",

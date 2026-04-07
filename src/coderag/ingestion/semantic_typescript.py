@@ -1,4 +1,4 @@
-﻿"""Extracción semántica fase 1 para TypeScript basada en patrones."""
+"""Extracción semántica fase 1 para TypeScript basada en patrones."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable
 
-from src.coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
 
 _IMPORT_PATTERN = re.compile(
     r"^\s*import\s+(?:type\s+)?(?:.+?\s+from\s+)?['\"]([^'\"]+)['\"]"

@@ -1,7 +1,7 @@
-﻿"""Respaldo genérico del analizador para fragmentos no específicos del idioma."""
+"""Respaldo genérico del analizador para fragmentos no específicos del idioma."""
 
-from src.coderag.core.models import ScannedFile, SymbolChunk
-from src.coderag.ingestion.chunker import extract_symbol_chunks
+from coderag.core.models import ScannedFile, SymbolChunk
+from coderag.ingestion.chunker import extract_symbol_chunks
 
 
 def parse_generic(repo_id: str, file_obj: ScannedFile) -> list[SymbolChunk]:

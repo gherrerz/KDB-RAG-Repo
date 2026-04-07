@@ -1,11 +1,11 @@
-﻿"""Pruebas de limpieza de chat al cambiar repositorio en la vista de consulta."""
+"""Pruebas de limpieza de chat al cambiar repositorio en la vista de consulta."""
 
 import sys
 
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from src.coderag.ui.main_window import MainWindow
+from coderag.ui.main_window import MainWindow
 
 
 class _FakeResponse:
@@ -40,7 +40,7 @@ def window(monkeypatch: pytest.MonkeyPatch, qapp: QApplication) -> MainWindow:
     def _fake_get(url: str, timeout: int) -> _FakeResponse:  # noqa: ARG001
         return _FakeResponse({"repo_ids": list(state["repo_ids"])})
 
-    import src.coderag.ui.main_window as module
+    import coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "get", _fake_get)
     created = MainWindow()
@@ -144,7 +144,7 @@ def test_delete_selected_repo_calls_endpoint_and_cleans_ui(
             }
         )
 
-    import src.coderag.ui.main_window as module
+    import coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "delete", _fake_delete)
     monkeypatch.setattr(

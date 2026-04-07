@@ -5,7 +5,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from src.coderag.core.models import JobInfo, JobStatus
+from coderag.core.models import JobInfo, JobStatus
 
 
 class MetadataStore:

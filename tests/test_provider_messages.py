@@ -1,6 +1,6 @@
-﻿"""Pruebas unitarias para catálogo centralizado de mensajes de UI."""
+"""Pruebas unitarias para catálogo centralizado de mensajes de UI."""
 
-from src.coderag.ui.provider_messages import (
+from coderag.ui.provider_messages import (
     embedding_warning_not_configured,
     embedding_warning_unsupported,
     ingest_provider_not_ready_message,

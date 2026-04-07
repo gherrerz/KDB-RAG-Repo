@@ -1,8 +1,8 @@
-﻿"""Generic fallback extractor for unsupported languages."""
+"""Generic fallback extractor for unsupported languages."""
 
 import re
 
-from src.coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
+from coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
 
 
 class GenericFallbackExtractor:

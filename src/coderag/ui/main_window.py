@@ -1,4 +1,4 @@
-﻿"""Ventana principal del escritorio para el Validador Híbrido de Respuestas RAG."""
+"""Ventana principal del escritorio para el Validador Híbrido de Respuestas RAG."""
 
 import sys
 import os
@@ -15,23 +15,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.coderag.core.settings import get_settings
-from src.coderag.ui.provider_action_state import (
+from coderag.core.settings import get_settings
+from coderag.ui.provider_action_state import (
     ActionState,
     evaluate_ingest_action,
     evaluate_query_action,
 )
-from src.coderag.ui.evidence_view import EvidenceView
-from src.coderag.ui.ingestion_view import IngestionView
-from src.coderag.ui.provider_messages import (
+from coderag.ui.evidence_view import EvidenceView
+from coderag.ui.ingestion_view import IngestionView
+from coderag.ui.provider_messages import (
     ingest_requires_repo_url_message,
 )
-from src.coderag.ui.query_preconditions import evaluate_local_query_preconditions
-from src.coderag.ui.query_response_formatter import (
+from coderag.ui.query_preconditions import evaluate_local_query_preconditions
+from coderag.ui.query_response_formatter import (
     build_query_answer_text,
     build_repo_not_ready_message,
 )
-from src.coderag.ui.query_view import QueryView
+from coderag.ui.query_view import QueryView
 
 API_BASE = os.getenv("CODERAG_API_BASE", "http://127.0.0.1:8000")
 UI_REQUEST_TIMEOUT_SECONDS = get_settings().ui_request_timeout_seconds

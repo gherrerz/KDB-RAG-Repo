@@ -1,18 +1,18 @@
-﻿"""Pruebas UI para autocompletado de modelos y warnings por provider."""
+"""Pruebas UI para autocompletado de modelos y warnings por provider."""
 
 import sys
 
 import pytest
 from PySide6.QtWidgets import QApplication
 
-import src.coderag.ui.ingestion_view as ingestion_view_module
-import src.coderag.ui.query_view as query_view_module
-from src.coderag.ui.ingestion_view import IngestionView
-from src.coderag.ui.model_catalog_client import (
+import coderag.ui.ingestion_view as ingestion_view_module
+import coderag.ui.query_view as query_view_module
+from coderag.ui.ingestion_view import IngestionView
+from coderag.ui.model_catalog_client import (
     UIModelCatalogResult,
     should_show_remote_catalog_fallback_hint,
 )
-from src.coderag.ui.query_view import QueryView
+from coderag.ui.query_view import QueryView
 
 
 @pytest.fixture

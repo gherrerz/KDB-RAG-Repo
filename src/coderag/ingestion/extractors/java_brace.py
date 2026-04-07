@@ -1,9 +1,9 @@
-﻿"""Java extractor based on declaration patterns + brace balancing."""
+"""Java extractor based on declaration patterns + brace balancing."""
 
 import re
 
-from src.coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
-from src.coderag.ingestion.extractors.brace_aware import (
+from coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
+from coderag.ingestion.extractors.brace_aware import (
     BraceAwareSpanResolver,
     CommentStyle,
 )

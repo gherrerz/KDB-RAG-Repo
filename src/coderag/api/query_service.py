@@ -1,4 +1,4 @@
-﻿"""Orquestación de consultas de un extremo a otro para Hybrid RAG + GraphRAG."""
+"""Orquestación de consultas de un extremo a otro para Hybrid RAG + GraphRAG."""
 
 import ast
 from collections import Counter
@@ -9,7 +9,7 @@ from threading import Lock
 from time import monotonic
 import unicodedata
 
-from src.coderag.core.models import (
+from coderag.core.models import (
     Citation,
     InventoryItem,
     InventoryQueryResponse,
@@ -19,20 +19,20 @@ from src.coderag.core.models import (
     RetrievalStatistics,
     RetrievalChunk,
 )
-from src.coderag.core.settings import get_settings
-from src.coderag.api.citation_filters import build_inventory_citations, is_noisy_path
-from src.coderag.api.query_diagnostics import (
+from coderag.core.settings import get_settings
+from coderag.api.citation_filters import build_inventory_citations, is_noisy_path
+from coderag.api.query_diagnostics import (
     build_inventory_diagnostics,
     build_inventory_missing_target_diagnostics,
     build_query_diagnostics,
     build_retrieval_diagnostics,
 )
-from src.coderag.ingestion.graph_builder import GraphBuilder
-from src.coderag.llm.openai_client import AnswerClient
-from src.coderag.retrieval.context_assembler import assemble_context
-from src.coderag.retrieval.graph_expand import expand_with_graph, expand_with_graph_with_diagnostics
-from src.coderag.retrieval.hybrid_search import hybrid_search
-from src.coderag.retrieval.reranker import rerank
+from coderag.ingestion.graph_builder import GraphBuilder
+from coderag.llm.openai_client import AnswerClient
+from coderag.retrieval.context_assembler import assemble_context
+from coderag.retrieval.graph_expand import expand_with_graph, expand_with_graph_with_diagnostics
+from coderag.retrieval.hybrid_search import hybrid_search
+from coderag.retrieval.reranker import rerank
 
 
 INVENTORY_EQUIVALENT_GROUPS = [

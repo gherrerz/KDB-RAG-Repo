@@ -6,8 +6,8 @@ from redis import Redis
 from rq import SimpleWorker
 from rq.timeouts import TimerDeathPenalty
 
-from src.coderag.core.logging import configure_logging
-from src.coderag.core.settings import get_settings
+from coderag.core.logging import configure_logging
+from coderag.core.settings import get_settings
 
 
 class CoderagSimpleWorker(SimpleWorker):

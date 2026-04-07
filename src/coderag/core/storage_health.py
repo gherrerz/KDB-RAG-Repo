@@ -1,4 +1,4 @@
-﻿"""Validación de salud de almacenamiento para rutas de ingesta y consulta."""
+"""Validación de salud de almacenamiento para rutas de ingesta y consulta."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ from neo4j import GraphDatabase
 from openai import OpenAI
 from redis import Redis
 
-from src.coderag.core.settings import get_settings
-from src.coderag.ingestion.embedding import MODEL_DIMENSIONS
-from src.coderag.ingestion.index_bm25 import GLOBAL_BM25
-from src.coderag.ingestion.index_chroma import ChromaIndex
-from src.coderag.storage.metadata_store import MetadataStore
+from coderag.core.settings import get_settings
+from coderag.ingestion.embedding import MODEL_DIMENSIONS
+from coderag.ingestion.index_bm25 import GLOBAL_BM25
+from coderag.ingestion.index_chroma import ChromaIndex
+from coderag.storage.metadata_store import MetadataStore
 
 
 class StoragePreflightError(RuntimeError):

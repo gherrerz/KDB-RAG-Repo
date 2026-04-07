@@ -1,12 +1,12 @@
-﻿"""Servidor FastAPI para operaciones de ingesta y consulta."""
+"""Servidor FastAPI para operaciones de ingesta y consulta."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 
-from src.coderag.core.logging import configure_logging
-from src.coderag.core.models import (
+from coderag.core.logging import configure_logging
+from coderag.core.models import (
     InventoryQueryRequest,
     InventoryQueryResponse,
     JobInfo,
@@ -22,14 +22,14 @@ from src.coderag.core.models import (
     ResetResponse,
     StorageHealthResponse,
 )
-from src.coderag.core.storage_health import (
+from coderag.core.storage_health import (
     StoragePreflightError,
     ensure_storage_ready,
     get_repo_query_status,
     run_storage_preflight,
 )
-from src.coderag.jobs.worker import IngestionConflictError, JobManager
-from src.coderag.llm.model_discovery import discover_models
+from coderag.jobs.worker import IngestionConflictError, JobManager
+from coderag.llm.model_discovery import discover_models
 
 
 @asynccontextmanager
@@ -223,7 +223,7 @@ def get_job(
 )
 def query_repo(request: QueryRequest) -> QueryResponse:
     """Ejecute una canalización de consultas híbrida para un repositorio indexado."""
-    from src.coderag.api.query_service import run_query
+    from coderag.api.query_service import run_query
 
     try:
         ensure_storage_ready(context="query", repo_id=request.repo_id)
@@ -306,7 +306,7 @@ def query_repo(request: QueryRequest) -> QueryResponse:
 )
 def query_inventory(request: InventoryQueryRequest) -> InventoryQueryResponse:
     """Ejecute una consulta de inventario paginado primero en el gráfico para obtener intenciones de lista amplia."""
-    from src.coderag.api.query_service import run_inventory_query
+    from coderag.api.query_service import run_inventory_query
 
     try:
         ensure_storage_ready(context="inventory_query", repo_id=request.repo_id)
@@ -347,7 +347,7 @@ def query_inventory(request: InventoryQueryRequest) -> InventoryQueryResponse:
 )
 def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
     """Ejecuta consulta retrieval-only y devuelve evidencia sin sintetizar con LLM."""
-    from src.coderag.api.query_service import run_retrieval_query
+    from coderag.api.query_service import run_retrieval_query
 
     try:
         ensure_storage_ready(context="retrieval_query", repo_id=request.repo_id)

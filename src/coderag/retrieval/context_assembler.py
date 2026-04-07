@@ -1,6 +1,6 @@
-﻿"""Ensamblado de contexto para la entrada del mensaje final de LLM."""
+"""Ensamblado de contexto para la entrada del mensaje final de LLM."""
 
-from src.coderag.core.models import RetrievalChunk
+from coderag.core.models import RetrievalChunk
 
 
 SECTION_SEPARATOR = "\n\n---\n\n"

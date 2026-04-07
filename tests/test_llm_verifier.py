@@ -1,6 +1,6 @@
-﻿"""Pruebas de robustez del análisis de resultados del verificador."""
+"""Pruebas de robustez del análisis de resultados del verificador."""
 
-from src.coderag.llm.openai_client import _is_verifier_result_valid
+from coderag.llm.openai_client import _is_verifier_result_valid
 
 
 def test_verifier_accepts_accented_and_punctuated_valid_tokens() -> None:

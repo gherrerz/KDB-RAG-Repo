@@ -1,6 +1,6 @@
-﻿"""Pruebas unitarias para helper compartido de feedback de providers."""
+"""Pruebas unitarias para helper compartido de feedback de providers."""
 
-from src.coderag.ui.provider_feedback import (
+from coderag.ui.provider_feedback import (
     embedding_feedback_from_capability,
     llm_feedback_from_capability,
 )

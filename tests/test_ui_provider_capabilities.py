@@ -1,6 +1,6 @@
-﻿"""Pruebas del adaptador tipado de capacidades para UI."""
+"""Pruebas del adaptador tipado de capacidades para UI."""
 
-from src.coderag.ui.provider_capabilities import (
+from coderag.ui.provider_capabilities import (
     normalize_embedding_capability,
     normalize_llm_capability,
     readiness,

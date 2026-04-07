@@ -1,8 +1,8 @@
-﻿"""Evaluadores puros para decidir estado de acciones en la UI."""
+"""Evaluadores puros para decidir estado de acciones en la UI."""
 
 from dataclasses import dataclass
 
-from src.coderag.ui.provider_messages import (
+from coderag.ui.provider_messages import (
     ingest_provider_not_ready_message,
     ingest_ready_message,
     query_blocked_by_ingestion_message,

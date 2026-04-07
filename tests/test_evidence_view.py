@@ -1,4 +1,4 @@
-﻿"""Pruebas de microinteracciones en panel de evidencia."""
+"""Pruebas de microinteracciones en panel de evidencia."""
 
 import sys
 
@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from src.coderag.ui.evidence_view import EvidenceView
+from coderag.ui.evidence_view import EvidenceView
 
 
 @pytest.fixture

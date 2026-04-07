@@ -1,4 +1,4 @@
-﻿Set-StrictMode -Version Latest
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -23,10 +23,10 @@ function Wait-Port {
 
 Write-Host "[1/6] Deteniendo procesos Python de API/UI..."
 $patterns = @(
-    "-m src.main",
-    "src.coderag.api.server:app",
+    "-m main",
+    "coderag.api.server:app",
     "-m uvicorn",
-    "-m src.coderag.ui.main_window",
+    "-m coderag.ui.main_window",
     "--multiprocessing-fork"
 )
 $pythonProcs = Get-CimInstance Win32_Process | Where-Object { $_.Name -like "python*.exe" }
@@ -72,7 +72,7 @@ if (-not (Test-Path $pythonExe)) {
 
 $neo4jCmd = @'
 import sys
-from src.coderag.core.settings import get_settings
+from coderag.core.settings import get_settings
 from neo4j import GraphDatabase
 settings = get_settings()
 driver = GraphDatabase.driver(
@@ -147,12 +147,13 @@ if (Test-Path $dbPath) {
 Write-Host "[6/7] Levantando API..."
 $env:HEALTH_CHECK_OPENAI = "false"
 $env:CODERAG_API_BASE = "http://127.0.0.1:8000"
-Start-Process -FilePath $pythonExe -ArgumentList "-m src.main --host 127.0.0.1 --port 8000" -WorkingDirectory $root | Out-Null
+$env:PYTHONPATH = Join-Path $root "src"
+Start-Process -FilePath $pythonExe -ArgumentList "-m main --host 127.0.0.1 --port 8000" -WorkingDirectory $root | Out-Null
 if (-not (Wait-Port -Port 8000 -Retries 30 -DelaySeconds 1)) {
     throw "API no quedó disponible en 127.0.0.1:8000 tras reset cold"
 }
 
 Write-Host "[7/7] Levantando UI..."
-Start-Process -FilePath $pythonExe -ArgumentList "-m src.coderag.ui.main_window" -WorkingDirectory $root | Out-Null
+Start-Process -FilePath $pythonExe -ArgumentList "-m coderag.ui.main_window" -WorkingDirectory $root | Out-Null
 
 Write-Host "Reset en frío completado."

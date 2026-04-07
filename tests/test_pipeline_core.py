@@ -1,9 +1,9 @@
-﻿"""Pruebas básicas para componentes de ingestión y recuperación."""
+"""Pruebas básicas para componentes de ingestión y recuperación."""
 
-from src.coderag.core.models import RetrievalChunk, ScannedFile
-from src.coderag.ingestion.chunker import extract_symbol_chunks
-from src.coderag.ingestion.index_bm25 import BM25Index, tokenize
-from src.coderag.retrieval.context_assembler import assemble_context
+from coderag.core.models import RetrievalChunk, ScannedFile
+from coderag.ingestion.chunker import extract_symbol_chunks
+from coderag.ingestion.index_bm25 import BM25Index, tokenize
+from coderag.retrieval.context_assembler import assemble_context
 
 
 def test_extract_symbol_chunks_java_class_method_constructor() -> None:
@@ -50,7 +50,7 @@ def test_extract_symbol_chunks_python_long_symbol_uses_full_span(
     class _Settings:
         symbol_extractor_v2_enabled = True
 
-    import src.coderag.ingestion.chunker as module
+    import coderag.ingestion.chunker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
 
@@ -76,7 +76,7 @@ def test_extract_symbol_chunks_legacy_flag_keeps_windowed_span(
     class _Settings:
         symbol_extractor_v2_enabled = False
 
-    import src.coderag.ingestion.chunker as module
+    import coderag.ingestion.chunker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
 
@@ -165,7 +165,7 @@ def test_bm25_persist_and_load_roundtrip(
 
     (_Settings.workspace_path).mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.ingestion.index_bm25 as module
+    import coderag.ingestion.index_bm25 as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
 

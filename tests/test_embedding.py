@@ -1,10 +1,10 @@
-﻿"""Pruebas para consistencia de dimensiones en generación de embeddings."""
+"""Pruebas para consistencia de dimensiones en generación de embeddings."""
 
 from types import SimpleNamespace
 
 import pytest
 
-from src.coderag.ingestion.embedding import EmbeddingClient
+from coderag.ingestion.embedding import EmbeddingClient
 
 
 class _FakeEmbeddingsAPI:
@@ -39,7 +39,7 @@ def test_embed_texts_uses_model_dimension_when_no_client(monkeypatch: pytest.Mon
         openai_embedding_model = "text-embedding-3-small"
         openai_api_key = ""
 
-    import src.coderag.ingestion.embedding as module
+    import coderag.ingestion.embedding as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     client = EmbeddingClient()
@@ -58,7 +58,7 @@ def test_embed_texts_keeps_dimension_on_mixed_api_and_fallback(
         openai_embedding_model = "text-embedding-3-small"
         openai_api_key = "test-key"
 
-    import src.coderag.ingestion.embedding as module
+    import coderag.ingestion.embedding as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     monkeypatch.setattr(
@@ -85,7 +85,7 @@ def test_embed_texts_reports_progress_per_batch(
         openai_api_key = "test-key"
         openai_timeout_seconds = 10.0
 
-    import src.coderag.ingestion.embedding as module
+    import coderag.ingestion.embedding as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     monkeypatch.setattr(

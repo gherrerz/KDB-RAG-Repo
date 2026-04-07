@@ -1,4 +1,4 @@
-﻿"""Cliente UI para obtener catálogos de modelos desde la API con fallback local."""
+"""Cliente UI para obtener catálogos de modelos desde la API con fallback local."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ import os
 
 import requests
 
-from src.coderag.core.provider_model_catalog import (
+from coderag.core.provider_model_catalog import (
     embedding_models_for_provider,
     llm_models_for_provider,
 )
-from src.coderag.core.settings import get_settings
+from coderag.core.settings import get_settings
 
 API_BASE = os.getenv("CODERAG_API_BASE", "http://127.0.0.1:8000")
 

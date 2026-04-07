@@ -1,14 +1,14 @@
-﻿"""Resolucion compartida del estado UI de providers para Ingesta/Consulta."""
+"""Resolucion compartida del estado UI de providers para Ingesta/Consulta."""
 
 from dataclasses import dataclass
 
-from src.coderag.ui.provider_capabilities import (
+from coderag.ui.provider_capabilities import (
     readiness,
     resolve_embedding_capability,
     resolve_llm_capability,
 )
-from src.coderag.ui.provider_defaults import default_embedding_model, default_llm_model
-from src.coderag.ui.provider_feedback import (
+from coderag.ui.provider_defaults import default_embedding_model, default_llm_model
+from coderag.ui.provider_feedback import (
     embedding_feedback_from_capability,
     llm_feedback_from_capability,
 )

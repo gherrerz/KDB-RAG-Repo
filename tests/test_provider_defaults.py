@@ -1,6 +1,6 @@
-﻿"""Pruebas unitarias para catálogo compartido de modelos por defecto."""
+"""Pruebas unitarias para catálogo compartido de modelos por defecto."""
 
-from src.coderag.ui.provider_defaults import (
+from coderag.ui.provider_defaults import (
     default_embedding_model,
     default_llm_model,
     embedding_models_for_provider,

@@ -1,7 +1,7 @@
-﻿"""Unit tests for reusable citation filtering helpers."""
+"""Unit tests for reusable citation filtering helpers."""
 
-from src.coderag.api.citation_filters import build_inventory_citations, is_noisy_path
-from src.coderag.core.models import InventoryItem
+from coderag.api.citation_filters import build_inventory_citations, is_noisy_path
+from coderag.core.models import InventoryItem
 
 
 def test_is_noisy_path_detects_known_noise_tokens() -> None:

@@ -1,12 +1,12 @@
-﻿"""Constructores de fragmentos para símbolos, archivos y módulos."""
+"""Constructores de fragmentos para símbolos, archivos y módulos."""
 
 import hashlib
 import json
 import re
 
-from src.coderag.core.models import ScannedFile, SymbolChunk
-from src.coderag.core.settings import get_settings
-from src.coderag.ingestion.extractors import DEFAULT_LANGUAGE_EXTRACTOR_REGISTRY
+from coderag.core.models import ScannedFile, SymbolChunk
+from coderag.core.settings import get_settings
+from coderag.ingestion.extractors import DEFAULT_LANGUAGE_EXTRACTOR_REGISTRY
 
 
 def _chunk_id(repo_id: str, path: str, name: str, start_line: int) -> str:

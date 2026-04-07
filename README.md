@@ -1,4 +1,4 @@
-﻿# RAG Hybrid Response Validator
+# RAG Hybrid Response Validator
 
 Plataforma de analisis de repositorios con Hybrid RAG para responder preguntas
 de codigo con evidencia verificable (archivos y lineas).
@@ -69,7 +69,8 @@ Alternativa para desarrollo local (API/UI fuera de contenedor):
 Arranque directo de API (sin scripts):
 
 ```powershell
-.\.venv\Scripts\python -m src.main --host 127.0.0.1 --port 8000
+$env:PYTHONPATH = 'src'
+.\.venv\Scripts\python -m main --host 127.0.0.1 --port 8000
 ```
 
 3. Inicia una ingesta.

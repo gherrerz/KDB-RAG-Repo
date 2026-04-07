@@ -1,4 +1,4 @@
-﻿"""Pruebas de helpers de estado de acciones en MainWindow."""
+"""Pruebas de helpers de estado de acciones en MainWindow."""
 
 import sys
 
@@ -6,8 +6,8 @@ import pytest
 import requests
 from PySide6.QtWidgets import QApplication
 
-from src.coderag.ui.main_window import MainWindow
-from src.coderag.ui.provider_action_state import ActionState
+from coderag.ui.main_window import MainWindow
+from coderag.ui.provider_action_state import ActionState
 
 
 class _FakeResponse:
@@ -42,7 +42,7 @@ def _build_window(monkeypatch: pytest.MonkeyPatch) -> MainWindow:
             return _FakeResponse({"query_ready": True, "warnings": []})
         return _FakeResponse({})
 
-    import src.coderag.ui.main_window as module
+    import coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "get", _fake_get)
     return MainWindow()
@@ -122,7 +122,7 @@ def test_repo_switch_syncs_embedding_runtime_defaults(
             )
         return _FakeResponse({})
 
-    import src.coderag.ui.main_window as module
+    import coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "get", _fake_get)
     window = MainWindow()
@@ -156,7 +156,7 @@ def test_timer_event_throttles_repeated_polling_failures(
     window._job_poll_enabled = True
     window._active_job_id = "job-1"
 
-    import src.coderag.ui.main_window as module
+    import coderag.ui.main_window as module
 
     def _fake_get(url: str, timeout: float):  # noqa: ARG001
         if "/jobs/" in url:

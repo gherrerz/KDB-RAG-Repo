@@ -1,6 +1,6 @@
-﻿"""Unit tests for inventory diagnostics helper payload construction."""
+"""Unit tests for inventory diagnostics helper payload construction."""
 
-from src.coderag.api.query_diagnostics import (
+from coderag.api.query_diagnostics import (
     build_inventory_diagnostics,
     build_inventory_missing_target_diagnostics,
 )

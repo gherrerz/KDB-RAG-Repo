@@ -1,9 +1,9 @@
-﻿"""Utilidades compartidas para feedback visual de providers en UI."""
+"""Utilidades compartidas para feedback visual de providers en UI."""
 
 from PySide6.QtWidgets import QLabel
 
-from src.coderag.ui.provider_capabilities import EmbeddingCapability, LLMCapability
-from src.coderag.ui.provider_messages import (
+from coderag.ui.provider_capabilities import EmbeddingCapability, LLMCapability
+from coderag.ui.provider_messages import (
     embedding_warning_not_configured,
     embedding_warning_unsupported,
     llm_warning_not_configured,

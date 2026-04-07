@@ -1,8 +1,8 @@
-﻿"""Helpers to filter noisy paths and build inventory citations."""
+"""Helpers to filter noisy paths and build inventory citations."""
 
 from collections.abc import Sequence
 
-from src.coderag.core.models import Citation, InventoryItem
+from coderag.core.models import Citation, InventoryItem
 
 
 def is_noisy_path(path: str) -> bool:

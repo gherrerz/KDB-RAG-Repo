@@ -1,14 +1,14 @@
-﻿"""Pruebas API para puntos finales primarios."""
+"""Pruebas API para puntos finales primarios."""
 
 import pytest
 from fastapi.testclient import TestClient
 
-from src import main
-from src.coderag.api import server
-from src.coderag.core.models import JobInfo, JobStatus
-from src.coderag.core.storage_health import StoragePreflightError
-from src.coderag.jobs.worker import IngestionConflictError
-from src.coderag.llm.model_discovery import ModelDiscoveryResult
+import main
+from coderag.api import server
+from coderag.core.models import JobInfo, JobStatus
+from coderag.core.storage_health import StoragePreflightError
+from coderag.jobs.worker import IngestionConflictError
+from coderag.llm.model_discovery import ModelDiscoveryResult
 
 app = main.app
 
@@ -387,7 +387,7 @@ def test_repo_status_endpoint_returns_structured_repo_readiness(monkeypatch) -> 
 
 def test_inventory_query_endpoint_returns_paginated_payload(monkeypatch) -> None:
     """Devuelve una respuesta de inventario estructurada a través de un punto final dedicado."""
-    from src.coderag.api import query_service
+    from coderag.api import query_service
 
     def fake_run_inventory_query(
         repo_id: str,
@@ -463,7 +463,7 @@ def test_storage_health_endpoint_returns_structured_payload() -> None:
 
 def test_query_endpoint_forwards_optional_provider_fields(monkeypatch) -> None:
     """Propaga parámetros opcionales de provider/model al servicio run_query."""
-    from src.coderag.api import query_service
+    from coderag.api import query_service
 
     captured: dict[str, object] = {}
 
@@ -533,7 +533,7 @@ def test_query_endpoint_forwards_optional_provider_fields(monkeypatch) -> None:
 
 def test_retrieval_query_endpoint_returns_structured_payload(monkeypatch) -> None:
     """Expone respuesta retrieval-only estructurada y sin síntesis LLM."""
-    from src.coderag.api import query_service
+    from coderag.api import query_service
 
     def fake_list_repo_ids() -> list[str]:
         return ["mall"]
@@ -615,7 +615,7 @@ def test_retrieval_query_endpoint_returns_structured_payload(monkeypatch) -> Non
 
 def test_retrieval_query_endpoint_forwards_embedding_and_context_flags(monkeypatch) -> None:
     """Propaga provider/model/include_context al servicio retrieval-only."""
-    from src.coderag.api import query_service
+    from coderag.api import query_service
 
     captured: dict[str, object] = {}
 

@@ -1,11 +1,11 @@
-﻿"""Módulo de expansión GraphRAG que utiliza vecinos Neo4j."""
+"""Módulo de expansión GraphRAG que utiliza vecinos Neo4j."""
 
 import logging
 from time import monotonic
 
-from src.coderag.core.models import RetrievalChunk
-from src.coderag.core.settings import get_settings
-from src.coderag.ingestion.graph_builder import GraphBuilder
+from coderag.core.models import RetrievalChunk
+from coderag.core.settings import get_settings
+from coderag.ingestion.graph_builder import GraphBuilder
 
 
 LOGGER = logging.getLogger(__name__)

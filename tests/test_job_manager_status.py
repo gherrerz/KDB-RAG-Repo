@@ -1,4 +1,4 @@
-﻿"""Pruebas de estados operativos del JobManager durante la ingesta."""
+"""Pruebas de estados operativos del JobManager durante la ingesta."""
 
 import datetime
 from contextlib import contextmanager, nullcontext
@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
-from src.coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
-from src.coderag.jobs.worker import (
+from coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
+from coderag.jobs.worker import (
     IngestionConflictError,
     JobManager,
     run_ingest_job_task,
@@ -25,7 +25,7 @@ def test_job_manager_marks_partial_when_repo_not_query_ready(
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     manager = JobManager()
@@ -40,8 +40,8 @@ def test_job_manager_marks_partial_when_repo_not_query_ready(
 
     monkeypatch.setattr(module, "Thread", _SyncThread)
 
-    import src.coderag.ingestion.pipeline as pipeline_module
-    import src.coderag.core.storage_health as health_module
+    import coderag.ingestion.pipeline as pipeline_module
+    import coderag.core.storage_health as health_module
 
     monkeypatch.setattr(
         pipeline_module,
@@ -84,7 +84,7 @@ def test_job_manager_marks_completed_when_repo_query_ready(
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     manager = JobManager()
@@ -99,8 +99,8 @@ def test_job_manager_marks_completed_when_repo_query_ready(
 
     monkeypatch.setattr(module, "Thread", _SyncThread)
 
-    import src.coderag.ingestion.pipeline as pipeline_module
-    import src.coderag.core.storage_health as health_module
+    import coderag.ingestion.pipeline as pipeline_module
+    import coderag.core.storage_health as health_module
 
     def _fake_ingest_repository(
         repo_url,
@@ -189,7 +189,7 @@ def test_job_manager_recovers_interrupted_running_jobs(
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
 
@@ -228,7 +228,7 @@ def test_job_manager_enqueues_job_when_rq_mode_enabled(
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     manager = JobManager()
@@ -269,7 +269,7 @@ def test_job_manager_get_job_prefers_store_in_rq_mode(
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     manager = JobManager()
@@ -298,7 +298,7 @@ def test_job_manager_rejects_duplicate_active_repo_ingest(
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     manager = JobManager()
@@ -337,7 +337,7 @@ def test_job_manager_uses_repo_lock_in_rq_mode(
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
     manager = JobManager()
@@ -377,7 +377,7 @@ def test_run_ingest_job_task_raises_when_final_status_is_failed(
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
 
@@ -412,7 +412,7 @@ def test_run_ingest_job_task_does_not_raise_for_non_retryable_failure(
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
 
@@ -446,7 +446,7 @@ def test_run_ingest_job_task_raises_when_retry_all_enabled(
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.jobs.worker as module
+    import coderag.jobs.worker as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
 

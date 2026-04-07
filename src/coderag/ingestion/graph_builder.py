@@ -1,4 +1,4 @@
-﻿"""Integración de Neo4j para la construcción de gráficos de conocimiento de código."""
+"""Integración de Neo4j para la construcción de gráficos de conocimiento de código."""
 
 import hashlib
 from collections import defaultdict
@@ -7,8 +7,8 @@ from typing import Any
 
 from neo4j import GraphDatabase
 
-from src.coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
-from src.coderag.core.settings import get_settings
+from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.core.settings import get_settings
 
 
 class GraphBuilder:

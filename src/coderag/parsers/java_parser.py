@@ -1,7 +1,7 @@
-﻿"""Envoltorio del analizador Java para el descubrimiento de símbolos."""
+"""Envoltorio del analizador Java para el descubrimiento de símbolos."""
 
-from src.coderag.core.models import ScannedFile, SymbolChunk
-from src.coderag.ingestion.chunker import extract_symbol_chunks
+from coderag.core.models import ScannedFile, SymbolChunk
+from coderag.ingestion.chunker import extract_symbol_chunks
 
 
 def parse_java(repo_id: str, file_obj: ScannedFile) -> list[SymbolChunk]:

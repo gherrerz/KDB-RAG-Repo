@@ -1,6 +1,6 @@
-﻿"""Pruebas unitarias para resolución compartida de estado UI por provider."""
+"""Pruebas unitarias para resolución compartida de estado UI por provider."""
 
-from src.coderag.ui.provider_ui_state import (
+from coderag.ui.provider_ui_state import (
     resolve_embedding_ui_state,
     resolve_llm_ui_state,
 )

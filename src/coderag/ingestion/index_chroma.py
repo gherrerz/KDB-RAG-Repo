@@ -1,4 +1,4 @@
-﻿"""Contenedor ChromaDB para indexación y búsqueda de vectores."""
+"""Contenedor ChromaDB para indexación y búsqueda de vectores."""
 
 from threading import Lock
 from typing import Any
@@ -8,7 +8,7 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 from chromadb.errors import InvalidDimensionException
 
-from src.coderag.core.settings import get_settings
+from coderag.core.settings import get_settings
 
 COLLECTIONS = [
     "code_symbols",

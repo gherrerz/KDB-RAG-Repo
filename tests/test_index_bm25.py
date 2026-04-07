@@ -1,10 +1,10 @@
-﻿"""Pruebas para operaciones de limpieza por repositorio en BM25."""
+"""Pruebas para operaciones de limpieza por repositorio en BM25."""
 
 from pathlib import Path
 
 import pytest
 
-from src.coderag.ingestion.index_bm25 import BM25Index
+from coderag.ingestion.index_bm25 import BM25Index
 
 
 class _Settings:
@@ -23,7 +23,7 @@ def test_delete_repo_removes_memory_and_snapshot(
     settings = _Settings(workspace_path=tmp_path / "workspace")
     settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.ingestion.index_bm25 as module
+    import coderag.ingestion.index_bm25 as module
 
     monkeypatch.setattr(module, "get_settings", lambda: settings)
 
@@ -53,7 +53,7 @@ def test_delete_repo_is_idempotent_on_missing_repo(
     settings = _Settings(workspace_path=tmp_path / "workspace")
     settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
-    import src.coderag.ingestion.index_bm25 as module
+    import coderag.ingestion.index_bm25 as module
 
     monkeypatch.setattr(module, "get_settings", lambda: settings)
 
