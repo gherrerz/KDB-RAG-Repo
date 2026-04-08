@@ -92,6 +92,7 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 - `HEALTH_CHECK_TTL_SECONDS`: cache de resultados de preflight en segundos. Default: `10`.
 - `HEALTH_CHECK_OPENAI`: incluye check de conectividad/model list OpenAI. Default en settings: `true`; en compose: `false`.
 - `HEALTH_CHECK_REDIS`: incluye check de Redis en preflight. Default: `false`.
+- Neo4j se evalua como no critico solo en `startup` (lifespan), pero se mantiene critico para contextos de operacion como `query` e `ingest`.
 - `MODEL_DISCOVERY_TIMEOUT_SECONDS`: timeout de discovery de catalogo de modelos. Default: `8`.
 - `MODEL_DISCOVERY_CACHE_TTL_SECONDS`: cache de discovery en segundos. Default: `3600`.
 - `MODEL_DISCOVERY_MAX_RESULTS`: maximo de resultados de discovery. Default: `80`.

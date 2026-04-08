@@ -50,6 +50,66 @@ def bypass_storage_preflight(monkeypatch):
     monkeypatch.setattr(server, "run_storage_preflight", fake_run_storage_preflight)
 
 
+def test_lifespan_startup_succeeds_with_non_critical_neo4j(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Valida arranque por lifespan cuando Neo4j falla como check no crítico."""
+    observed_contexts: list[str] = []
+
+    def fake_ensure_storage_ready(
+        *,
+        context: str,
+        repo_id: str | None = None,
+        force: bool = False,
+    ) -> dict:
+        observed_contexts.append(context)
+        if context == "startup":
+            return {
+                "ok": True,
+                "strict": True,
+                "checked_at": "2026-01-01T00:00:00+00:00",
+                "context": context,
+                "repo_id": repo_id,
+                "failed_components": [],
+                "items": [
+                    {
+                        "name": "neo4j",
+                        "ok": False,
+                        "critical": False,
+                        "code": "neo4j_unreachable",
+                        "message": "connection refused",
+                        "latency_ms": 1.0,
+                        "details": {},
+                    }
+                ],
+                "cached": force,
+            }
+        return {
+            "ok": True,
+            "strict": True,
+            "checked_at": "2026-01-01T00:00:00+00:00",
+            "context": context,
+            "repo_id": repo_id,
+            "failed_components": [],
+            "items": [],
+            "cached": force,
+        }
+
+    monkeypatch.setattr(server, "ensure_storage_ready", fake_ensure_storage_ready)
+
+    with TestClient(app) as client:
+        response = client.get("/repos")
+        assert response.status_code == 200
+        assert observed_contexts[0] == "startup"
+        startup_health = client.app.state.storage_health
+        assert startup_health["ok"] is True
+        assert startup_health["context"] == "startup"
+        assert startup_health["failed_components"] == []
+        assert startup_health["items"][0]["name"] == "neo4j"
+        assert startup_health["items"][0]["ok"] is False
+        assert startup_health["items"][0]["critical"] is False
+
+
 def test_get_missing_job_returns_404() -> None:
     """No se encontraron devoluciones para una identificación de trabajo de ingesta desconocida."""
     client = TestClient(app)

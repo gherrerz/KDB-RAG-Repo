@@ -239,12 +239,16 @@ def _check_bm25(context: str, repo_id: str | None) -> dict[str, Any]:
     """Valida estado BM25 global o por repositorio según contexto."""
     if context in {"query", "inventory_query"}:
         if not repo_id:
-            return {"repo_id": None, "indexed": False, "ok": False, "critical": False, "message": "repo_id es requerido para validar BM25 en consulta."}
+            raise RuntimeError(
+                "repo_id es requerido para validar BM25 en consulta."
+            )
         loaded = GLOBAL_BM25.ensure_repo_loaded(repo_id)
         if not loaded:
-            return {"repo_id": repo_id, "indexed": False, "ok": False, "critical": False, "message": f"No hay índice BM25 cargado para repo '{repo_id}'."}
-        return {"repo_id": repo_id, "indexed": True, "ok": True, "critical": False}
-    return {"indexed_repos": GLOBAL_BM25.repo_count(), "ok": True, "critical": False}
+            raise RuntimeError(
+                f"No hay índice BM25 cargado para repo '{repo_id}'."
+            )
+        return {"repo_id": repo_id, "indexed": True}
+    return {"indexed_repos": GLOBAL_BM25.repo_count()}
 
 
 def _check_openai(timeout_seconds: float) -> dict[str, Any]:
@@ -321,7 +325,7 @@ def run_storage_preflight(
         {
             "type": "check",
             "name": "neo4j",
-            "critical": True,
+            "critical": context != "startup",
             "check_fn": lambda: _check_neo4j(timeout_seconds),
         },
         {

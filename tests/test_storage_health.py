@@ -262,3 +262,135 @@ def test_check_chroma_raises_on_hnsw_space_mismatch(
 
     with pytest.raises(RuntimeError, match="Espacio HNSW inconsistente"):
         storage_health._check_chroma()
+
+
+def test_check_bm25_raises_when_repo_not_loaded_in_query_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lanza error cuando BM25 no está cargado para el repo en contexto query."""
+    monkeypatch.setattr(
+        storage_health.GLOBAL_BM25,
+        "ensure_repo_loaded",
+        lambda repo_id: False,
+    )
+
+    with pytest.raises(RuntimeError, match="No hay índice BM25 cargado"):
+        storage_health._check_bm25(context="query", repo_id="mall")
+
+
+def test_run_storage_preflight_marks_bm25_as_non_critical_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reporta BM25 como fallo no crítico cuando falta índice en query."""
+    storage_health._CACHE.clear()
+    monkeypatch.setattr(storage_health, "get_settings", _fake_settings)
+    monkeypatch.setattr(storage_health, "_check_workspace", lambda path: {"path": str(path)})
+    monkeypatch.setattr(
+        storage_health,
+        "_check_metadata_sqlite",
+        lambda db_path: {"db_path": str(db_path)},
+    )
+    monkeypatch.setattr(storage_health, "_check_chroma", lambda: {"collection_count": 0})
+    monkeypatch.setattr(
+        storage_health,
+        "_check_neo4j",
+        lambda timeout_seconds: {"uri": "bolt://127.0.0.1:17687"},
+    )
+    monkeypatch.setattr(
+        storage_health,
+        "_check_openai",
+        lambda timeout_seconds: {"model_probe": "dummy"},
+    )
+    monkeypatch.setattr(
+        storage_health.GLOBAL_BM25,
+        "ensure_repo_loaded",
+        lambda repo_id: False,
+    )
+
+    report = storage_health.run_storage_preflight(
+        context="query",
+        repo_id="mall",
+        force=True,
+    )
+
+    bm25_item = next(item for item in report["items"] if item["name"] == "bm25")
+    assert report["ok"] is True
+    assert report["failed_components"] == []
+    assert bm25_item["ok"] is False
+    assert bm25_item["critical"] is False
+    assert bm25_item["code"] == "bm25_repo_missing"
+
+
+def test_run_storage_preflight_treats_neo4j_as_non_critical_on_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No bloquea startup cuando Neo4j falla en preflight."""
+    storage_health._CACHE.clear()
+    monkeypatch.setattr(storage_health, "get_settings", _fake_settings)
+    monkeypatch.setattr(storage_health, "_check_workspace", lambda path: {"path": str(path)})
+    monkeypatch.setattr(
+        storage_health,
+        "_check_metadata_sqlite",
+        lambda db_path: {"db_path": str(db_path)},
+    )
+    monkeypatch.setattr(storage_health, "_check_chroma", lambda: {"collection_count": 0})
+    monkeypatch.setattr(
+        storage_health,
+        "_check_neo4j",
+        lambda timeout_seconds: (_ for _ in ()).throw(RuntimeError("connection refused")),
+    )
+    monkeypatch.setattr(
+        storage_health,
+        "_check_openai",
+        lambda timeout_seconds: {"model_probe": "dummy"},
+    )
+
+    report = storage_health.run_storage_preflight(context="startup", force=True)
+
+    neo4j_item = next(item for item in report["items"] if item["name"] == "neo4j")
+    assert report["ok"] is True
+    assert "neo4j" not in report["failed_components"]
+    assert neo4j_item["ok"] is False
+    assert neo4j_item["critical"] is False
+
+
+def test_run_storage_preflight_keeps_neo4j_critical_in_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mantiene Neo4j crítico fuera del contexto startup."""
+    storage_health._CACHE.clear()
+    monkeypatch.setattr(storage_health, "get_settings", _fake_settings)
+    monkeypatch.setattr(storage_health, "_check_workspace", lambda path: {"path": str(path)})
+    monkeypatch.setattr(
+        storage_health,
+        "_check_metadata_sqlite",
+        lambda db_path: {"db_path": str(db_path)},
+    )
+    monkeypatch.setattr(storage_health, "_check_chroma", lambda: {"collection_count": 0})
+    monkeypatch.setattr(
+        storage_health,
+        "_check_neo4j",
+        lambda timeout_seconds: (_ for _ in ()).throw(RuntimeError("connection refused")),
+    )
+    monkeypatch.setattr(
+        storage_health,
+        "_check_openai",
+        lambda timeout_seconds: {"model_probe": "dummy"},
+    )
+    monkeypatch.setattr(
+        storage_health.GLOBAL_BM25,
+        "ensure_repo_loaded",
+        lambda repo_id: True,
+    )
+
+    report = storage_health.run_storage_preflight(
+        context="query",
+        repo_id="mall",
+        force=True,
+    )
+
+    neo4j_item = next(item for item in report["items"] if item["name"] == "neo4j")
+    assert report["ok"] is False
+    assert report["failed_components"] == ["neo4j"]
+    assert neo4j_item["ok"] is False
+    assert neo4j_item["critical"] is True
