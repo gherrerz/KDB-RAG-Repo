@@ -73,7 +73,7 @@ class IngestionView(QWidget):
 
         self.embedding_provider = QComboBox()
         self.embedding_provider.addItems(
-            ["openai", "anthropic", "gemini", "vertex_ai"]
+            ["openai", "gemini", "vertex_ai"]
         )
 
         self.embedding_model = QComboBox()

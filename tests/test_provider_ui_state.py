@@ -10,7 +10,7 @@ class _Settings:
     """Settings de prueba con capacidades configurables por provider."""
 
     def embedding_provider_capabilities(self, provider: str) -> dict[str, str | bool]:
-        if provider == "anthropic":
+        if provider == "openai":
             return {
                 "provider": provider,
                 "supported": False,
@@ -32,14 +32,14 @@ class _Settings:
         }
 
     def llm_provider_capabilities(self, provider: str) -> dict[str, str | bool]:
-        if provider == "anthropic":
+        if provider == "vertex_ai":
             return {
                 "provider": provider,
                 "supported": True,
                 "configured": False,
                 "answer": True,
                 "verify": True,
-                "reason": "missing_anthropic_api_key",
+                "reason": "missing_vertex_ai_api_key_or_project",
             }
         return {
             "provider": provider,
@@ -64,7 +64,7 @@ def test_resolve_embedding_ui_state_ready_query() -> None:
 
 def test_resolve_embedding_ui_state_unsupported_ingestion() -> None:
     """Marca warning con fallback cuando embeddings no tiene backend."""
-    state = resolve_embedding_ui_state(_Settings(), "anthropic", context="ingestion")
+    state = resolve_embedding_ui_state(_Settings(), "openai", context="ingestion")
 
     assert state.default_model == "text-embedding-3-small"
     assert "fallback" in state.warning.lower()
@@ -75,10 +75,10 @@ def test_resolve_embedding_ui_state_unsupported_ingestion() -> None:
 
 def test_resolve_llm_ui_state_not_configured() -> None:
     """Resuelve bloqueo cuando LLM está soportado pero no configurado."""
-    state = resolve_llm_ui_state(_Settings(), "anthropic")
+    state = resolve_llm_ui_state(_Settings(), "vertex_ai")
 
-    assert state.default_model == "claude-3-5-sonnet-20241022"
+    assert state.default_model == "gemini-2.0-flash"
     assert "no configurado" in state.warning.lower()
     assert state.chip_state == "blocked"
     assert state.ready is False
-    assert state.reason == "missing_anthropic_api_key"
+    assert state.reason == "missing_vertex_ai_api_key_or_project"

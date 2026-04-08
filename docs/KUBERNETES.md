@@ -67,7 +67,7 @@ Recomendacion:
 Campos sensibles tipicos:
 
 - `OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `VERTEX_AI_API_KEY`
+- `GEMINI_API_KEY`, `VERTEX_AI_API_KEY`
 - `VERTEX_AI_PROJECT_ID`
 - `NEO4J_PASSWORD`
 - `NEO4J_AUTH` (en secreto Neo4j)

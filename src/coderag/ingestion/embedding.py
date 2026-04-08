@@ -89,18 +89,14 @@ class EmbeddingClient:
         if hasattr(settings, "resolve_embedding_provider"):
             self.provider = settings.resolve_embedding_provider(provider)
         else:
-            self.provider = "openai"
+            self.provider = "vertex_ai"
 
         if hasattr(settings, "resolve_embedding_model"):
             self.model = settings.resolve_embedding_model(self.provider, model)
         elif model and model.strip():
             self.model = model.strip()
         else:
-            self.model = getattr(
-                settings,
-                "openai_embedding_model",
-                "text-embedding-3-small",
-            )
+            self.model = "text-embedding-005"
 
         if hasattr(settings, "resolve_api_key"):
             self.api_key = settings.resolve_api_key(self.provider)
@@ -145,14 +141,12 @@ class EmbeddingClient:
 
     def _default_dimension(self) -> int:
         """Devuelva una dimensión de respaldo estable para el modelo activo."""
-        return MODEL_DIMENSIONS.get(self.model, 1536)
+        return MODEL_DIMENSIONS.get(self.model, 768)
 
     def _fallback_reason(self) -> str:
         """Devuelve motivo compacto para trazabilidad de fallback."""
         if not self.api_key:
             return "missing_api_key"
-        if self.provider in {"anthropic"}:
-            return "provider_without_embedding_backend"
         if self.provider == "vertex_ai":
             settings = get_settings()
             if not getattr(settings, "vertex_ai_project_id", ""):
@@ -188,7 +182,20 @@ class EmbeddingClient:
         normalized = [self._sanitize_text(text) for text in texts]
         target_dimension: int | None = None
 
-        if self.client is None and self.provider not in {"gemini", "vertex_ai"}:
+        has_provider_runtime = True
+        if self.provider == "openai":
+            has_provider_runtime = self.client is not None
+        elif self.provider == "gemini":
+            has_provider_runtime = bool(self.api_key)
+        elif self.provider == "vertex_ai":
+            settings = get_settings()
+            has_provider_runtime = bool(
+                self.api_key and getattr(settings, "vertex_ai_project_id", "")
+            )
+        else:
+            has_provider_runtime = False
+
+        if not has_provider_runtime:
             target_dimension = self._default_dimension()
             LOGGER.warning(
                 "Embeddings provider=%s no disponible (%s); usando fallback "

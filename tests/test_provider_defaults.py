@@ -19,7 +19,7 @@ def test_default_embedding_models_catalog() -> None:
 def test_default_llm_models_catalog() -> None:
     """Resuelve modelos por defecto esperados para LLM."""
     assert default_llm_model("openai") == "gpt-4.1-mini"
-    assert default_llm_model("anthropic") == "claude-3-5-sonnet-20241022"
+    assert default_llm_model("gemini") == "gemini-2.0-flash"
     assert default_llm_model("vertex_ai") == "gemini-2.0-flash"
     assert default_llm_model("vertex") == "gemini-2.0-flash"
 
@@ -42,9 +42,9 @@ def test_embedding_models_for_provider_catalog() -> None:
 
 def test_llm_models_for_provider_catalog() -> None:
     """Expone listas predefinidas de modelos LLM por provider."""
-    anthropic_models = llm_models_for_provider("anthropic")
+    gemini_models = llm_models_for_provider("gemini")
     vertex_models = llm_models_for_provider("vertex_ai")
 
-    assert "claude-3-5-sonnet-20241022" in anthropic_models
-    assert "claude-3-5-haiku-20241022" in anthropic_models
+    assert "gemini-2.0-flash" in gemini_models
+    assert "gemini-2.0-flash-lite" in gemini_models
     assert "gemini-2.0-flash" in vertex_models

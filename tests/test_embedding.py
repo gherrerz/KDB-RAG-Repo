@@ -39,6 +39,20 @@ def test_embed_texts_uses_model_dimension_when_no_client(monkeypatch: pytest.Mon
         openai_embedding_model = "text-embedding-3-small"
         openai_api_key = ""
 
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None = None) -> str:
+            return (provider or "openai").strip().lower()
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, override: str | None = None) -> str:
+            _ = provider
+            return (override or "text-embedding-3-small").strip()
+
+        @staticmethod
+        def resolve_api_key(provider: str) -> str:
+            _ = provider
+            return ""
+
     import coderag.ingestion.embedding as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
@@ -57,6 +71,20 @@ def test_embed_texts_keeps_dimension_on_mixed_api_and_fallback(
     class _Settings:
         openai_embedding_model = "text-embedding-3-small"
         openai_api_key = "test-key"
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None = None) -> str:
+            return (provider or "openai").strip().lower()
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, override: str | None = None) -> str:
+            _ = provider
+            return (override or "text-embedding-3-small").strip()
+
+        @staticmethod
+        def resolve_api_key(provider: str) -> str:
+            _ = provider
+            return "test-key"
 
     import coderag.ingestion.embedding as module
 
@@ -84,6 +112,20 @@ def test_embed_texts_reports_progress_per_batch(
         openai_embedding_model = "text-embedding-3-small"
         openai_api_key = "test-key"
         openai_timeout_seconds = 10.0
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None = None) -> str:
+            return (provider or "openai").strip().lower()
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, override: str | None = None) -> str:
+            _ = provider
+            return (override or "text-embedding-3-small").strip()
+
+        @staticmethod
+        def resolve_api_key(provider: str) -> str:
+            _ = provider
+            return "test-key"
 
     import coderag.ingestion.embedding as module
 

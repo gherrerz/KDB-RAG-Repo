@@ -1799,7 +1799,7 @@ def run_retrieval_query(
     resolved_embedding_provider = (
         settings.resolve_embedding_provider(embedding_provider)
         if hasattr(settings, "resolve_embedding_provider")
-        else (embedding_provider or "openai")
+        else (embedding_provider or "vertex_ai")
     )
     resolved_embedding_model = (
         settings.resolve_embedding_model(
@@ -1809,7 +1809,7 @@ def run_retrieval_query(
         if hasattr(settings, "resolve_embedding_model")
         else (
             embedding_model
-            or getattr(settings, "openai_embedding_model", "text-embedding-3-small")
+            or "text-embedding-005"
         )
     )
 
@@ -1961,12 +1961,12 @@ def run_query(
     verify_enabled = (
         settings.is_verify_enabled()
         if hasattr(settings, "is_verify_enabled")
-        else bool(getattr(settings, "openai_verify_enabled", True))
+        else True
     )
     resolved_embedding_provider = (
         settings.resolve_embedding_provider(embedding_provider)
         if hasattr(settings, "resolve_embedding_provider")
-        else (embedding_provider or "openai")
+        else (embedding_provider or "vertex_ai")
     )
     resolved_embedding_model = (
         settings.resolve_embedding_model(
@@ -1976,7 +1976,7 @@ def run_query(
         if hasattr(settings, "resolve_embedding_model")
         else (
             embedding_model
-            or getattr(settings, "openai_embedding_model", "text-embedding-3-small")
+            or "text-embedding-005"
         )
     )
     pipeline_started_at = monotonic()

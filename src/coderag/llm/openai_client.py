@@ -9,7 +9,6 @@ import requests
 
 from coderag.core.provider_model_catalog import default_llm_model, llm_models_for_provider
 from coderag.core.settings import ProviderName, get_settings
-from coderag.llm.model_discovery import discover_models
 from coderag.llm.prompts import (
     SYSTEM_PROMPT,
     build_answer_prompt,
@@ -206,81 +205,6 @@ def _openai_model_candidates(primary_model: str) -> list[str]:
     return candidates
 
 
-def _is_anthropic_model_selection_error(message: str) -> bool:
-    """Detecta errores por modelo inválido/no habilitado en Anthropic."""
-    lowered = message.strip().lower()
-    if not lowered:
-        return False
-    if "model" not in lowered:
-        return False
-    model_signals = (
-        "not found",
-        "does not exist",
-        "not available",
-        "unsupported",
-        "invalid",
-        "access",
-        "permission",
-        "not enabled",
-    )
-    return any(signal in lowered for signal in model_signals)
-
-
-def _anthropic_model_candidates(primary_model: str) -> list[str]:
-    """Construye fallback de modelos Anthropic con prioridad estable."""
-    candidates: list[str] = []
-    for item in [
-        primary_model,
-        default_llm_model("anthropic"),
-        *llm_models_for_provider("anthropic"),
-    ]:
-        value = item.strip()
-        if value and value not in candidates:
-            candidates.append(value)
-    return candidates
-
-
-def _append_remote_anthropic_candidates(
-    attempted: list[str],
-) -> list[str]:
-    """Extiende candidatos con catálogo remoto/cacheado sin duplicados."""
-    try:
-        discovered = discover_models("anthropic", "llm", force_refresh=False)
-    except Exception:
-        return []
-
-    merged: list[str] = []
-    for item in discovered.models:
-        value = item.strip()
-        if value and value not in attempted and value not in merged:
-            merged.append(value)
-    return merged
-
-
-def _anthropic_error_message(response: requests.Response) -> str:
-    """Devuelve detalle de error Anthropic con el payload cuando existe."""
-    status = response.status_code
-    body_message = ""
-    try:
-        payload = response.json()
-    except ValueError:
-        payload = {}
-
-    if isinstance(payload, dict):
-        error = payload.get("error")
-        if isinstance(error, dict):
-            body_message = str(error.get("message") or "").strip()
-        if not body_message:
-            body_message = str(payload.get("message") or "").strip()
-
-    if body_message:
-        return f"Anthropic API error {status}: {body_message}"
-    raw_text = response.text.strip()
-    if raw_text:
-        return f"Anthropic API error {status}: {raw_text}"
-    return f"Anthropic API error {status}"
-
-
 class AnswerClient:
     """Servicio multi-provider para generación y validación de respuestas."""
 
@@ -299,7 +223,7 @@ class AnswerClient:
         if hasattr(settings, "resolve_llm_provider"):
             self.provider = settings.resolve_llm_provider(provider)
         else:
-            self.provider = "openai"
+            self.provider = "vertex_ai"
 
         if hasattr(settings, "resolve_api_key"):
             self.api_key = settings.resolve_api_key(self.provider)
@@ -314,7 +238,7 @@ class AnswerClient:
         elif answer_model and answer_model.strip():
             self.answer_model = answer_model.strip()
         else:
-            self.answer_model = getattr(settings, "openai_answer_model", "gpt-4.1-mini")
+            self.answer_model = "gemini-2.0-flash"
 
         if hasattr(settings, "resolve_verifier_model"):
             self.verifier_model = settings.resolve_verifier_model(
@@ -324,11 +248,7 @@ class AnswerClient:
         elif verifier_model and verifier_model.strip():
             self.verifier_model = verifier_model.strip()
         else:
-            self.verifier_model = getattr(
-                settings,
-                "openai_verifier_model",
-                "gpt-4.1-mini",
-            )
+            self.verifier_model = "gemini-2.0-flash"
 
         self.client = self._resolve_client(
             provider=self.provider,
@@ -364,8 +284,6 @@ class AnswerClient:
 
         if self.provider == "openai":
             return self._call_openai(model, prompt, timeout_seconds=timeout_seconds)
-        if self.provider == "anthropic":
-            return self._call_anthropic(model, prompt, timeout_seconds=timeout_seconds)
         if self.provider == "gemini":
             return self._call_gemini(model, prompt, timeout_seconds=timeout_seconds)
         if self.provider == "vertex_ai":
@@ -469,70 +387,6 @@ class AnswerClient:
             raise last_error
         return ""
 
-    def _call_anthropic(
-        self,
-        model: str,
-        prompt: str,
-        timeout_seconds: float | None = None,
-    ) -> str:
-        """Llama a Anthropic Messages API con prompt equivalente."""
-        if not self.api_key:
-            return ""
-        timeout_value = _timeout_value(timeout_seconds)
-        candidates = _anthropic_model_candidates(model)
-        attempted: list[str] = []
-        remote_candidates_appended = False
-        last_error: Exception | None = None
-
-        while candidates:
-            candidate_model = candidates.pop(0)
-            attempted.append(candidate_model)
-
-            payload = {
-                "model": candidate_model,
-                "max_tokens": 2048,
-                "system": SYSTEM_PROMPT,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0,
-            }
-            response = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                json=payload,
-                headers={
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                timeout=timeout_value,
-            )
-
-            if response.status_code >= 400:
-                error_message = _anthropic_error_message(response)
-                last_error = RuntimeError(error_message)
-                if _is_anthropic_model_selection_error(error_message):
-                    if not candidates and not remote_candidates_appended:
-                        remote_candidates_appended = True
-                        candidates = _append_remote_anthropic_candidates(attempted)
-                    continue
-                raise last_error
-
-            data = response.json()
-            chunks = data.get("content") or []
-            text_parts = [
-                item.get("text", "")
-                for item in chunks
-                if isinstance(item, dict) and item.get("type") == "text"
-            ]
-            text = "\n".join(part for part in text_parts if part).strip()
-            if text:
-                return text
-
-            last_error = RuntimeError("Anthropic API returned empty content")
-
-        if last_error is not None:
-            raise last_error
-        return ""
-
     def _call_gemini(
         self,
         model: str,
@@ -612,7 +466,7 @@ class AnswerClient:
         """Devuelve si la generación del provider activo está habilitada."""
         if self.provider == "openai":
             return self.client is not None
-        if self.provider in {"anthropic", "gemini"}:
+        if self.provider == "gemini":
             return bool(self.api_key)
         if self.provider == "vertex_ai":
             settings = get_settings()

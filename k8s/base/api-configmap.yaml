@@ -3,13 +3,9 @@ kind: ConfigMap
 metadata:
   name: coderag-api-config
 data:
-  OPENAI_EMBEDDING_MODEL: text-embedding-3-small
-  OPENAI_ANSWER_MODEL: gpt-4.1-mini
-  OPENAI_VERIFIER_MODEL: gpt-4.1-mini
-  OPENAI_VERIFY_ENABLED: "true"
-  LLM_PROVIDER: openai
+  LLM_PROVIDER: vertex_ai
   LLM_VERIFY_ENABLED: "true"
-  EMBEDDING_PROVIDER: openai
+  EMBEDDING_PROVIDER: vertex_ai
   VERTEX_AI_LOCATION: us-central1
   CHROMA_PATH: /app/storage/chroma
   PYTHONPATH: /app/src

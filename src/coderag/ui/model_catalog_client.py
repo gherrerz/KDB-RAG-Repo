@@ -19,14 +19,11 @@ _NON_REMOTE_FALLBACK_WARNINGS = {
     "catalog_service_unavailable",
     "model_kind_invalid",
     "missing_openai_api_key",
-    "missing_anthropic_api_key",
     "missing_gemini_api_key",
     "missing_vertex_ai_api_key_or_project",
     "provider_without_embedding_backend",
-    "anthropic_embedding_unsupported",
     "gemini_sdk_discovery_disabled",
     "unknown_provider_catalog_fallback",
-    "anthropic_catalog_fallback",
 }
 
 

@@ -11,11 +11,6 @@ EMBEDDING_MODEL_OPTIONS: dict[str, list[str]] = {
         "text-embedding-3-large",
         "text-embedding-ada-002",
     ],
-    # Anthropic no ofrece embeddings directos en este flujo; fallback operativo.
-    "anthropic": [
-        "text-embedding-3-small",
-        "text-embedding-3-large",
-    ],
     "gemini": [
         "text-embedding-004",
     ],
@@ -31,10 +26,6 @@ LLM_MODEL_OPTIONS: dict[str, list[str]] = {
         "gpt-4.1",
         "gpt-4o-mini",
     ],
-    "anthropic": [
-        "claude-3-5-sonnet-20241022",
-        "claude-3-5-haiku-20241022",
-    ],
     "gemini": [
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
@@ -47,14 +38,12 @@ LLM_MODEL_OPTIONS: dict[str, list[str]] = {
 
 DEFAULT_EMBEDDING_MODELS: dict[str, str] = {
     "openai": "text-embedding-3-small",
-    "anthropic": "text-embedding-3-small",
     "gemini": "text-embedding-004",
     "vertex_ai": "text-embedding-005",
 }
 
 DEFAULT_LLM_MODELS: dict[str, str] = {
     "openai": "gpt-4.1-mini",
-    "anthropic": "claude-3-5-sonnet-20241022",
     "gemini": "gemini-2.0-flash",
     "vertex_ai": "gemini-2.0-flash",
 }

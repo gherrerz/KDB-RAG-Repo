@@ -34,12 +34,6 @@ class _VertexSettings(_Settings):
     vertex_ai_location = "us-central1"
 
 
-class _AnthropicSettings(_Settings):
-    """Configuración de pruebas para escenarios Anthropic."""
-
-    anthropic_api_key = "anthropic-test-key"
-
-
 def test_openai_missing_key_uses_fallback(monkeypatch) -> None:
     """Sin API key OpenAI, discovery cae a catálogo local."""
     monkeypatch.setattr(model_discovery, "get_settings", lambda: _Settings())
@@ -294,37 +288,29 @@ def test_vertex_falls_back_to_gemini_rest_when_publisher_fails(monkeypatch) -> N
     assert calls[0] == "gemini-key"
 
 
-def test_anthropic_uses_remote_catalog_when_available(monkeypatch) -> None:
-    """Anthropic debe usar catálogo remoto cuando la API responde."""
-    monkeypatch.setattr(model_discovery, "get_settings", lambda: _AnthropicSettings())
-    monkeypatch.setattr(
-        model_discovery,
-        "_discover_anthropic_names",
-        lambda **_: ["claude-sonnet-4-6", "claude-opus-4-6"],
-    )
+def test_unknown_provider_llm_returns_fallback_shape(monkeypatch) -> None:
+    """Providers desconocidos devuelven shape fallback con warning estándar."""
+    monkeypatch.setattr(model_discovery, "get_settings", lambda: _Settings())
 
     result = model_discovery.discover_models("anthropic", "llm", force_refresh=True)
 
-    assert result.source == "remote"
-    assert result.warning is None
-    assert "claude-sonnet-4-6" in result.models
-
-
-def test_anthropic_remote_failed_falls_back(monkeypatch) -> None:
-    """Si el catálogo remoto Anthropic falla, usa fallback local estable."""
-    monkeypatch.setattr(model_discovery, "get_settings", lambda: _AnthropicSettings())
-
-    def _raise_anthropic(**_kwargs):
-        raise RuntimeError("anthropic unavailable")
-
-    monkeypatch.setattr(
-        model_discovery,
-        "_discover_anthropic_names",
-        _raise_anthropic,
-    )
-
-    result = model_discovery.discover_models("anthropic", "llm", force_refresh=True)
-
+    assert result.provider == "anthropic"
     assert result.source == "fallback"
-    assert result.warning == "anthropic_remote_catalog_failed"
-    assert "claude-3-5-sonnet-20241022" in result.models
+    assert result.warning == "unknown_provider_catalog_fallback"
+    assert result.models == []
+
+
+def test_unknown_provider_embedding_returns_fallback_shape(monkeypatch) -> None:
+    """Providers desconocidos en embeddings también devuelven fallback controlado."""
+    monkeypatch.setattr(model_discovery, "get_settings", lambda: _Settings())
+
+    result = model_discovery.discover_models(
+        "anthropic",
+        "embedding",
+        force_refresh=True,
+    )
+
+    assert result.provider == "anthropic"
+    assert result.source == "fallback"
+    assert result.warning == "unknown_provider_catalog_fallback"
+    assert result.models == []

@@ -88,7 +88,7 @@ class QueryView(QWidget):
 
         self.embedding_provider = QComboBox()
         self.embedding_provider.addItems(
-            ["openai", "anthropic", "gemini", "vertex_ai"]
+            ["openai", "gemini", "vertex_ai"]
         )
         self.embedding_model = QComboBox()
         self.embedding_model.setEditable(True)
@@ -102,7 +102,7 @@ class QueryView(QWidget):
         self.embedding_status_chip.setProperty("state", "ready")
 
         self.llm_provider = QComboBox()
-        self.llm_provider.addItems(["openai", "anthropic", "gemini", "vertex_ai"])
+        self.llm_provider.addItems(["openai", "gemini", "vertex_ai"])
         self.answer_model = QComboBox()
         self.answer_model.setEditable(True)
         self.answer_model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)

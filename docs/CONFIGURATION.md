@@ -10,16 +10,12 @@ escenario contenedorizado.
 
 ### LLM y proveedores
 
-- `LLM_PROVIDER`: proveedor principal de LLM para answer/verify (`openai`, `anthropic`, `gemini`, `vertex_ai`). Default: `openai`.
+- `LLM_PROVIDER`: proveedor principal de LLM para answer/verify (`openai`, `gemini`, `vertex_ai`). Default: `vertex_ai`.
 - `LLM_ANSWER_MODEL`: override del modelo de respuesta multi-provider. Default: vacio (se resuelve por provider).
 - `LLM_VERIFIER_MODEL`: override del modelo de verificacion multi-provider. Default: vacio (se resuelve por provider).
 - `LLM_VERIFY_ENABLED`: habilita la verificacion semantica de respuesta. Default: `true`.
 - `OPENAI_API_KEY`: credencial OpenAI. Default: vacio.
-- `OPENAI_ANSWER_MODEL`: fallback answer cuando provider efectivo es OpenAI. Default: `gpt-4.1-mini`.
-- `OPENAI_VERIFIER_MODEL`: fallback verifier cuando provider efectivo es OpenAI. Default: `gpt-4.1-mini`.
-- `OPENAI_VERIFY_ENABLED`: flag legacy para verificacion OpenAI. Default: `true`.
 - `OPENAI_TIMEOUT_SECONDS`: timeout de llamadas OpenAI. Default: `20`.
-- `ANTHROPIC_API_KEY`: credencial Anthropic. Default: vacio.
 - `GEMINI_API_KEY`: credencial Gemini. Default: vacio.
 - `VERTEX_AI_API_KEY`: credencial Vertex AI. Default: vacio.
 - `VERTEX_AI_PROJECT_ID`: proyecto de Vertex AI. Default: vacio.
@@ -27,9 +23,8 @@ escenario contenedorizado.
 
 ### Embeddings
 
-- `EMBEDDING_PROVIDER`: proveedor de embeddings (`openai`, `anthropic`, `gemini`, `vertex_ai`). Default: `openai`.
+- `EMBEDDING_PROVIDER`: proveedor de embeddings (`openai`, `gemini`, `vertex_ai`). Default: `vertex_ai`.
 - `EMBEDDING_MODEL`: override del modelo de embedding. Default: vacio (aplica fallback por provider).
-- `OPENAI_EMBEDDING_MODEL`: fallback OpenAI para embeddings. Default: `text-embedding-3-small`.
 
 ### Retrieval y limites de consulta
 
@@ -109,9 +104,10 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 ## Ejemplo minimo recomendado (.env local)
 
 ```dotenv
-LLM_PROVIDER=openai
-EMBEDDING_PROVIDER=openai
-OPENAI_API_KEY=your_key
+LLM_PROVIDER=vertex_ai
+EMBEDDING_PROVIDER=vertex_ai
+VERTEX_AI_API_KEY=your_token
+VERTEX_AI_PROJECT_ID=your_project
 HEALTH_CHECK_OPENAI=false
 NEO4J_URI=bolt://127.0.0.1:17687
 NEO4J_USER=neo4j

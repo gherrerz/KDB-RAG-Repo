@@ -372,115 +372,48 @@ def test_call_openai_uses_rest_responses_when_sdk_has_no_responses(monkeypatch) 
     assert result == "respuesta rest ok"
 
 
-def test_call_anthropic_falls_back_to_discovered_model(monkeypatch) -> None:
-    """Si el modelo elegido falla por disponibilidad, reintenta con catálogo descubierto."""
+def test_call_vertex_ai_returns_text_from_candidates(monkeypatch) -> None:
+    """Vertex extrae contenido de candidates/content/parts correctamente."""
 
     class _Settings:
-        anthropic_api_key = "anthropic-key"
+        vertex_ai_api_key = "vertex-token"
+        vertex_ai_project_id = "test-project"
+        vertex_ai_location = "us-central1"
 
         @staticmethod
         def resolve_llm_provider(provider: str | None = None) -> str:
-            return (provider or "anthropic").strip().lower()
+            return (provider or "vertex_ai").strip().lower()
 
         @staticmethod
         def resolve_api_key(provider: str) -> str:
             _ = provider
-            return "anthropic-key"
+            return "vertex-token"
 
         @staticmethod
         def resolve_answer_model(provider: str, override: str | None = None) -> str:
             _ = provider
-            return (override or "claude-3-5-sonnet-20241022").strip()
+            return (override or "gemini-2.0-flash").strip()
 
         @staticmethod
         def resolve_verifier_model(provider: str, override: str | None = None) -> str:
             _ = provider
-            return (override or "claude-3-5-sonnet-20241022").strip()
+            return (override or "gemini-2.0-flash").strip()
 
     class _FakeResponse:
-        def __init__(self, status_code: int, payload: dict, text: str = "") -> None:
-            self.status_code = status_code
-            self._payload = payload
-            self.text = text
-
-        def json(self) -> dict:
-            return self._payload
-
-    calls: list[str] = []
-
-    def _fake_post(*args, **kwargs):
-        _ = args
-        model = kwargs["json"]["model"]
-        calls.append(model)
-        if model == "claude-sonnet-4-5":
-            return _FakeResponse(
-                200,
-                {"content": [{"type": "text", "text": "respuesta anthropic ok"}]},
-            )
-        return _FakeResponse(
-            400,
-            {"error": {"message": f"model {model} is not available for this account"}},
-        )
-
-    monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
-    monkeypatch.setattr("coderag.llm.openai_client.requests.post", _fake_post)
-
-    class _DiscoveryResult:
-        def __init__(self) -> None:
-            self.models = ["claude-sonnet-4-5"]
-
-    monkeypatch.setattr(
-        "coderag.llm.openai_client.discover_models",
-        lambda provider, kind, force_refresh=False: _DiscoveryResult(),
-    )
-
-    client = AnswerClient(
-        provider="anthropic",
-        answer_model="claude-3-5-sonnet-20241022",
-    )
-
-    result = client._call_anthropic("claude-3-5-sonnet-20241022", "hola", timeout_seconds=5)
-
-    assert result == "respuesta anthropic ok"
-    assert calls[0] == "claude-3-5-sonnet-20241022"
-    assert "claude-sonnet-4-5" in calls
-
-
-def test_call_anthropic_raises_rich_error_message(monkeypatch) -> None:
-    """Propaga detalle de error Anthropic para diagnóstico en generation_error."""
-
-    class _Settings:
-        anthropic_api_key = "anthropic-key"
-
         @staticmethod
-        def resolve_llm_provider(provider: str | None = None) -> str:
-            return (provider or "anthropic").strip().lower()
-
-        @staticmethod
-        def resolve_api_key(provider: str) -> str:
-            _ = provider
-            return "anthropic-key"
-
-        @staticmethod
-        def resolve_answer_model(provider: str, override: str | None = None) -> str:
-            _ = provider
-            return (override or "claude-3-5-sonnet-20241022").strip()
-
-        @staticmethod
-        def resolve_verifier_model(provider: str, override: str | None = None) -> str:
-            _ = provider
-            return (override or "claude-3-5-sonnet-20241022").strip()
-
-    class _FakeResponse:
-        status_code = 429
-        text = ""
+        def raise_for_status() -> None:
+            return None
 
         @staticmethod
         def json() -> dict:
             return {
-                "error": {
-                    "message": "rate limit exceeded for your organization",
-                }
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [{"text": "respuesta vertex ok"}],
+                        }
+                    }
+                ]
             }
 
     monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
@@ -489,14 +422,48 @@ def test_call_anthropic_raises_rich_error_message(monkeypatch) -> None:
         lambda *args, **kwargs: _FakeResponse(),
     )
 
-    client = AnswerClient(provider="anthropic", answer_model="claude-3-5-sonnet-20241022")
+    client = AnswerClient(provider="vertex_ai", answer_model="gemini-2.0-flash")
+    result = client._call_vertex_ai("gemini-2.0-flash", "hola", timeout_seconds=5)
 
-    try:
-        client._call_anthropic("claude-3-5-sonnet-20241022", "hola", timeout_seconds=5)
-    except RuntimeError as exc:
-        message = str(exc)
-    else:
-        raise AssertionError("Expected RuntimeError for Anthropic HTTP 429")
+    assert result == "respuesta vertex ok"
 
-    assert "Anthropic API error 429" in message
-    assert "rate limit exceeded" in message
+
+def test_call_vertex_ai_returns_empty_when_project_not_configured(monkeypatch) -> None:
+    """Vertex devuelve vacío sin proyecto configurado y evita llamada remota."""
+
+    class _Settings:
+        vertex_ai_api_key = "vertex-token"
+        vertex_ai_project_id = ""
+        vertex_ai_location = "us-central1"
+
+        @staticmethod
+        def resolve_llm_provider(provider: str | None = None) -> str:
+            return (provider or "vertex_ai").strip().lower()
+
+        @staticmethod
+        def resolve_api_key(provider: str) -> str:
+            _ = provider
+            return "vertex-token"
+
+        @staticmethod
+        def resolve_answer_model(provider: str, override: str | None = None) -> str:
+            _ = provider
+            return (override or "gemini-2.0-flash").strip()
+
+        @staticmethod
+        def resolve_verifier_model(provider: str, override: str | None = None) -> str:
+            _ = provider
+            return (override or "gemini-2.0-flash").strip()
+
+    monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
+
+    def _unexpected_post(*args, **kwargs):
+        _ = args, kwargs
+        raise AssertionError("requests.post should not be called without project")
+
+    monkeypatch.setattr("coderag.llm.openai_client.requests.post", _unexpected_post)
+
+    client = AnswerClient(provider="vertex_ai", answer_model="gemini-2.0-flash")
+    result = client._call_vertex_ai("gemini-2.0-flash", "hola", timeout_seconds=5)
+
+    assert result == ""

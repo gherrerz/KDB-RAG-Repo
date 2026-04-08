@@ -32,12 +32,12 @@ def test_ingestion_provider_autofill_and_warning(
 
     class _Settings:
         def embedding_provider_capabilities(self, provider: str) -> dict[str, str | bool]:
-            if provider == "anthropic":
+            if provider == "vertex_ai":
                 return {
                     "provider": provider,
-                    "supported": False,
+                    "supported": True,
                     "configured": False,
-                    "reason": "provider_without_embedding_backend",
+                    "reason": "missing_vertex_ai_api_key_or_project",
                 }
             return {
                 "provider": provider,
@@ -59,11 +59,11 @@ def test_ingestion_provider_autofill_and_warning(
                 source="remote",
                 warning=None,
             )
-        if provider == "anthropic" and kind == "embedding":
+        if provider == "vertex_ai" and kind == "embedding":
             return UIModelCatalogResult(
-                models=["text-embedding-3-small", "text-embedding-3-large"],
+                models=["text-embedding-005", "text-multilingual-embedding-002"],
                 source="fallback",
-                warning="provider_without_embedding_backend",
+                warning="missing_vertex_ai_api_key_or_project",
             )
         return UIModelCatalogResult(
             models=["text-embedding-3-small"],
@@ -87,10 +87,10 @@ def test_ingestion_provider_autofill_and_warning(
     assert view.embedding_status_chip.text() == "Embeddings: Listo"
     assert view.embedding_status_chip.property("state") == "ready"
 
-    view.embedding_provider.setCurrentText("anthropic")
-    assert "fallback" in view.embedding_warning.text().lower()
-    assert "fallback" in view.embedding_status_chip.text().lower()
-    assert view.embedding_status_chip.property("state") == "warning"
+    view.embedding_provider.setCurrentText("vertex_ai")
+    assert "no configurado" in view.embedding_warning.text().lower()
+    assert "no listo" in view.embedding_status_chip.text().lower()
+    assert view.embedding_status_chip.property("state") == "blocked"
 
 
 def test_query_provider_autofill_and_warnings(
@@ -116,14 +116,14 @@ def test_query_provider_autofill_and_warnings(
             }
 
         def llm_provider_capabilities(self, provider: str) -> dict[str, str | bool]:
-            if provider == "anthropic":
+            if provider == "gemini":
                 return {
                     "provider": provider,
                     "supported": True,
                     "configured": False,
                     "answer": True,
                     "verify": True,
-                    "reason": "missing_anthropic_api_key",
+                    "reason": "missing_gemini_api_key",
                 }
             return {
                 "provider": provider,
@@ -147,11 +147,11 @@ def test_query_provider_autofill_and_warnings(
                 source="fallback",
                 warning="missing_vertex_ai_api_key_or_project",
             )
-        if provider == "anthropic" and kind == "llm":
+        if provider == "gemini" and kind == "llm":
             return UIModelCatalogResult(
-                models=["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+                models=["gemini-2.0-flash", "gemini-2.0-flash-lite"],
                 source="fallback",
-                warning="missing_anthropic_api_key",
+                warning="missing_gemini_api_key",
             )
         return UIModelCatalogResult(
             models=["gpt-4.1-mini"],
@@ -173,11 +173,11 @@ def test_query_provider_autofill_and_warnings(
     assert "no listo" in view.embedding_status_chip.text().lower()
     assert view.embedding_status_chip.property("state") == "blocked"
 
-    view.llm_provider.setCurrentText("anthropic")
-    assert view.answer_model.currentText() == "claude-3-5-sonnet-20241022"
-    assert view.verifier_model.currentText() == "claude-3-5-sonnet-20241022"
+    view.llm_provider.setCurrentText("gemini")
+    assert view.answer_model.currentText() == "gemini-2.0-flash"
+    assert view.verifier_model.currentText() == "gemini-2.0-flash"
     assert view.answer_model.count() >= 2
-    assert "claude-3-5-haiku-20241022" in [
+    assert "gemini-2.0-flash-lite" in [
         view.answer_model.itemText(i) for i in range(view.answer_model.count())
     ]
     assert "no configurado" in view.llm_warning.text().lower()
@@ -336,20 +336,20 @@ def test_query_vertex_refresh_keeps_embedding_and_llm_catalogs(
 
 def test_remote_catalog_hint_helper_filters_expected_fallbacks() -> None:
     """No muestra hint remoto para fallback esperado por capabilities/provider."""
-    assert not should_show_remote_catalog_fallback_hint("anthropic_embedding_unsupported")
-    assert not should_show_remote_catalog_fallback_hint("missing_anthropic_api_key")
-    assert should_show_remote_catalog_fallback_hint("anthropic_remote_catalog_failed")
+    assert not should_show_remote_catalog_fallback_hint("provider_without_embedding_backend")
+    assert not should_show_remote_catalog_fallback_hint("missing_gemini_api_key")
+    assert should_show_remote_catalog_fallback_hint("gemini_rest_catalog_failed")
 
 
-def test_ingestion_anthropic_embedding_does_not_show_remote_failure_hint(
+def test_ingestion_openai_without_embedding_backend_hides_remote_failure_hint(
     monkeypatch: pytest.MonkeyPatch,
     qapp: QApplication,
 ) -> None:
-    """Anthropic embeddings usa fallback esperado sin warning remoto adicional."""
+    """Sin backend de embeddings, la UI no muestra hint de fallo remoto."""
 
     class _Settings:
         def embedding_provider_capabilities(self, provider: str) -> dict[str, str | bool]:
-            if provider == "anthropic":
+            if provider == "openai":
                 return {
                     "provider": provider,
                     "supported": False,
@@ -370,11 +370,11 @@ def test_ingestion_anthropic_embedding_does_not_show_remote_failure_hint(
         force_refresh: bool = False,
     ) -> UIModelCatalogResult:
         _ = force_refresh
-        if provider == "anthropic" and kind == "embedding":
+        if provider == "openai" and kind == "embedding":
             return UIModelCatalogResult(
                 models=["text-embedding-3-small", "text-embedding-3-large"],
                 source="fallback",
-                warning="anthropic_embedding_unsupported",
+                warning="provider_without_embedding_backend",
             )
         return UIModelCatalogResult(
             models=["text-embedding-3-small"],
@@ -390,18 +390,18 @@ def test_ingestion_anthropic_embedding_does_not_show_remote_failure_hint(
     )
 
     view = IngestionView()
-    view.embedding_provider.setCurrentText("anthropic")
+    view.embedding_provider.setCurrentText("openai")
 
     warning_text = view.embedding_warning.text().lower()
     assert "catalogo remoto" not in warning_text
     assert "fallback" in warning_text
 
 
-def test_query_anthropic_remote_catalog_replaces_stale_default(
+def test_query_vertex_remote_catalog_replaces_stale_default(
     monkeypatch: pytest.MonkeyPatch,
     qapp: QApplication,
 ) -> None:
-    """Con catálogo remoto/cache, QueryView no debe inyectar defaults legacy fuera de catálogo."""
+    """Con catálogo remoto, QueryView no debe inyectar defaults fuera de catálogo."""
 
     class _Settings:
         def embedding_provider_capabilities(
@@ -432,9 +432,9 @@ def test_query_anthropic_remote_catalog_replaces_stale_default(
         force_refresh: bool = False,
     ) -> UIModelCatalogResult:
         _ = force_refresh
-        if provider == "anthropic" and kind == "llm":
+        if provider == "vertex_ai" and kind == "llm":
             return UIModelCatalogResult(
-                models=["claude-sonnet-4-5", "claude-haiku-4-5"],
+                models=["gemini-2.5-pro", "gemini-2.5-flash"],
                 source="remote",
             )
         return UIModelCatalogResult(
@@ -450,7 +450,7 @@ def test_query_anthropic_remote_catalog_replaces_stale_default(
     )
 
     view = QueryView()
-    view.llm_provider.setCurrentText("anthropic")
+    view.llm_provider.setCurrentText("vertex_ai")
 
     answer_models = [
         view.answer_model.itemText(i) for i in range(view.answer_model.count())
@@ -459,8 +459,8 @@ def test_query_anthropic_remote_catalog_replaces_stale_default(
         view.verifier_model.itemText(i) for i in range(view.verifier_model.count())
     ]
 
-    assert view.answer_model.currentText() == "claude-sonnet-4-5"
-    assert view.verifier_model.currentText() == "claude-sonnet-4-5"
-    assert answer_models == ["claude-sonnet-4-5", "claude-haiku-4-5"]
-    assert verifier_models == ["claude-sonnet-4-5", "claude-haiku-4-5"]
-    assert "claude-3-5-sonnet-20241022" not in answer_models
+    assert view.answer_model.currentText() == "gemini-2.5-pro"
+    assert view.verifier_model.currentText() == "gemini-2.5-pro"
+    assert answer_models == ["gemini-2.5-pro", "gemini-2.5-flash"]
+    assert verifier_models == ["gemini-2.5-pro", "gemini-2.5-flash"]
+    assert "gemini-2.0-flash" not in answer_models
