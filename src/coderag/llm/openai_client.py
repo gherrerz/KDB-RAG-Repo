@@ -517,11 +517,13 @@ class AnswerClient:
             resolved_use_case = (use_case_id or settings.vertex_ai_label_use_case_id).strip()
             request_labels = build_vertex_labels(
                 enabled=bool(settings.vertex_ai_labels_enabled),
-                namespace=str(settings.vertex_ai_label_namespace),
                 service=str(settings.vertex_ai_label_service),
                 use_case_id=resolved_use_case,
                 model_name=model_name,
                 service_account_email=auth_context.service_account_email,
+                service_account_label=str(
+                    getattr(settings, "vertex_ai_label_service_account", "")
+                ),
                 overrides=labels,
             )
             if request_labels:

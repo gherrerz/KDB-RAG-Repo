@@ -86,23 +86,26 @@ def _normalize_label_value(label_value: str) -> str:
 def build_vertex_labels(
     *,
     enabled: bool,
-    namespace: str,
     service: str,
     use_case_id: str,
     model_name: str,
     service_account_email: str,
+    service_account_label: str | None = None,
     overrides: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Construye labels base de Vertex y permite overrides opcionales."""
     if not enabled:
         return {}
 
+    resolved_service_account = (service_account_label or "").strip()
+    if not resolved_service_account:
+        resolved_service_account = service_account_email.replace("@", "_at_")
+
     labels: dict[str, str] = {
-        "namespace": namespace,
         "service": service,
         "use_case_id": use_case_id,
         "model_name": model_name,
-        "service_account": service_account_email.replace("@", "_at_"),
+        "service_account": resolved_service_account,
     }
 
     if overrides:

@@ -331,11 +331,13 @@ class EmbeddingClient:
         ).strip()
         request_labels = build_vertex_labels(
             enabled=bool(getattr(settings, "vertex_ai_labels_enabled", True)),
-            namespace=str(getattr(settings, "vertex_ai_label_namespace", "coderag")),
             service=str(getattr(settings, "vertex_ai_label_service", "kdb-rag")),
             use_case_id=resolved_use_case,
             model_name=model_name,
             service_account_email=auth_context.service_account_email,
+            service_account_label=str(
+                getattr(settings, "vertex_ai_label_service_account", "")
+            ),
             overrides=labels,
         )
 

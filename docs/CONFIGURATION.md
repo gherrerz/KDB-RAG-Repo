@@ -22,8 +22,8 @@ escenario contenedorizado.
 - `VERTEX_AI_PROJECT_ID`: proyecto de Vertex AI. Default: vacio.
 - `VERTEX_AI_LOCATION`: region de Vertex AI. Default: `us-central1`.
 - `VERTEX_AI_LABELS_ENABLED`: habilita labels de request en llamadas Vertex AI. Default: `true`.
-- `VERTEX_AI_LABEL_NAMESPACE`: namespace base para labels Vertex. Default: `coderag`.
 - `VERTEX_AI_LABEL_SERVICE`: nombre de servicio para labels Vertex. Default: `kdb-rag`.
+- `VERTEX_AI_LABEL_SERVICE_ACCOUNT`: override opcional del label `service_account` (si está vacío usa el email del Service Account autenticado). Default: vacio.
 - `VERTEX_AI_LABEL_USE_CASE_ID`: use case base para labels Vertex. Default: `rag_query`.
 - `VERTEX_AI_CORRELATION_ID_ENABLED`: agrega `x-correlation-id` por request Vertex. Default: `true`.
 
@@ -117,8 +117,8 @@ GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
 VERTEX_AI_PROJECT_ID=your_project
 VERTEX_AI_LOCATION=us-central1
 VERTEX_AI_LABELS_ENABLED=true
-VERTEX_AI_LABEL_NAMESPACE=coderag
 VERTEX_AI_LABEL_SERVICE=kdb-rag
+VERTEX_AI_LABEL_SERVICE_ACCOUNT=
 VERTEX_AI_LABEL_USE_CASE_ID=rag_query
 VERTEX_AI_CORRELATION_ID_ENABLED=true
 HEALTH_CHECK_OPENAI=false

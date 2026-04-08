@@ -45,13 +45,13 @@ class Settings(BaseSettings):
         default=True,
         alias="VERTEX_AI_LABELS_ENABLED",
     )
-    vertex_ai_label_namespace: str = Field(
-        default="coderag",
-        alias="VERTEX_AI_LABEL_NAMESPACE",
-    )
     vertex_ai_label_service: str = Field(
         default="kdb-rag",
         alias="VERTEX_AI_LABEL_SERVICE",
+    )
+    vertex_ai_label_service_account: str = Field(
+        default="",
+        alias="VERTEX_AI_LABEL_SERVICE_ACCOUNT",
     )
     vertex_ai_label_use_case_id: str = Field(
         default="rag_query",

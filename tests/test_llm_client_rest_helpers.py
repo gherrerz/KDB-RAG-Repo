@@ -383,7 +383,6 @@ def test_call_vertex_ai_returns_text_from_candidates(monkeypatch) -> None:
         vertex_ai_project_id = "test-project"
         vertex_ai_location = "us-central1"
         vertex_ai_labels_enabled = True
-        vertex_ai_label_namespace = "coderag"
         vertex_ai_label_service = "kdb-rag"
         vertex_ai_label_use_case_id = "rag_query"
         vertex_ai_correlation_id_enabled = False
@@ -511,7 +510,6 @@ def test_call_vertex_ai_fallbacks_when_selected_model_not_found(monkeypatch) -> 
         vertex_ai_project_id = "test-project"
         vertex_ai_location = "us-central1"
         vertex_ai_labels_enabled = True
-        vertex_ai_label_namespace = "coderag"
         vertex_ai_label_service = "kdb-rag"
         vertex_ai_label_use_case_id = "rag_query"
         vertex_ai_correlation_id_enabled = False

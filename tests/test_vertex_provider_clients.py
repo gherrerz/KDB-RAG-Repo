@@ -19,7 +19,6 @@ def test_embedding_vertex_uses_predict_endpoint(monkeypatch: pytest.MonkeyPatch)
         vertex_ai_project_id = "demo-proj"
         vertex_ai_location = "us-central1"
         vertex_ai_labels_enabled = True
-        vertex_ai_label_namespace = "coderag"
         vertex_ai_label_service = "kdb-rag"
         vertex_ai_label_use_case_id = "rag_embedding"
         vertex_ai_correlation_id_enabled = False

@@ -10,8 +10,8 @@ data:
   GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/google/service-account.json
   VERTEX_AI_LOCATION: us-central1
   VERTEX_AI_LABELS_ENABLED: "true"
-  VERTEX_AI_LABEL_NAMESPACE: qa-anthos
   VERTEX_AI_LABEL_SERVICE: webspec-coipo
+  VERTEX_AI_LABEL_SERVICE_ACCOUNT: ""
   VERTEX_AI_LABEL_USE_CASE_ID: tbd
   VERTEX_AI_CORRELATION_ID_ENABLED: "true"
   CHROMA_PATH: /app/storage/chroma
