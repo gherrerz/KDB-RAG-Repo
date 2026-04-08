@@ -1,5 +1,7 @@
 """Pruebas unitarias para helpers REST internos del cliente LLM."""
 
+import requests
+
 from coderag.llm.openai_client import (
     AnswerClient,
     _build_generate_content_payload,
@@ -374,11 +376,17 @@ def test_call_openai_uses_rest_responses_when_sdk_has_no_responses(monkeypatch) 
 
 def test_call_vertex_ai_returns_text_from_candidates(monkeypatch) -> None:
     """Vertex extrae contenido de candidates/content/parts correctamente."""
+    captured: dict[str, object] = {}
 
     class _Settings:
-        vertex_ai_api_key = "vertex-token"
+        google_application_credentials = "C:/fake/service-account.json"
         vertex_ai_project_id = "test-project"
         vertex_ai_location = "us-central1"
+        vertex_ai_labels_enabled = True
+        vertex_ai_label_namespace = "coderag"
+        vertex_ai_label_service = "kdb-rag"
+        vertex_ai_label_use_case_id = "rag_query"
+        vertex_ai_correlation_id_enabled = False
 
         @staticmethod
         def resolve_llm_provider(provider: str | None = None) -> str:
@@ -387,7 +395,7 @@ def test_call_vertex_ai_returns_text_from_candidates(monkeypatch) -> None:
         @staticmethod
         def resolve_api_key(provider: str) -> str:
             _ = provider
-            return "vertex-token"
+            return ""
 
         @staticmethod
         def resolve_answer_model(provider: str, override: str | None = None) -> str:
@@ -398,6 +406,9 @@ def test_call_vertex_ai_returns_text_from_candidates(monkeypatch) -> None:
         def resolve_verifier_model(provider: str, override: str | None = None) -> str:
             _ = provider
             return (override or "gemini-2.0-flash").strip()
+
+        def is_vertex_ai_configured(self) -> bool:
+            return bool(self.vertex_ai_project_id and self.google_application_credentials)
 
     class _FakeResponse:
         @staticmethod
@@ -418,21 +429,41 @@ def test_call_vertex_ai_returns_text_from_candidates(monkeypatch) -> None:
 
     monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
     monkeypatch.setattr(
-        "coderag.llm.openai_client.requests.post",
-        lambda *args, **kwargs: _FakeResponse(),
+        "coderag.llm.openai_client.resolve_vertex_auth_context",
+        lambda _path: type(
+            "_Auth",
+            (),
+            {
+                "access_token": "sa-token",
+                "service_account_email": "qa-anthos@example.iam.gserviceaccount.com",
+            },
+        )(),
     )
+    def _fake_post(*args, **kwargs):
+        _ = args
+        captured["headers"] = kwargs.get("headers")
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse()
+
+    monkeypatch.setattr("coderag.llm.openai_client.requests.post", _fake_post)
 
     client = AnswerClient(provider="vertex_ai", answer_model="gemini-2.0-flash")
     result = client._call_vertex_ai("gemini-2.0-flash", "hola", timeout_seconds=5)
 
     assert result == "respuesta vertex ok"
+    headers = captured.get("headers")
+    assert isinstance(headers, dict)
+    assert headers.get("Authorization") == "Bearer sa-token"
+    payload = captured.get("json")
+    assert isinstance(payload, dict)
+    assert payload.get("labels")
 
 
 def test_call_vertex_ai_returns_empty_when_project_not_configured(monkeypatch) -> None:
     """Vertex devuelve vacío sin proyecto configurado y evita llamada remota."""
 
     class _Settings:
-        vertex_ai_api_key = "vertex-token"
+        google_application_credentials = "C:/fake/service-account.json"
         vertex_ai_project_id = ""
         vertex_ai_location = "us-central1"
 
@@ -443,7 +474,7 @@ def test_call_vertex_ai_returns_empty_when_project_not_configured(monkeypatch) -
         @staticmethod
         def resolve_api_key(provider: str) -> str:
             _ = provider
-            return "vertex-token"
+            return ""
 
         @staticmethod
         def resolve_answer_model(provider: str, override: str | None = None) -> str:
@@ -454,6 +485,9 @@ def test_call_vertex_ai_returns_empty_when_project_not_configured(monkeypatch) -
         def resolve_verifier_model(provider: str, override: str | None = None) -> str:
             _ = provider
             return (override or "gemini-2.0-flash").strip()
+
+        def is_vertex_ai_configured(self) -> bool:
+            return bool(self.vertex_ai_project_id and self.google_application_credentials)
 
     monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
 
@@ -467,3 +501,100 @@ def test_call_vertex_ai_returns_empty_when_project_not_configured(monkeypatch) -
     result = client._call_vertex_ai("gemini-2.0-flash", "hola", timeout_seconds=5)
 
     assert result == ""
+
+
+def test_call_vertex_ai_fallbacks_when_selected_model_not_found(monkeypatch) -> None:
+    """Vertex reintenta con fallback si el modelo seleccionado devuelve 404."""
+
+    class _Settings:
+        google_application_credentials = "C:/fake/service-account.json"
+        vertex_ai_project_id = "test-project"
+        vertex_ai_location = "us-central1"
+        vertex_ai_labels_enabled = True
+        vertex_ai_label_namespace = "coderag"
+        vertex_ai_label_service = "kdb-rag"
+        vertex_ai_label_use_case_id = "rag_query"
+        vertex_ai_correlation_id_enabled = False
+
+        @staticmethod
+        def resolve_llm_provider(provider: str | None = None) -> str:
+            return (provider or "vertex_ai").strip().lower()
+
+        @staticmethod
+        def resolve_api_key(provider: str) -> str:
+            _ = provider
+            return ""
+
+        @staticmethod
+        def resolve_answer_model(provider: str, override: str | None = None) -> str:
+            _ = provider
+            return (override or "gemini-2.0-flash").strip()
+
+        @staticmethod
+        def resolve_verifier_model(provider: str, override: str | None = None) -> str:
+            _ = provider
+            return (override or "gemini-2.0-flash").strip()
+
+        def is_vertex_ai_configured(self) -> bool:
+            return bool(self.vertex_ai_project_id and self.google_application_credentials)
+
+    class _ErrorResponse:
+        status_code = 404
+
+        @staticmethod
+        def raise_for_status() -> None:
+            raise requests.HTTPError(
+                "404 Client Error: Not Found for url: "
+                "https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/"
+                "locations/us-central1/publishers/google/models/gemini-2.0-flash:generateContent"
+            )
+
+        @staticmethod
+        def json() -> dict:
+            return {}
+
+    class _OkResponse:
+        @staticmethod
+        def raise_for_status() -> None:
+            return None
+
+        @staticmethod
+        def json() -> dict:
+            return {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [{"text": "respuesta fallback ok"}],
+                        }
+                    }
+                ]
+            }
+
+    calls: list[str] = []
+
+    def _fake_post(url: str, **_kwargs):
+        calls.append(url)
+        if "gemini-2.0-flash" in url:
+            return _ErrorResponse()
+        return _OkResponse()
+
+    monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        "coderag.llm.openai_client.resolve_vertex_auth_context",
+        lambda _path: type(
+            "_Auth",
+            (),
+            {
+                "access_token": "sa-token",
+                "service_account_email": "qa-anthos@example.iam.gserviceaccount.com",
+            },
+        )(),
+    )
+    monkeypatch.setattr("coderag.llm.openai_client.requests.post", _fake_post)
+
+    client = AnswerClient(provider="vertex_ai", answer_model="gemini-2.0-flash")
+    result = client._call_vertex_ai("gemini-2.0-flash", "hola", timeout_seconds=5)
+
+    assert result == "respuesta fallback ok"
+    assert len(calls) >= 2
+    assert any("gemini-2.0-flash" in call for call in calls)

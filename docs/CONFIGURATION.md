@@ -17,9 +17,15 @@ escenario contenedorizado.
 - `OPENAI_API_KEY`: credencial OpenAI. Default: vacio.
 - `OPENAI_TIMEOUT_SECONDS`: timeout de llamadas OpenAI. Default: `20`.
 - `GEMINI_API_KEY`: credencial Gemini. Default: vacio.
-- `VERTEX_AI_API_KEY`: credencial Vertex AI. Default: vacio.
+- `VERTEX_AI_AUTH_MODE`: modo de autenticacion de Vertex AI. Default: `service_account`.
+- `GOOGLE_APPLICATION_CREDENTIALS`: ruta al JSON de Service Account para Vertex AI. Default: vacio.
 - `VERTEX_AI_PROJECT_ID`: proyecto de Vertex AI. Default: vacio.
 - `VERTEX_AI_LOCATION`: region de Vertex AI. Default: `us-central1`.
+- `VERTEX_AI_LABELS_ENABLED`: habilita labels de request en llamadas Vertex AI. Default: `true`.
+- `VERTEX_AI_LABEL_NAMESPACE`: namespace base para labels Vertex. Default: `coderag`.
+- `VERTEX_AI_LABEL_SERVICE`: nombre de servicio para labels Vertex. Default: `kdb-rag`.
+- `VERTEX_AI_LABEL_USE_CASE_ID`: use case base para labels Vertex. Default: `rag_query`.
+- `VERTEX_AI_CORRELATION_ID_ENABLED`: agrega `x-correlation-id` por request Vertex. Default: `true`.
 
 ### Embeddings
 
@@ -106,8 +112,15 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 ```dotenv
 LLM_PROVIDER=vertex_ai
 EMBEDDING_PROVIDER=vertex_ai
-VERTEX_AI_API_KEY=your_token
+VERTEX_AI_AUTH_MODE=service_account
+GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
 VERTEX_AI_PROJECT_ID=your_project
+VERTEX_AI_LOCATION=us-central1
+VERTEX_AI_LABELS_ENABLED=true
+VERTEX_AI_LABEL_NAMESPACE=coderag
+VERTEX_AI_LABEL_SERVICE=kdb-rag
+VERTEX_AI_LABEL_USE_CASE_ID=rag_query
+VERTEX_AI_CORRELATION_ID_ENABLED=true
 HEALTH_CHECK_OPENAI=false
 NEO4J_URI=bolt://127.0.0.1:17687
 NEO4J_USER=neo4j

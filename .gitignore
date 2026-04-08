@@ -60,3 +60,6 @@ benchmark_reports/
 .tmp_ingest_smoke.py
 .tmp_openapi_check.py
 .tmp_ingest_smoke.out
+
+#vertex ai credentials
+gcp_credentials_vertex.json

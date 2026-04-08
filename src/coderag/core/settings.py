@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 ProviderName = Literal["openai", "gemini", "vertex_ai"]
 HnswSpaceName = Literal["l2", "cosine"]
 IngestionExecutionMode = Literal["thread", "rq"]
+VertexAuthMode = Literal["service_account"]
 
 
 class Settings(BaseSettings):
@@ -30,9 +31,36 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="", alias="EMBEDDING_MODEL")
 
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
-    vertex_ai_api_key: str = Field(default="", alias="VERTEX_AI_API_KEY")
+    vertex_ai_auth_mode: VertexAuthMode = Field(
+        default="service_account",
+        alias="VERTEX_AI_AUTH_MODE",
+    )
+    google_application_credentials: str = Field(
+        default="",
+        alias="GOOGLE_APPLICATION_CREDENTIALS",
+    )
     vertex_ai_project_id: str = Field(default="", alias="VERTEX_AI_PROJECT_ID")
     vertex_ai_location: str = Field(default="us-central1", alias="VERTEX_AI_LOCATION")
+    vertex_ai_labels_enabled: bool = Field(
+        default=True,
+        alias="VERTEX_AI_LABELS_ENABLED",
+    )
+    vertex_ai_label_namespace: str = Field(
+        default="coderag",
+        alias="VERTEX_AI_LABEL_NAMESPACE",
+    )
+    vertex_ai_label_service: str = Field(
+        default="kdb-rag",
+        alias="VERTEX_AI_LABEL_SERVICE",
+    )
+    vertex_ai_label_use_case_id: str = Field(
+        default="rag_query",
+        alias="VERTEX_AI_LABEL_USE_CASE_ID",
+    )
+    vertex_ai_correlation_id_enabled: bool = Field(
+        default=True,
+        alias="VERTEX_AI_CORRELATION_ID_ENABLED",
+    )
     chroma_path: Path = Field(default=Path("./storage/chroma"), alias="CHROMA_PATH")
     chroma_hnsw_space: HnswSpaceName = Field(
         default="cosine",
@@ -342,12 +370,30 @@ class Settings(BaseSettings):
         if provider == "gemini":
             return self.gemini_api_key
         if provider == "vertex_ai":
-            return self.vertex_ai_api_key
+            return ""
         return self.openai_api_key
 
+    def resolve_vertex_credentials_path(self) -> Path:
+        """Resuelve y normaliza la ruta del JSON de Service Account de Vertex."""
+        raw_path = (self.google_application_credentials or "").strip()
+        if not raw_path:
+            return Path("")
+        return Path(raw_path).expanduser()
+
+    def vertex_ai_missing_reason(self) -> str:
+        """Explica por qué Vertex AI no está completamente configurado."""
+        if not self.vertex_ai_project_id:
+            return "missing_vertex_ai_api_key_or_project"
+        credentials_path = self.resolve_vertex_credentials_path()
+        if not credentials_path:
+            return "missing_vertex_ai_api_key_or_project"
+        if not credentials_path.is_file():
+            return "missing_vertex_ai_api_key_or_project"
+        return "ok"
+
     def is_vertex_ai_configured(self) -> bool:
-        """Valida si Vertex AI tiene credenciales y proyecto mínimos."""
-        return bool(self.vertex_ai_api_key and self.vertex_ai_project_id)
+        """Valida si Vertex AI tiene credenciales de SA y proyecto mínimos."""
+        return self.vertex_ai_missing_reason() == "ok"
 
     def embedding_provider_capabilities(self, provider: ProviderName) -> dict[str, str | bool]:
         """Devuelve capacidades/configuración del provider de embeddings."""
@@ -361,7 +407,7 @@ class Settings(BaseSettings):
             return {"provider": provider, "supported": True, "configured": configured, "reason": reason}
         if provider == "vertex_ai":
             configured = self.is_vertex_ai_configured()
-            reason = "ok" if configured else "missing_vertex_ai_api_key_or_project"
+            reason = "ok" if configured else self.vertex_ai_missing_reason()
             return {"provider": provider, "supported": True, "configured": configured, "reason": reason}
         return {
             "provider": provider,
@@ -395,7 +441,7 @@ class Settings(BaseSettings):
                 "reason": reason,
             }
         configured = self.is_vertex_ai_configured()
-        reason = "ok" if configured else "missing_vertex_ai_api_key_or_project"
+        reason = "ok" if configured else self.vertex_ai_missing_reason()
         return {
             "provider": provider,
             "supported": True,

@@ -15,6 +15,7 @@ from coderag.core.provider_model_catalog import (
     normalize_provider_name,
 )
 from coderag.core.settings import ProviderName, get_settings
+from coderag.core.vertex_ai import resolve_vertex_auth_context
 
 
 ModelKind = str
@@ -123,22 +124,34 @@ def _discover_openai(kind: ModelKind) -> ModelDiscoveryResult:
 def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
     """Lista modelos Vertex con estrategias remotas y fallback resiliente."""
     settings = get_settings()
-    token = settings.vertex_ai_api_key.strip()
     project_id = settings.vertex_ai_project_id.strip()
     location = settings.vertex_ai_location.strip() or "us-central1"
+    credentials_path = str(
+        getattr(settings, "google_application_credentials", "")
+    ).strip()
 
-    if not token or not project_id:
-        return _fallback("vertex_ai", kind, warning="missing_vertex_ai_api_key_or_project")
+    is_configured = (
+        settings.is_vertex_ai_configured()
+        if hasattr(settings, "is_vertex_ai_configured")
+        else bool(project_id and credentials_path)
+    )
+    if not is_configured or not project_id:
+        return _fallback(
+            "vertex_ai",
+            kind,
+            warning="missing_vertex_ai_api_key_or_project",
+        )
 
     timeout = max(1.0, float(settings.discovery_timeout_seconds))
     publisher_warning: str | None = None
+    auth_context = resolve_vertex_auth_context(credentials_path)
 
     try:
         names = _discover_vertex_publisher_names(
             project_id=project_id,
             location=location,
             timeout=timeout,
-            bearer_token=token,
+            bearer_token=auth_context.access_token,
             api_key=None,
         )
         models = _filter_models(names, kind, provider="vertex_ai")
@@ -153,28 +166,8 @@ def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
     except Exception:
         publisher_warning = "vertex_remote_catalog_failed"
 
-    # Algunos despliegues guardan API key en lugar de bearer token OAuth.
-    try:
-        names = _discover_vertex_publisher_names(
-            project_id=project_id,
-            location=location,
-            timeout=timeout,
-            bearer_token=None,
-            api_key=token,
-        )
-        models = _filter_models(names, kind, provider="vertex_ai")
-        if models:
-            return ModelDiscoveryResult(
-                provider="vertex_ai",
-                kind=kind,
-                models=models,
-                source="remote",
-            )
-    except Exception:
-        pass
-
     # Fallback remoto compatible: usa catálogo Gemini REST (preferentemente GEMINI_API_KEY).
-    for compatible_key in (settings.gemini_api_key.strip(), token):
+    for compatible_key in (settings.gemini_api_key.strip(),):
         if not compatible_key:
             continue
         try:

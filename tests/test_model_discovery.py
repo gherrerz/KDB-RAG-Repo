@@ -14,7 +14,7 @@ class _Settings:
     discovery_gemini_sdk_enabled = True
     openai_api_key = ""
     gemini_api_key = ""
-    vertex_ai_api_key = ""
+    google_application_credentials = ""
     vertex_ai_project_id = ""
     vertex_ai_location = "us-central1"
 
@@ -28,7 +28,7 @@ class _GeminiSettings(_Settings):
 class _VertexSettings(_Settings):
     """Configuración de pruebas para escenarios Vertex AI."""
 
-    vertex_ai_api_key = "vertex-token"
+    google_application_credentials = "C:/fake/service-account.json"
     gemini_api_key = "gemini-key"
     vertex_ai_project_id = "test-project"
     vertex_ai_location = "us-central1"
@@ -263,6 +263,18 @@ def test_vertex_falls_back_to_gemini_rest_when_publisher_fails(monkeypatch) -> N
     """Si publisher falla, Vertex debe intentar catálogo Gemini REST compatible."""
     settings = _VertexSettings()
     monkeypatch.setattr(model_discovery, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        model_discovery,
+        "resolve_vertex_auth_context",
+        lambda _path: type(
+            "_Auth",
+            (),
+            {
+                "access_token": "sa-token",
+                "service_account_email": "qa-anthos@example.iam.gserviceaccount.com",
+            },
+        )(),
+    )
 
     def _raise_publisher(**_kwargs):
         raise RuntimeError("publisher unavailable")

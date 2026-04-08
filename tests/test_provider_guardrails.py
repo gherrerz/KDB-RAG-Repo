@@ -360,6 +360,16 @@ def test_query_status_preflight_sends_selected_embedding_configuration(
         return _FakeResponse({"answer": "ok", "citations": [], "diagnostics": {}})
 
     monkeypatch.setattr(module.requests, "post", _fake_post)
+    monkeypatch.setattr(
+        window.query_view,
+        "is_embedding_provider_ready",
+        lambda: (True, "ok"),
+    )
+    monkeypatch.setattr(
+        window.query_view,
+        "is_llm_provider_ready",
+        lambda: (True, "ok"),
+    )
 
     window.query_view.repo_id.setCurrentText("repo-a")
     window.query_view.embedding_provider.setCurrentText("vertex_ai")

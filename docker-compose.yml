@@ -19,9 +19,15 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-vertex_ai}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      VERTEX_AI_API_KEY: ${VERTEX_AI_API_KEY:-}
+      VERTEX_AI_AUTH_MODE: ${VERTEX_AI_AUTH_MODE:-service_account}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/secrets/vertex-service-account.json
       VERTEX_AI_PROJECT_ID: ${VERTEX_AI_PROJECT_ID:-}
       VERTEX_AI_LOCATION: ${VERTEX_AI_LOCATION:-us-central1}
+      VERTEX_AI_LABELS_ENABLED: ${VERTEX_AI_LABELS_ENABLED:-true}
+      VERTEX_AI_LABEL_NAMESPACE: ${VERTEX_AI_LABEL_NAMESPACE:-coderag}
+      VERTEX_AI_LABEL_SERVICE: ${VERTEX_AI_LABEL_SERVICE:-kdb-rag}
+      VERTEX_AI_LABEL_USE_CASE_ID: ${VERTEX_AI_LABEL_USE_CASE_ID:-rag_query}
+      VERTEX_AI_CORRELATION_ID_ENABLED: ${VERTEX_AI_CORRELATION_ID_ENABLED:-true}
       CHROMA_PATH: /app/storage/chroma
       WORKSPACE_PATH: /app/storage/workspace
       NEO4J_URI: bolt://neo4j:7687
@@ -69,6 +75,7 @@ services:
       MODEL_DISCOVERY_GEMINI_SDK_ENABLED: ${MODEL_DISCOVERY_GEMINI_SDK_ENABLED:-true}
     volumes:
       - api_storage:/app/storage
+      - ${VERTEX_AI_SERVICE_ACCOUNT_FILE:-./secrets/vertex-service-account.json}:/app/secrets/vertex-service-account.json:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 20s
@@ -137,9 +144,15 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-vertex_ai}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      VERTEX_AI_API_KEY: ${VERTEX_AI_API_KEY:-}
+      VERTEX_AI_AUTH_MODE: ${VERTEX_AI_AUTH_MODE:-service_account}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/secrets/vertex-service-account.json
       VERTEX_AI_PROJECT_ID: ${VERTEX_AI_PROJECT_ID:-}
       VERTEX_AI_LOCATION: ${VERTEX_AI_LOCATION:-us-central1}
+      VERTEX_AI_LABELS_ENABLED: ${VERTEX_AI_LABELS_ENABLED:-true}
+      VERTEX_AI_LABEL_NAMESPACE: ${VERTEX_AI_LABEL_NAMESPACE:-coderag}
+      VERTEX_AI_LABEL_SERVICE: ${VERTEX_AI_LABEL_SERVICE:-kdb-rag}
+      VERTEX_AI_LABEL_USE_CASE_ID: ${VERTEX_AI_LABEL_USE_CASE_ID:-rag_query}
+      VERTEX_AI_CORRELATION_ID_ENABLED: ${VERTEX_AI_CORRELATION_ID_ENABLED:-true}
       CHROMA_PATH: /app/storage/chroma
       WORKSPACE_PATH: /app/storage/workspace
       NEO4J_URI: bolt://neo4j:7687
@@ -165,6 +178,7 @@ services:
       SEMANTIC_GRAPH_TYPESCRIPT_ENABLED: ${SEMANTIC_GRAPH_TYPESCRIPT_ENABLED:-false}
     volumes:
       - api_storage:/app/storage
+      - ${VERTEX_AI_SERVICE_ACCOUNT_FILE:-./secrets/vertex-service-account.json}:/app/secrets/vertex-service-account.json:ro
     restart: unless-stopped
 
 volumes:

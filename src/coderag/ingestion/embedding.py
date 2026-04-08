@@ -4,11 +4,13 @@ import hashlib
 import logging
 from threading import Lock
 from collections.abc import Callable
+from uuid import uuid4
 
 from openai import OpenAI
 import requests
 
 from coderag.core.settings import ProviderName, get_settings
+from coderag.core.vertex_ai import build_vertex_labels, resolve_vertex_auth_context
 
 LOGGER = logging.getLogger(__name__)
 
@@ -145,12 +147,13 @@ class EmbeddingClient:
 
     def _fallback_reason(self) -> str:
         """Devuelve motivo compacto para trazabilidad de fallback."""
-        if not self.api_key:
-            return "missing_api_key"
         if self.provider == "vertex_ai":
             settings = get_settings()
-            if not getattr(settings, "vertex_ai_project_id", ""):
-                return "missing_vertex_ai_project"
+            if hasattr(settings, "is_vertex_ai_configured") and not settings.is_vertex_ai_configured():
+                return "missing_vertex_ai_api_key_or_project"
+            return "provider_runtime_error"
+        if not self.api_key:
+            return "missing_api_key"
         return "provider_runtime_error"
 
     @staticmethod
@@ -174,6 +177,8 @@ class EmbeddingClient:
         texts: list[str],
         *,
         progress_callback: Callable[[int, int], None] | None = None,
+        labels: dict[str, str] | None = None,
+        use_case_id: str | None = None,
     ) -> list[list[float]]:
         """Incruste textos con callback opcional de progreso por lotes."""
         if not texts:
@@ -189,9 +194,10 @@ class EmbeddingClient:
             has_provider_runtime = bool(self.api_key)
         elif self.provider == "vertex_ai":
             settings = get_settings()
-            has_provider_runtime = bool(
-                self.api_key and getattr(settings, "vertex_ai_project_id", "")
-            )
+            if hasattr(settings, "is_vertex_ai_configured"):
+                has_provider_runtime = bool(settings.is_vertex_ai_configured())
+            else:
+                has_provider_runtime = bool(getattr(settings, "vertex_ai_project_id", ""))
         else:
             has_provider_runtime = False
 
@@ -223,7 +229,11 @@ class EmbeddingClient:
                 elif self.provider == "gemini":
                     batch_vectors = self._embed_with_gemini_rest(batch)
                 elif self.provider == "vertex_ai":
-                    batch_vectors = self._embed_with_vertex_ai_rest(batch)
+                    batch_vectors = self._embed_with_vertex_ai_rest(
+                        batch,
+                        labels=labels,
+                        use_case_id=use_case_id,
+                    )
                 else:
                     batch_vectors = []
 
@@ -287,13 +297,28 @@ class EmbeddingClient:
         response.raise_for_status()
         return _extract_gemini_embeddings(response.json())
 
-    def _embed_with_vertex_ai_rest(self, texts: list[str]) -> list[list[float]]:
-        """Solicita embeddings a Vertex AI usando token OAuth en VERTEX_AI_API_KEY."""
+    def _embed_with_vertex_ai_rest(
+        self,
+        texts: list[str],
+        *,
+        labels: dict[str, str] | None = None,
+        use_case_id: str | None = None,
+    ) -> list[list[float]]:
+        """Solicita embeddings a Vertex AI usando Service Account."""
         settings = get_settings()
         project = getattr(settings, "vertex_ai_project_id", "")
         location = getattr(settings, "vertex_ai_location", "us-central1")
-        if not self.api_key or not project:
+        credentials_path = str(
+            getattr(settings, "google_application_credentials", "")
+        ).strip()
+        if not project:
             return []
+        if hasattr(settings, "is_vertex_ai_configured") and not settings.is_vertex_ai_configured():
+            return []
+        if not credentials_path:
+            return []
+
+        auth_context = resolve_vertex_auth_context(credentials_path)
 
         model_name = _vertex_model_name(self.model)
 
@@ -301,16 +326,40 @@ class EmbeddingClient:
             f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/"
             f"locations/{location}/publishers/google/models/{model_name}:predict"
         )
+        resolved_use_case = (
+            use_case_id or getattr(settings, "vertex_ai_label_use_case_id", "rag_embedding")
+        ).strip()
+        request_labels = build_vertex_labels(
+            enabled=bool(getattr(settings, "vertex_ai_labels_enabled", True)),
+            namespace=str(getattr(settings, "vertex_ai_label_namespace", "coderag")),
+            service=str(getattr(settings, "vertex_ai_label_service", "kdb-rag")),
+            use_case_id=resolved_use_case,
+            model_name=model_name,
+            service_account_email=auth_context.service_account_email,
+            overrides=labels,
+        )
+
         payload = {
             "instances": [{"content": text} for text in texts],
         }
+        if request_labels:
+            payload["labels"] = request_labels
+
+        correlation_id = None
+        if bool(getattr(settings, "vertex_ai_correlation_id_enabled", False)):
+            correlation_id = str(uuid4())
+
+        headers = {
+            "Authorization": f"Bearer {auth_context.access_token}",
+            "Content-Type": "application/json",
+        }
+        if correlation_id:
+            headers["x-correlation-id"] = correlation_id
+
         response = requests.post(
             url,
             json=payload,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             timeout=_timeout_value(getattr(get_settings(), "openai_timeout_seconds", 20.0)),
         )
         response.raise_for_status()

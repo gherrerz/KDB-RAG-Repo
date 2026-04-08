@@ -1,14 +1,17 @@
 """Envoltorio de cliente OpenAI para generación y validación de respuestas."""
 
 import re
+import logging
 from threading import Lock
 import unicodedata
+from uuid import uuid4
 
 from openai import OpenAI
 import requests
 
 from coderag.core.provider_model_catalog import default_llm_model, llm_models_for_provider
 from coderag.core.settings import ProviderName, get_settings
+from coderag.core.vertex_ai import build_vertex_labels, resolve_vertex_auth_context
 from coderag.llm.prompts import (
     SYSTEM_PROMPT,
     build_answer_prompt,
@@ -17,6 +20,7 @@ from coderag.llm.prompts import (
 
 
 UNAVAILABLE_ANSWER_TEXT = "No se encontró información en el repositorio."
+LOGGER = logging.getLogger(__name__)
 
 
 def _normalize_verifier_result(value: str) -> str:
@@ -87,14 +91,18 @@ def _vertex_model_name(model: str) -> str:
 def _build_generate_content_payload(prompt: str, *, vertex: bool) -> dict:
     """Construye payload generateContent para Gemini o Vertex."""
     system_key = "systemInstruction" if vertex else "system_instruction"
+    content_payload: dict[str, object] = {
+        "parts": [{"text": prompt}],
+    }
+    if vertex:
+        # Vertex con modelos Gemini 2.5 requiere role explícito en contents.
+        content_payload["role"] = "user"
     return {
         system_key: {
             "parts": [{"text": SYSTEM_PROMPT}],
         },
         "contents": [
-            {
-                "parts": [{"text": prompt}],
-            }
+            content_payload
         ],
         "generationConfig": {
             "temperature": 0,
@@ -191,6 +199,23 @@ def _is_openai_responses_payload_error(exc: Exception) -> bool:
     )
 
 
+def _is_vertex_model_selection_error(exc: Exception) -> bool:
+    """Detecta errores de Vertex por modelo no disponible/no encontrado."""
+    message = str(exc).lower()
+    if "404" in message and "models/" in message:
+        return True
+    return (
+        "model" in message
+        and (
+            "not found" in message
+            or "not available" in message
+            or "does not exist" in message
+            or "unsupported" in message
+            or "not enabled" in message
+        )
+    )
+
+
 def _openai_model_candidates(primary_model: str) -> list[str]:
     """Construye candidatos de modelo con fallback determinista y sin duplicados."""
     candidates: list[str] = []
@@ -198,6 +223,27 @@ def _openai_model_candidates(primary_model: str) -> list[str]:
         primary_model,
         default_llm_model("openai"),
         *llm_models_for_provider("openai"),
+    ]:
+        value = item.strip()
+        if value and value not in candidates:
+            candidates.append(value)
+    return candidates
+
+
+def _vertex_model_candidates(primary_model: str) -> list[str]:
+    """Construye candidatos de modelo Vertex con fallback determinista."""
+    candidates: list[str] = []
+    resilient_fallbacks = [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]
+    for item in [
+        primary_model,
+        default_llm_model("vertex_ai"),
+        *llm_models_for_provider("vertex_ai"),
+        *resilient_fallbacks,
     ]:
         value = item.strip()
         if value and value not in candidates:
@@ -277,6 +323,9 @@ class AnswerClient:
         model: str,
         prompt: str,
         timeout_seconds: float | None = None,
+        *,
+        labels: dict[str, str] | None = None,
+        use_case_id: str | None = None,
     ) -> str:
         """Ejecute la llamada API del provider activo y devuelva texto plano."""
         if not self.enabled:
@@ -287,7 +336,13 @@ class AnswerClient:
         if self.provider == "gemini":
             return self._call_gemini(model, prompt, timeout_seconds=timeout_seconds)
         if self.provider == "vertex_ai":
-            return self._call_vertex_ai(model, prompt, timeout_seconds=timeout_seconds)
+            return self._call_vertex_ai(
+                model,
+                prompt,
+                timeout_seconds=timeout_seconds,
+                labels=labels,
+                use_case_id=use_case_id,
+            )
         return UNAVAILABLE_ANSWER_TEXT
 
     def _call_openai(
@@ -419,39 +474,95 @@ class AnswerClient:
         model: str,
         prompt: str,
         timeout_seconds: float | None = None,
+        *,
+        labels: dict[str, str] | None = None,
+        use_case_id: str | None = None,
     ) -> str:
-        """Llama a Vertex AI generateContent usando token OAuth en VERTEX_AI_API_KEY."""
+        """Llama a Vertex AI generateContent usando Service Account."""
         settings = get_settings()
         project = getattr(settings, "vertex_ai_project_id", "")
         location = getattr(settings, "vertex_ai_location", "us-central1")
-        if not self.api_key or not project:
+        credentials_path = str(
+            getattr(settings, "google_application_credentials", "")
+        ).strip()
+        if not project:
+            return ""
+        if hasattr(settings, "is_vertex_ai_configured") and not settings.is_vertex_ai_configured():
+            return ""
+        if not credentials_path:
             return ""
 
-        model_name = _vertex_model_name(model)
+        auth_context = resolve_vertex_auth_context(credentials_path)
 
-        url = (
-            f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/"
-            f"locations/{location}/publishers/google/models/{model_name}:generateContent"
-        )
-        payload = _build_generate_content_payload(prompt, vertex=True)
         timeout_value = _timeout_value(timeout_seconds)
-        response = requests.post(
-            url,
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=timeout_value,
-        )
-        response.raise_for_status()
-        return _extract_generative_text(response.json())
+        correlation_id = None
+        if bool(getattr(settings, "vertex_ai_correlation_id_enabled", False)):
+            correlation_id = str(uuid4())
+
+        headers = {
+            "Authorization": f"Bearer {auth_context.access_token}",
+            "Content-Type": "application/json",
+        }
+        if correlation_id:
+            headers["x-correlation-id"] = correlation_id
+
+        last_error: Exception | None = None
+        for candidate_model in _vertex_model_candidates(model):
+            model_name = _vertex_model_name(candidate_model)
+            url = (
+                f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/"
+                f"locations/{location}/publishers/google/models/{model_name}:generateContent"
+            )
+            payload = _build_generate_content_payload(prompt, vertex=True)
+            resolved_use_case = (use_case_id or settings.vertex_ai_label_use_case_id).strip()
+            request_labels = build_vertex_labels(
+                enabled=bool(settings.vertex_ai_labels_enabled),
+                namespace=str(settings.vertex_ai_label_namespace),
+                service=str(settings.vertex_ai_label_service),
+                use_case_id=resolved_use_case,
+                model_name=model_name,
+                service_account_email=auth_context.service_account_email,
+                overrides=labels,
+            )
+            if request_labels:
+                payload["labels"] = request_labels
+
+            try:
+                response = requests.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=timeout_value,
+                )
+                response.raise_for_status()
+                if correlation_id:
+                    LOGGER.debug(
+                        "Vertex request completed correlation_id=%s model=%s",
+                        correlation_id,
+                        candidate_model,
+                    )
+                return _extract_generative_text(response.json())
+            except Exception as exc:
+                last_error = exc
+                if _is_vertex_model_selection_error(exc):
+                    LOGGER.warning(
+                        "Vertex model unavailable model=%s; trying next fallback candidate.",
+                        candidate_model,
+                    )
+                    continue
+                raise
+
+        if last_error is not None:
+            raise last_error
+        return ""
 
     def answer(
         self,
         query: str,
         context: str,
         timeout_seconds: float | None = None,
+        *,
+        labels: dict[str, str] | None = None,
     ) -> str:
         """Genere una respuesta basada en el contexto para una pregunta de un usuario."""
         prompt = build_answer_prompt(query=query, context=context)
@@ -459,6 +570,8 @@ class AnswerClient:
             self.answer_model,
             prompt,
             timeout_seconds=timeout_seconds,
+            labels=labels,
+            use_case_id="query_answer",
         )
 
     @property
@@ -480,6 +593,8 @@ class AnswerClient:
         answer: str,
         context: str,
         timeout_seconds: float | None = None,
+        *,
+        labels: dict[str, str] | None = None,
     ) -> bool:
         """Valida si la respuesta está sustentada en el contexto proporcionado."""
         if not self.enabled:
@@ -490,5 +605,7 @@ class AnswerClient:
             self.verifier_model,
             prompt,
             timeout_seconds=timeout_seconds,
+            labels=labels,
+            use_case_id="query_verify",
         )
         return _is_verifier_result_valid(result)

@@ -50,6 +50,7 @@ kubectl apply -k k8s/overlays/cloud-with-redis
 3. Replace placeholder secret values in:
    - `k8s/base/api-secret.yaml`
    - `k8s/base/neo4j-secret.yaml`
+  - Define `service-account.json` in `k8s/base/api-secret.yaml` for Vertex AI.
 4. Update ingress host/TLS in `k8s/overlays/cloud/ingress.yaml`.
 5. Tune CPU/memory requests/limits and PVC sizes to your workload.
 

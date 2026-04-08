@@ -41,6 +41,21 @@ py -3.12 -m venv .venv
 copy .env.example .env
 ```
 
+Configura credenciales de Vertex AI con Service Account en `.env`:
+
+```powershell
+$env:VERTEX_AI_SERVICE_ACCOUNT_FILE = 'C:/ruta/segura/service-account.json'
+```
+
+Variables mínimas en `.env` para Vertex:
+
+```dotenv
+VERTEX_AI_AUTH_MODE=service_account
+GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/vertex-service-account.json
+VERTEX_AI_PROJECT_ID=your_project
+VERTEX_AI_LOCATION=us-central1
+```
+
 2. Levanta stack local con Docker Compose (API + Neo4j).
 
 ```powershell
