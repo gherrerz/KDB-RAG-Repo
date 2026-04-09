@@ -63,3 +63,4 @@ benchmark_reports/
 
 #vertex ai credentials
 gcp_credentials_vertex.json
+gcp_credentials_vertex.json.b64

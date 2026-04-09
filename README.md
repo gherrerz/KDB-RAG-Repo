@@ -51,7 +51,7 @@ Variables mínimas en `.env` para Vertex:
 
 ```dotenv
 VERTEX_AI_AUTH_MODE=service_account
-GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/vertex-service-account.json
+VERTEX_AI_SERVICE_ACCOUNT_JSON_B64=<base64_json_sa>
 VERTEX_AI_PROJECT_ID=your_project
 VERTEX_AI_LOCATION=us-central1
 ```

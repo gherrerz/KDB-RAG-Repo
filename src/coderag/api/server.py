@@ -28,6 +28,7 @@ from coderag.core.storage_health import (
     get_repo_query_status,
     run_storage_preflight,
 )
+from coderag.core.settings import get_settings
 from coderag.jobs.worker import IngestionConflictError, JobManager
 from coderag.llm.model_discovery import discover_models
 
@@ -35,6 +36,9 @@ from coderag.llm.model_discovery import discover_models
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Ejecuta validación estricta de storage durante el arranque de la API."""
+    settings = get_settings()
+    if hasattr(settings, "decode_vertex_service_account_b64"):
+        settings.decode_vertex_service_account_b64()
     report = ensure_storage_ready(context="startup", force=True)
     app.state.storage_health = report
     yield

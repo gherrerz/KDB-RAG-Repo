@@ -482,17 +482,22 @@ class AnswerClient:
         settings = get_settings()
         project = getattr(settings, "vertex_ai_project_id", "")
         location = getattr(settings, "vertex_ai_location", "us-central1")
-        credentials_path = str(
-            getattr(settings, "google_application_credentials", "")
-        ).strip()
+        if hasattr(settings, "resolve_vertex_credentials_reference"):
+            credentials_source = str(
+                settings.resolve_vertex_credentials_reference()
+            ).strip()
+        else:
+            credentials_source = str(
+                getattr(settings, "vertex_ai_service_account_json_b64", "")
+            ).strip()
         if not project:
             return ""
         if hasattr(settings, "is_vertex_ai_configured") and not settings.is_vertex_ai_configured():
             return ""
-        if not credentials_path:
+        if not credentials_source:
             return ""
 
-        auth_context = resolve_vertex_auth_context(credentials_path)
+        auth_context = resolve_vertex_auth_context(credentials_source)
 
         timeout_value = _timeout_value(timeout_seconds)
         correlation_id = None

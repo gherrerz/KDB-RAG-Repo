@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
+import json
 import re
 from threading import Lock
 from typing import Mapping
@@ -28,27 +30,49 @@ class VertexAuthContext:
 
 
 @lru_cache(maxsize=4)
-def _load_service_account_credentials(credentials_path: str):
-    """Carga y cachea credenciales de Service Account desde archivo JSON."""
-    path = Path(credentials_path).expanduser()
-    if not path.is_file():
-        raise FileNotFoundError(
-            "No se encontró GOOGLE_APPLICATION_CREDENTIALS en "
-            f"{path}."
-        )
-    return service_account.Credentials.from_service_account_file(
-        str(path),
+def _load_service_account_credentials_from_info(serialized_info: str):
+    """Carga y cachea credenciales de Service Account desde JSON serializado."""
+    info = json.loads(serialized_info)
+    return service_account.Credentials.from_service_account_info(
+        info,
         scopes=[_CLOUD_PLATFORM_SCOPE],
     )
 
 
-def resolve_vertex_auth_context(credentials_path: str) -> VertexAuthContext:
-    """Resuelve token OAuth y email de Service Account para Vertex AI."""
-    sanitized_path = credentials_path.strip()
-    if not sanitized_path:
-        raise ValueError("GOOGLE_APPLICATION_CREDENTIALS está vacío.")
+def _decode_service_account_info_b64(payload_b64: str) -> dict[str, object]:
+    """Decodifica y valida un JSON de Service Account codificado en Base64."""
+    try:
+        decoded_bytes = base64.b64decode(payload_b64, validate=True)
+    except binascii.Error as exc:
+        raise ValueError(
+            "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 no contiene Base64 válido."
+        ) from exc
 
-    credentials = _load_service_account_credentials(sanitized_path)
+    try:
+        decoded_text = decoded_bytes.decode("utf-8")
+        payload = json.loads(decoded_text)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 no contiene JSON válido."
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 debe decodificar a un objeto JSON."
+        )
+    return payload
+
+
+def resolve_vertex_auth_context(credentials_source: str) -> VertexAuthContext:
+    """Resuelve token OAuth de Service Account desde JSON Base64."""
+    sanitized_source = credentials_source.strip()
+    if not sanitized_source:
+        raise ValueError("Faltan credenciales Vertex en VERTEX_AI_SERVICE_ACCOUNT_JSON_B64.")
+
+    service_account_info = _decode_service_account_info_b64(sanitized_source)
+    serialized_info = json.dumps(service_account_info, sort_keys=True)
+    credentials = _load_service_account_credentials_from_info(serialized_info)
+
     with _REFRESH_LOCK:
         if not credentials.valid or credentials.expired or not credentials.token:
             credentials.refresh(Request())

@@ -1,6 +1,9 @@
 """Configuración de la aplicación cargada desde variables de entorno."""
 
+import base64
+import binascii
 from functools import lru_cache
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -35,9 +38,9 @@ class Settings(BaseSettings):
         default="service_account",
         alias="VERTEX_AI_AUTH_MODE",
     )
-    google_application_credentials: str = Field(
+    vertex_ai_service_account_json_b64: str = Field(
         default="",
-        alias="GOOGLE_APPLICATION_CREDENTIALS",
+        alias="VERTEX_AI_SERVICE_ACCOUNT_JSON_B64",
     )
     vertex_ai_project_id: str = Field(default="", alias="VERTEX_AI_PROJECT_ID")
     vertex_ai_location: str = Field(default="us-central1", alias="VERTEX_AI_LOCATION")
@@ -373,21 +376,50 @@ class Settings(BaseSettings):
             return ""
         return self.openai_api_key
 
-    def resolve_vertex_credentials_path(self) -> Path:
-        """Resuelve y normaliza la ruta del JSON de Service Account de Vertex."""
-        raw_path = (self.google_application_credentials or "").strip()
-        if not raw_path:
-            return Path("")
-        return Path(raw_path).expanduser()
+    def decode_vertex_service_account_b64(self) -> dict[str, object] | None:
+        """Decodifica el JSON de Service Account desde Base64 cuando existe."""
+        raw_b64 = (self.vertex_ai_service_account_json_b64 or "").strip()
+        if not raw_b64:
+            return None
+
+        try:
+            decoded_bytes = base64.b64decode(raw_b64, validate=True)
+        except binascii.Error as exc:
+            raise ValueError(
+                "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 no contiene Base64 válido."
+            ) from exc
+
+        try:
+            decoded_text = decoded_bytes.decode("utf-8")
+            payload = json.loads(decoded_text)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 no contiene JSON válido."
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise ValueError(
+                "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 debe decodificar a un objeto JSON."
+            )
+        return payload
+
+    def resolve_vertex_credentials_reference(self) -> str:
+        """Resuelve credencial Base64 de Service Account para Vertex."""
+        raw_b64 = (self.vertex_ai_service_account_json_b64 or "").strip()
+        return raw_b64
 
     def vertex_ai_missing_reason(self) -> str:
         """Explica por qué Vertex AI no está completamente configurado."""
         if not self.vertex_ai_project_id:
             return "missing_vertex_ai_api_key_or_project"
-        credentials_path = self.resolve_vertex_credentials_path()
-        if not credentials_path:
+        raw_b64 = (self.vertex_ai_service_account_json_b64 or "").strip()
+        if not raw_b64:
             return "missing_vertex_ai_api_key_or_project"
-        if not credentials_path.is_file():
+        try:
+            decoded_payload = self.decode_vertex_service_account_b64()
+        except ValueError:
+            return "missing_vertex_ai_api_key_or_project"
+        if not decoded_payload:
             return "missing_vertex_ai_api_key_or_project"
         return "ok"
 

@@ -126,14 +126,19 @@ def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
     settings = get_settings()
     project_id = settings.vertex_ai_project_id.strip()
     location = settings.vertex_ai_location.strip() or "us-central1"
-    credentials_path = str(
-        getattr(settings, "google_application_credentials", "")
-    ).strip()
+    if hasattr(settings, "resolve_vertex_credentials_reference"):
+        credentials_source = str(
+            settings.resolve_vertex_credentials_reference()
+        ).strip()
+    else:
+        credentials_source = str(
+            getattr(settings, "vertex_ai_service_account_json_b64", "")
+        ).strip()
 
     is_configured = (
         settings.is_vertex_ai_configured()
         if hasattr(settings, "is_vertex_ai_configured")
-        else bool(project_id and credentials_path)
+        else bool(project_id and credentials_source)
     )
     if not is_configured or not project_id:
         return _fallback(
@@ -144,7 +149,7 @@ def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
 
     timeout = max(1.0, float(settings.discovery_timeout_seconds))
     publisher_warning: str | None = None
-    auth_context = resolve_vertex_auth_context(credentials_path)
+    auth_context = resolve_vertex_auth_context(credentials_source)
 
     try:
         names = _discover_vertex_publisher_names(

@@ -379,7 +379,7 @@ def test_call_vertex_ai_returns_text_from_candidates(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     class _Settings:
-        google_application_credentials = "C:/fake/service-account.json"
+        vertex_ai_service_account_json_b64 = "test-b64"
         vertex_ai_project_id = "test-project"
         vertex_ai_location = "us-central1"
         vertex_ai_labels_enabled = True
@@ -407,7 +407,7 @@ def test_call_vertex_ai_returns_text_from_candidates(monkeypatch) -> None:
             return (override or "gemini-2.0-flash").strip()
 
         def is_vertex_ai_configured(self) -> bool:
-            return bool(self.vertex_ai_project_id and self.google_application_credentials)
+            return bool(self.vertex_ai_project_id and self.vertex_ai_service_account_json_b64)
 
     class _FakeResponse:
         @staticmethod
@@ -462,7 +462,7 @@ def test_call_vertex_ai_returns_empty_when_project_not_configured(monkeypatch) -
     """Vertex devuelve vacío sin proyecto configurado y evita llamada remota."""
 
     class _Settings:
-        google_application_credentials = "C:/fake/service-account.json"
+        vertex_ai_service_account_json_b64 = "test-b64"
         vertex_ai_project_id = ""
         vertex_ai_location = "us-central1"
 
@@ -486,7 +486,7 @@ def test_call_vertex_ai_returns_empty_when_project_not_configured(monkeypatch) -
             return (override or "gemini-2.0-flash").strip()
 
         def is_vertex_ai_configured(self) -> bool:
-            return bool(self.vertex_ai_project_id and self.google_application_credentials)
+            return bool(self.vertex_ai_project_id and self.vertex_ai_service_account_json_b64)
 
     monkeypatch.setattr("coderag.llm.openai_client.get_settings", lambda: _Settings())
 
@@ -506,7 +506,7 @@ def test_call_vertex_ai_fallbacks_when_selected_model_not_found(monkeypatch) -> 
     """Vertex reintenta con fallback si el modelo seleccionado devuelve 404."""
 
     class _Settings:
-        google_application_credentials = "C:/fake/service-account.json"
+        vertex_ai_service_account_json_b64 = "test-b64"
         vertex_ai_project_id = "test-project"
         vertex_ai_location = "us-central1"
         vertex_ai_labels_enabled = True
@@ -534,7 +534,7 @@ def test_call_vertex_ai_fallbacks_when_selected_model_not_found(monkeypatch) -> 
             return (override or "gemini-2.0-flash").strip()
 
         def is_vertex_ai_configured(self) -> bool:
-            return bool(self.vertex_ai_project_id and self.google_application_credentials)
+            return bool(self.vertex_ai_project_id and self.vertex_ai_service_account_json_b64)
 
     class _ErrorResponse:
         status_code = 404

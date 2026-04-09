@@ -14,7 +14,7 @@ class _Settings:
     discovery_gemini_sdk_enabled = True
     openai_api_key = ""
     gemini_api_key = ""
-    google_application_credentials = ""
+    vertex_ai_service_account_json_b64 = ""
     vertex_ai_project_id = ""
     vertex_ai_location = "us-central1"
 
@@ -28,7 +28,7 @@ class _GeminiSettings(_Settings):
 class _VertexSettings(_Settings):
     """Configuración de pruebas para escenarios Vertex AI."""
 
-    google_application_credentials = "C:/fake/service-account.json"
+    vertex_ai_service_account_json_b64 = "test-b64"
     gemini_api_key = "gemini-key"
     vertex_ai_project_id = "test-project"
     vertex_ai_location = "us-central1"

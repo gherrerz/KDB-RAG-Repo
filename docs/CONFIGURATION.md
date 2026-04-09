@@ -18,7 +18,7 @@ escenario contenedorizado.
 - `OPENAI_TIMEOUT_SECONDS`: timeout de llamadas OpenAI. Default: `20`.
 - `GEMINI_API_KEY`: credencial Gemini. Default: vacio.
 - `VERTEX_AI_AUTH_MODE`: modo de autenticacion de Vertex AI. Default: `service_account`.
-- `GOOGLE_APPLICATION_CREDENTIALS`: ruta al JSON de Service Account para Vertex AI. Default: vacio.
+- `VERTEX_AI_SERVICE_ACCOUNT_JSON_B64`: JSON de Service Account codificado en Base64 (prioritario). Default: vacio.
 - `VERTEX_AI_PROJECT_ID`: proyecto de Vertex AI. Default: vacio.
 - `VERTEX_AI_LOCATION`: region de Vertex AI. Default: `us-central1`.
 - `VERTEX_AI_LABELS_ENABLED`: habilita labels de request en llamadas Vertex AI. Default: `true`.
@@ -113,7 +113,7 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 LLM_PROVIDER=vertex_ai
 EMBEDDING_PROVIDER=vertex_ai
 VERTEX_AI_AUTH_MODE=service_account
-GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
+VERTEX_AI_SERVICE_ACCOUNT_JSON_B64=<base64_json_sa>
 VERTEX_AI_PROJECT_ID=your_project
 VERTEX_AI_LOCATION=us-central1
 VERTEX_AI_LABELS_ENABLED=true

@@ -1,5 +1,8 @@
 """Pruebas de prioridad de resolución provider/modelo en Settings."""
 
+import base64
+import json
+
 import pytest
 
 from coderag.core.settings import Settings
@@ -113,6 +116,39 @@ def test_semantic_graph_query_flags_defaults() -> None:
     assert settings.semantic_graph_query_max_nodes == 200
     assert settings.semantic_graph_query_max_ms == 120.0
     assert settings.semantic_graph_query_fallback_to_structural is True
+
+
+def test_vertex_credentials_reference_prefers_base64() -> None:
+    """Usa la credencial Base64 de Vertex como referencia efectiva."""
+    payload = {"type": "service_account", "project_id": "demo"}
+    encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
+    settings = Settings(
+        VERTEX_AI_SERVICE_ACCOUNT_JSON_B64=encoded,
+        _env_file=None,
+    )
+
+    assert settings.resolve_vertex_credentials_reference() == encoded
+
+
+def test_decode_vertex_service_account_b64_returns_dict() -> None:
+    """Decodifica VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 a objeto JSON en runtime."""
+    payload = {
+        "type": "service_account",
+        "project_id": "demo-project",
+        "private_key_id": "key-id",
+    }
+    encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
+    settings = Settings(VERTEX_AI_SERVICE_ACCOUNT_JSON_B64=encoded, _env_file=None)
+
+    assert settings.decode_vertex_service_account_b64() == payload
+
+
+def test_decode_vertex_service_account_b64_raises_on_invalid_value() -> None:
+    """Informa error cuando VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 no es válido."""
+    settings = Settings(VERTEX_AI_SERVICE_ACCOUNT_JSON_B64="not-valid-b64", _env_file=None)
+
+    with pytest.raises(ValueError):
+        settings.decode_vertex_service_account_b64()
 
 
 def test_resolve_semantic_relation_types_filters_invalid_and_duplicates() -> None:

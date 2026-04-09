@@ -15,7 +15,7 @@ def test_embedding_vertex_uses_predict_endpoint(monkeypatch: pytest.MonkeyPatch)
         openai_embedding_model = "text-embedding-3-small"
         openai_api_key = ""
         openai_timeout_seconds = 5.0
-        google_application_credentials = "C:/fake/service-account.json"
+        vertex_ai_service_account_json_b64 = "test-b64"
         vertex_ai_project_id = "demo-proj"
         vertex_ai_location = "us-central1"
         vertex_ai_labels_enabled = True
@@ -34,7 +34,7 @@ def test_embedding_vertex_uses_predict_endpoint(monkeypatch: pytest.MonkeyPatch)
             return self.openai_api_key
 
         def is_vertex_ai_configured(self) -> bool:
-            return bool(self.vertex_ai_project_id and self.google_application_credentials)
+            return bool(self.vertex_ai_project_id and self.vertex_ai_service_account_json_b64)
 
     captured: dict[str, object] = {"url": ""}
 
@@ -82,7 +82,7 @@ def test_answer_client_vertex_enabled_requires_project(monkeypatch: pytest.Monke
 
     class _Settings:
         openai_api_key = ""
-        google_application_credentials = "C:/fake/service-account.json"
+        vertex_ai_service_account_json_b64 = "test-b64"
         vertex_ai_project_id = ""
         vertex_ai_location = "us-central1"
 
@@ -100,7 +100,7 @@ def test_answer_client_vertex_enabled_requires_project(monkeypatch: pytest.Monke
             return override or "gemini-2.0-flash"
 
         def is_vertex_ai_configured(self) -> bool:
-            return bool(self.google_application_credentials and self.vertex_ai_project_id)
+            return bool(self.vertex_ai_service_account_json_b64 and self.vertex_ai_project_id)
 
     import coderag.llm.openai_client as module
 
