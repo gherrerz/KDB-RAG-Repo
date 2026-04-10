@@ -179,6 +179,40 @@ def test_upsert_recovers_from_dimension_message_error(
     assert "Dimensión de embeddings incompatible" in message
 
 
+def test_upsert_recovers_from_collection_expect_dimension_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lanza error controlado para el formato de mismatch dimensional de Chroma v1."""
+    fake_client = _FakeClient()
+    fake_client.collections["code_symbols"] = _FakeCollection(
+        error_once=RuntimeError(
+            "Collection expecting embedding with dimension of 3072, got 768"
+        )
+    )
+
+    import coderag.ingestion.index_chroma as module
+
+    monkeypatch.setattr(
+        module.chromadb,
+        "PersistentClient",
+        lambda *args, **kwargs: fake_client,
+    )
+    module.ChromaIndex._shared_client = None
+    module.ChromaIndex._shared_collections = None
+    module.ChromaIndex._shared_path = None
+    index = ChromaIndex()
+
+    ids = ["id1", "id2"]
+    docs = ["x", "y"]
+    embeds = [[0.1, 0.2], [0.2, 0.1]]
+    metas = [{"i": 1}, {"i": 2}]
+    with pytest.raises(RuntimeError) as exc_info:
+        index.upsert("code_symbols", ids, docs, embeds, metas)
+
+    message = str(exc_info.value)
+    assert "Dimensión de embeddings incompatible" in message
+
+
 def test_delete_by_repo_id_removes_documents_from_all_collections(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

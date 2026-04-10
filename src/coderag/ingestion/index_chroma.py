@@ -25,7 +25,10 @@ def _is_dimension_mismatch_error(exc: Exception) -> bool:
     if isinstance(exc, InvalidDimensionException):
         return True
     message = str(exc).lower()
-    return "embedding dimension" in message and "collection" in message
+    has_collection = "collection" in message
+    has_dimension = "dimension" in message
+    has_embedding = "embedding" in message
+    return has_collection and has_dimension and has_embedding
 
 
 def _is_space_mismatch_error(exc: Exception) -> bool:

@@ -26,6 +26,22 @@ Incidencias frecuentes y acciones sugeridas.
 - Usa modo estable sin autoreload para ingestas largas.
 - Revisa logs del job con GET /jobs/{job_id}?logs_tail=400.
 
+## Error de dimensión en Chroma durante ingesta
+
+Síntoma típico:
+
+- `Collection expecting embedding with dimension of 3072, got 768`
+
+Causa:
+
+- Se cambió el provider/modelo de embeddings y las colecciones Chroma existentes
+	quedaron con una dimensionalidad anterior.
+
+Acción recomendada:
+
+- Ejecuta limpieza total (`POST /admin/reset` o `scripts/reset_cold.ps1`) y luego
+	reingesta el repositorio.
+
 ## Error al instalar dependencias en Windows
 
 Si durante `pip install -r requirements.txt` aparece un error en
