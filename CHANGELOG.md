@@ -7,6 +7,10 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- Archivos de dependencias separados para runtime, desktop, desarrollo y
+    entorno completo local:
+    `requirements-runtime.txt`, `requirements-desktop.txt`,
+    `requirements-dev.txt` y `requirements-full.txt`.
 - Estructura documental orientada a customer journeys.
 - Nuevas guias en docs/ para instalacion, configuracion, arquitectura,
   troubleshooting y contribucion.
@@ -21,6 +25,10 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Nueva guia `KUBERNETES.md` con despliegue, secretos, probes, persistencia, rollback y validacion funcional.
 
 ### Changed
+- `requirements.txt` pasa a representar el baseline API/worker para que el
+    contrato por defecto priorice levantar la API.
+- `Dockerfile` mantiene build de runtime usando el contrato API-first de
+    `requirements.txt`, dejando fuera PySide6 y pytest del contenedor.
 - `chromadb` se actualiza a `1.5.5` para alinear el stack vectorial con versiones recientes del ecosistema.
 - README reestructurado como portal corto de navegacion.
 - API reference reorganizada por journeys y operaciones.

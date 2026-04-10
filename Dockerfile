@@ -12,6 +12,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
+COPY requirements-runtime.txt ./
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
@@ -38,6 +39,7 @@ RUN apt-get update \
 
 COPY --from=builder /wheels /wheels
 COPY requirements.txt ./
+COPY requirements-runtime.txt ./
 
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \

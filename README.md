@@ -41,6 +41,13 @@ py -3.12 -m venv .venv
 copy .env.example .env
 ```
 
+Perfiles de dependencias:
+
+- `requirements.txt`: baseline API/worker para levantar el backend.
+- `requirements-runtime.txt`: alias explicito del perfil API/worker.
+- `requirements-desktop.txt`: runtime + UI de escritorio.
+- `requirements-full.txt`: entorno completo local con UI y tests.
+
 Configura credenciales de Vertex AI con Service Account en `.env`:
 
 ```powershell

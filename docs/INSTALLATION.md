@@ -27,6 +27,13 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
 ```
 
+Perfiles de dependencias:
+
+- `requirements.txt`: baseline API/worker para levantar la API.
+- `requirements-runtime.txt`: alias explicito del perfil headless.
+- `requirements-desktop.txt`: agrega PySide6 para UI local.
+- `requirements-full.txt`: agrega UI y tests para desarrollo completo.
+
 2. Crear archivo de entorno.
 
 ```powershell
@@ -53,6 +60,12 @@ $env:INGESTION_EXECUTION_MODE = "rq"
 ```
 
 4. Levantar UI (opcional, desktop local).
+
+Si instalaste solo `requirements.txt`, agrega primero soporte UI:
+
+```powershell
+.\.venv\Scripts\python -m pip install -r requirements-desktop.txt
+```
 
 ```powershell
 .\.venv\Scripts\python -m coderag.ui.main_window
