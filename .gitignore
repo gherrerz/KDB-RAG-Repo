@@ -34,6 +34,7 @@ pip-wheel-metadata/
 .env
 .env.*
 !.env.example
+secrets/
 
 # Logs
 *.log
@@ -57,9 +58,8 @@ docker-compose.override.yml
 benchmark_reports/
 
 # Local temporary scripts
-.tmp_ingest_smoke.py
-.tmp_openapi_check.py
-.tmp_ingest_smoke.out
+.tmp*.py
+.tmp*.out
 
 #vertex ai credentials
 gcp_credentials_vertex.json
