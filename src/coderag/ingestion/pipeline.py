@@ -160,6 +160,8 @@ def ingest_repository(
     branch: str,
     commit: str | None,
     logger: LoggerFn,
+    provider: str | None = None,
+    token: str | None = None,
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
     diagnostics_sink: dict[str, object] | None = None,
@@ -172,6 +174,8 @@ def ingest_repository(
         destination_root=settings.workspace_path,
         branch=branch,
         commit=commit,
+        provider=provider,
+        token=token,
     )
 
     if _repo_has_existing_index_data(repo_id=repo_id, logger=logger):

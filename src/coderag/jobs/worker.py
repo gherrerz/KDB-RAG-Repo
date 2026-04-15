@@ -91,6 +91,8 @@ def _execute_ingest_job(
             repo_url=request.repo_url,
             branch=request.branch,
             commit=request.commit,
+            provider=request.provider,
+            token=request.token,
             embedding_provider=request.embedding_provider,
             embedding_model=request.embedding_model,
             logger=logger,

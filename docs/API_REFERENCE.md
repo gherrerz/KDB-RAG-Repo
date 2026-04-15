@@ -168,6 +168,11 @@ Limpia todo el estado indexado.
 | `embedding_provider` | `str | null` | no | `null` |
 | `embedding_model` | `str | null` | no | `null` |
 
+Notas para `token` en repos privados:
+
+- Para Bitbucket se acepta token simple (usa usuario HTTP por defecto).
+- Para Bitbucket Server/Data Center se recomienda `usuario:token`.
+
 ### JobInfo
 
 | Field | Type | Requerido | Descripción |
@@ -409,6 +414,17 @@ Request:
   "provider": "github",
   "repo_url": "https://github.com/macrozheng/mall.git",
   "branch": "main"
+}
+```
+
+Request (Bitbucket privado):
+
+```json
+{
+  "provider": "bitbucket",
+  "repo_url": "https://bitbucket.example/scm/team/proyecto.git",
+  "branch": "master",
+  "token": "usuario_ci:token_privado"
 }
 ```
 

@@ -109,6 +109,9 @@ $body = @{
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/repos/ingest -ContentType 'application/json' -Body $body
 ```
 
+Para repos privados en Bitbucket, agrega `token` al body. Se admite token
+simple y formato `usuario:token` (recomendado para Bitbucket Server/DC).
+
 4. Consulta estado del job.
 
 ```powershell

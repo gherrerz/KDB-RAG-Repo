@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1.7
+ARG pythonVersion=3.12
 
-FROM python:3.12-slim-bookworm AS builder
+FROM python:${pythonVersion}-slim-bookworm AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
+USER root
 WORKDIR /build
 
 RUN apt-get update \
@@ -12,7 +14,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-COPY requirements-runtime.txt ./
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
@@ -21,13 +22,14 @@ RUN pip install --upgrade pip setuptools wheel \
     && pip wheel --wheel-dir /wheels -r requirements.txt
 
 
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:${pythonVersion}-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app/src
 
+USER root    
 WORKDIR /app
 
 RUN groupadd --system app \
@@ -39,7 +41,6 @@ RUN apt-get update \
 
 COPY --from=builder /wheels /wheels
 COPY requirements.txt ./
-COPY requirements-runtime.txt ./
 
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \

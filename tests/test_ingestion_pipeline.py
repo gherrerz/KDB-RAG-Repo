@@ -63,7 +63,10 @@ def test_ingest_repository_continues_on_graph_failure(
     monkeypatch.setattr(
         pipeline,
         "clone_repository",
-        lambda repo_url, destination_root, branch, commit: ("r1", tmp_path),
+        lambda repo_url, destination_root, branch, commit, **kwargs: (
+            "r1",
+            tmp_path,
+        ),
     )
     monkeypatch.setattr(
         pipeline,
@@ -156,7 +159,10 @@ def test_ingest_repository_purges_existing_repo_before_reindex(
     monkeypatch.setattr(
         pipeline,
         "clone_repository",
-        lambda repo_url, destination_root, branch, commit: ("r1", tmp_path),
+        lambda repo_url, destination_root, branch, commit, **kwargs: (
+            "r1",
+            tmp_path,
+        ),
     )
     monkeypatch.setattr(
         pipeline,
@@ -218,6 +224,109 @@ def test_ingest_repository_purges_existing_repo_before_reindex(
     assert call_order == ["purge", "index_vectors", "index_bm25", "index_graph"]
     assert any("Repositorio existente detectado" in item for item in logs)
     assert any("Observabilidad símbolos:" in item for item in logs)
+
+
+def test_ingest_repository_forwards_provider_and_token_to_clone(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Propaga provider/token al clonador para autenticación de repos privados."""
+    scanned = [ScannedFile(path="a.py", language="python", content="print('ok')")]
+    symbols = [
+        SymbolChunk(
+            id="s1",
+            repo_id="r1",
+            path="a.py",
+            language="python",
+            symbol_name="main",
+            symbol_type="function",
+            start_line=1,
+            end_line=1,
+            snippet="print('ok')",
+        )
+    ]
+
+    class _Settings:
+        workspace_path = tmp_path
+        scan_max_file_size_bytes = 12345
+        scan_excluded_dirs = ".git,node_modules"
+        scan_excluded_extensions = ".png,.zip"
+        scan_excluded_files = ".gitignore,.env"
+
+    captured: dict[str, object] = {}
+
+    def _fake_clone(
+        repo_url: str,
+        destination_root: Path,
+        branch: str,
+        commit: str | None,
+        provider: str | None = None,
+        token: str | None = None,
+    ) -> tuple[str, Path]:
+        captured["repo_url"] = repo_url
+        captured["destination_root"] = destination_root
+        captured["branch"] = branch
+        captured["commit"] = commit
+        captured["provider"] = provider
+        captured["token"] = token
+        return "r1", tmp_path
+
+    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(pipeline, "clone_repository", _fake_clone)
+    monkeypatch.setattr(
+        pipeline,
+        "_repo_has_existing_index_data",
+        lambda repo_id, logger: False,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "scan_repository_with_stats",
+        lambda *args, **kwargs: (
+            scanned,
+            {
+                "visited": 1,
+                "scanned": 1,
+                "excluded_dir": 0,
+                "excluded_extension": 0,
+                "excluded_file": 0,
+                "excluded_size": 0,
+                "excluded_decode": 0,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_symbol_chunks",
+        lambda repo_id, scanned_files: symbols,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_vectors",
+        lambda repo_id, s, c, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_bm25",
+        lambda repo_id, scanned_files, chunks: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_graph",
+        lambda repo_id, scanned_files, chunks, logger=None, **kwargs: None,
+    )
+
+    logs: list[str] = []
+    pipeline.ingest_repository(
+        repo_url="https://bitbucket.example/scm/acme/repo.git",
+        branch="master",
+        commit=None,
+        logger=logs.append,
+        provider="bitbucket",
+        token="svc-ci:token-abc",
+    )
+
+    assert captured["provider"] == "bitbucket"
+    assert captured["token"] == "svc-ci:token-abc"
 
 
 def test_index_graph_adds_semantic_relations_when_enabled(
@@ -767,7 +876,10 @@ def test_ingest_repository_fails_when_purge_fails(
     monkeypatch.setattr(
         pipeline,
         "clone_repository",
-        lambda repo_url, destination_root, branch, commit: ("r1", tmp_path),
+        lambda repo_url, destination_root, branch, commit, **kwargs: (
+            "r1",
+            tmp_path,
+        ),
     )
     monkeypatch.setattr(
         pipeline,

@@ -36,7 +36,10 @@ class RepoIngestRequest(BaseModel):
     )
     token: str | None = Field(
         default=None,
-        description="Token opcional para repositorios privados.",
+        description=(
+            "Token opcional para repositorios privados. Para Bitbucket "
+            "admite token simple o formato usuario:token."
+        ),
     )
     branch: str = Field(
         default="main",

@@ -178,6 +178,75 @@ def test_job_manager_marks_completed_when_repo_query_ready(
     assert runtime["last_embedding_model"] is None
 
 
+def test_job_manager_passes_provider_and_token_to_ingestion_pipeline(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Propaga provider/token del request al pipeline de ingesta."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    manager = JobManager()
+
+    class _SyncThread:
+        def __init__(self, target, args, daemon):
+            self._target = target
+            self._args = args
+
+        def start(self) -> None:
+            self._target(*self._args)
+
+    monkeypatch.setattr(module, "Thread", _SyncThread)
+
+    import coderag.ingestion.pipeline as pipeline_module
+    import coderag.core.storage_health as health_module
+
+    captured: dict[str, object] = {}
+
+    def _fake_ingest_repository(repo_url, branch, commit, logger, **kwargs) -> str:
+        del logger
+        captured["repo_url"] = repo_url
+        captured["branch"] = branch
+        captured["commit"] = commit
+        captured["provider"] = kwargs.get("provider")
+        captured["token"] = kwargs.get("token")
+        return "repo-private"
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "ingest_repository",
+        _fake_ingest_repository,
+    )
+    monkeypatch.setattr(
+        health_module,
+        "get_repo_query_status",
+        lambda repo_id, listed_in_catalog: {
+            "repo_id": repo_id,
+            "listed_in_catalog": listed_in_catalog,
+            "query_ready": True,
+            "warnings": [],
+        },
+    )
+
+    request = RepoIngestRequest(
+        provider="bitbucket",
+        repo_url="https://bitbucket.example/scm/acme/private.git",
+        branch="master",
+        token="svc-ci:top-secret",
+        commit=None,
+    )
+    manager.create_ingest_job(request)
+
+    assert captured["provider"] == "bitbucket"
+    assert captured["token"] == "svc-ci:top-secret"
+
+
 def test_job_manager_recovers_interrupted_running_jobs(
     monkeypatch,
     tmp_path,
