@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from coderag.core.provider_model_catalog import normalize_provider_name
 from coderag.ui.provider_capabilities import (
     readiness,
     resolve_embedding_capability,
@@ -33,7 +34,7 @@ def resolve_embedding_ui_state(
     context: str,
 ) -> ProviderUIState:
     """Resuelve estado UI de embeddings para el provider seleccionado."""
-    normalized = provider.strip().lower()
+    normalized = normalize_provider_name(provider)
     capability = resolve_embedding_capability(settings, normalized)
     warning, chip_state, chip_text = embedding_feedback_from_capability(
         capability,
@@ -52,7 +53,7 @@ def resolve_embedding_ui_state(
 
 def resolve_llm_ui_state(settings: object, provider: str) -> ProviderUIState:
     """Resuelve estado UI de LLM para el provider seleccionado."""
-    normalized = provider.strip().lower()
+    normalized = normalize_provider_name(provider)
     capability = resolve_llm_capability(settings, normalized)
     warning, chip_state, chip_text = llm_feedback_from_capability(capability)
     ready, reason = readiness(capability)

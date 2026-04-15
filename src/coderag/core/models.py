@@ -50,7 +50,7 @@ class RepoIngestRequest(BaseModel):
     embedding_provider: str | None = Field(
         default=None,
         description="Proveedor de embeddings opcional para esta ingesta.",
-        examples=["openai", "gemini", "vertex_ai"],
+        examples=["openai", "gemini", "vertex"],
     )
     embedding_model: str | None = Field(
         default=None,
@@ -119,7 +119,7 @@ class QueryRequest(BaseModel):
     embedding_provider: str | None = Field(
         default=None,
         description="Proveedor de embeddings opcional para vectorizar query.",
-        examples=["openai", "gemini", "vertex_ai"],
+        examples=["openai", "gemini", "vertex"],
     )
     embedding_model: str | None = Field(
         default=None,
@@ -128,7 +128,7 @@ class QueryRequest(BaseModel):
     llm_provider: str | None = Field(
         default=None,
         description="Proveedor LLM opcional para respuesta/verificación.",
-        examples=["openai", "gemini", "vertex_ai"],
+        examples=["openai", "gemini", "vertex"],
     )
     answer_model: str | None = Field(
         default=None,
@@ -161,7 +161,7 @@ class RetrievalQueryRequest(BaseModel):
     embedding_provider: str | None = Field(
         default=None,
         description="Proveedor de embeddings opcional para vectorizar query.",
-        examples=["openai", "gemini", "vertex_ai"],
+        examples=["openai", "gemini", "vertex"],
     )
     embedding_model: str | None = Field(
         default=None,

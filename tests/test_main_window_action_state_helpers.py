@@ -129,7 +129,7 @@ def test_repo_switch_syncs_embedding_runtime_defaults(
 
     window.query_view.repo_id.setCurrentText("repo-b")
 
-    assert window.query_view.get_embedding_provider() == "vertex_ai"
+    assert window.query_view.get_embedding_provider() == "vertex"
     assert window.query_view.get_embedding_model() == "text-embedding-005"
 
 

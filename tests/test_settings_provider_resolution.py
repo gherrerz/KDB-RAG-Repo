@@ -18,7 +18,7 @@ def test_embedding_resolution_priority_override_over_env_and_legacy() -> None:
     provider = settings.resolve_embedding_provider("vertex_ai")
     model = settings.resolve_embedding_model(provider, "override-embed-model")
 
-    assert provider == "vertex_ai"
+    assert provider == "vertex"
     assert model == "override-embed-model"
 
 
@@ -65,7 +65,7 @@ def test_llm_resolution_uses_new_env_before_legacy() -> None:
     answer_model = settings.resolve_answer_model(provider, None)
     verifier_model = settings.resolve_verifier_model(provider, None)
 
-    assert provider == "vertex_ai"
+    assert provider == "vertex"
     assert answer_model == "env-answer-model"
     assert verifier_model == "env-verifier-model"
 

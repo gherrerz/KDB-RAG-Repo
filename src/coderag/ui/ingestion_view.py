@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from coderag.core.provider_model_catalog import normalize_provider_name
 from coderag.core.settings import get_settings
 from coderag.ui.base_styles import (
     BASE_BUTTON_STYLES,
@@ -73,7 +74,7 @@ class IngestionView(QWidget):
 
         self.embedding_provider = QComboBox()
         self.embedding_provider.addItems(
-            ["openai", "gemini", "vertex_ai"]
+            ["openai", "gemini", "vertex"]
         )
 
         self.embedding_model = QComboBox()
@@ -526,7 +527,9 @@ class IngestionView(QWidget):
         provider: str | None = None,
     ) -> None:
         """Recarga catálogo de embeddings desde API y aplica fallback local."""
-        selected_provider = (provider or self.embedding_provider.currentText()).strip()
+        selected_provider = normalize_provider_name(
+            provider or self.embedding_provider.currentText()
+        )
         settings = get_settings()
         state = resolve_embedding_ui_state(
             settings,
@@ -587,7 +590,7 @@ class IngestionView(QWidget):
         settings = get_settings()
         state = resolve_embedding_ui_state(
             settings,
-            self.embedding_provider.currentText(),
+            normalize_provider_name(self.embedding_provider.currentText()),
             context="ingestion",
         )
         return state.ready, state.reason

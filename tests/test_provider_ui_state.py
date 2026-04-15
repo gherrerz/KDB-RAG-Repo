@@ -17,7 +17,7 @@ class _Settings:
                 "configured": False,
                 "reason": "provider_without_embedding_backend",
             }
-        if provider == "vertex_ai":
+        if provider == "vertex":
             return {
                 "provider": provider,
                 "supported": True,
@@ -32,7 +32,7 @@ class _Settings:
         }
 
     def llm_provider_capabilities(self, provider: str) -> dict[str, str | bool]:
-        if provider == "vertex_ai":
+        if provider == "vertex":
             return {
                 "provider": provider,
                 "supported": True,

@@ -10,7 +10,7 @@ escenario contenedorizado.
 
 ### LLM y proveedores
 
-- `LLM_PROVIDER`: proveedor principal de LLM para answer/verify (`openai`, `gemini`, `vertex_ai`). Default: `vertex_ai`.
+- `LLM_PROVIDER`: proveedor principal de LLM para answer/verify (`openai`, `gemini`, `vertex`). Default: `vertex`.
 - `LLM_ANSWER_MODEL`: override del modelo de respuesta multi-provider. Default: vacio (se resuelve por provider).
 - `LLM_VERIFIER_MODEL`: override del modelo de verificacion multi-provider. Default: vacio (se resuelve por provider).
 - `LLM_VERIFY_ENABLED`: habilita la verificacion semantica de respuesta. Default: `true`.
@@ -29,8 +29,13 @@ escenario contenedorizado.
 
 ### Embeddings
 
-- `EMBEDDING_PROVIDER`: proveedor de embeddings (`openai`, `gemini`, `vertex_ai`). Default: `vertex_ai`.
+- `EMBEDDING_PROVIDER`: proveedor de embeddings (`openai`, `gemini`, `vertex`). Default: `vertex`.
 - `EMBEDDING_MODEL`: override del modelo de embedding. Default: vacio (aplica fallback por provider).
+
+Compatibilidad temporal de naming:
+
+- `vertex_ai` sigue siendo aceptado como alias legacy y se normaliza a `vertex`.
+- El prefijo de variables `VERTEX_AI_*` se mantiene por compatibilidad operativa.
 
 ### Retrieval y limites de consulta
 
@@ -110,8 +115,8 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 ## Ejemplo minimo recomendado (.env local)
 
 ```dotenv
-LLM_PROVIDER=vertex_ai
-EMBEDDING_PROVIDER=vertex_ai
+LLM_PROVIDER=vertex
+EMBEDDING_PROVIDER=vertex
 VERTEX_AI_AUTH_MODE=service_account
 VERTEX_AI_SERVICE_ACCOUNT_JSON_B64=<base64_json_sa>
 VERTEX_AI_PROJECT_ID=your_project

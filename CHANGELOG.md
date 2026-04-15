@@ -25,6 +25,9 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Nueva guia `KUBERNETES.md` con despliegue, secretos, probes, persistencia, rollback y validacion funcional.
 
 ### Changed
+- Canonical provider naming now uses `vertex` for `LLM_PROVIDER` y
+    `EMBEDDING_PROVIDER`; `vertex_ai` se mantiene temporalmente como alias
+    compatible en runtime.
 - `requirements.txt` pasa a representar el baseline API/worker para que el
     contrato por defecto priorice levantar la API.
 - `Dockerfile` mantiene build de runtime usando el contrato API-first de

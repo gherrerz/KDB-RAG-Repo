@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from coderag.core.provider_model_catalog import normalize_provider_name
 from coderag.core.settings import get_settings
 from coderag.ui.base_styles import (
     BASE_BUTTON_STYLES,
@@ -88,7 +89,7 @@ class QueryView(QWidget):
 
         self.embedding_provider = QComboBox()
         self.embedding_provider.addItems(
-            ["openai", "gemini", "vertex_ai"]
+            ["openai", "gemini", "vertex"]
         )
         self.embedding_model = QComboBox()
         self.embedding_model.setEditable(True)
@@ -102,7 +103,7 @@ class QueryView(QWidget):
         self.embedding_status_chip.setProperty("state", "ready")
 
         self.llm_provider = QComboBox()
-        self.llm_provider.addItems(["openai", "gemini", "vertex_ai"])
+        self.llm_provider.addItems(["openai", "gemini", "vertex"])
         self.answer_model = QComboBox()
         self.answer_model.setEditable(True)
         self.answer_model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -732,7 +733,9 @@ class QueryView(QWidget):
         provider: str | None = None,
     ) -> None:
         """Recarga catálogo de modelos de embeddings para consulta."""
-        selected_provider = (provider or self.embedding_provider.currentText()).strip()
+        selected_provider = normalize_provider_name(
+            provider or self.embedding_provider.currentText()
+        )
         settings = get_settings()
         state = resolve_embedding_ui_state(
             settings,
@@ -780,7 +783,9 @@ class QueryView(QWidget):
         provider: str | None = None,
     ) -> None:
         """Recarga catálogo de modelos LLM para answer/verifier."""
-        selected_provider = (provider or self.llm_provider.currentText()).strip()
+        selected_provider = normalize_provider_name(
+            provider or self.llm_provider.currentText()
+        )
         settings = get_settings()
         state = resolve_llm_ui_state(settings, selected_provider)
         current_answer_model = self.answer_model.currentText().strip()
@@ -876,7 +881,7 @@ class QueryView(QWidget):
         settings = get_settings()
         state = resolve_embedding_ui_state(
             settings,
-            self.embedding_provider.currentText(),
+            normalize_provider_name(self.embedding_provider.currentText()),
             context="query",
         )
         return state.ready, state.reason
@@ -884,7 +889,10 @@ class QueryView(QWidget):
     def is_llm_provider_ready(self) -> tuple[bool, str]:
         """Evalúa si el provider LLM está listo para query."""
         settings = get_settings()
-        state = resolve_llm_ui_state(settings, self.llm_provider.currentText())
+        state = resolve_llm_ui_state(
+            settings,
+            normalize_provider_name(self.llm_provider.currentText()),
+        )
         return state.ready, state.reason
 
     def set_query_action_hint(self, text: str) -> None:

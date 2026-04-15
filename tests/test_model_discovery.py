@@ -81,13 +81,13 @@ def test_cache_returns_cached_source(monkeypatch) -> None:
     assert calls["count"] == 1
 
 
-def test_vertex_alias_uses_vertex_ai_fallback(monkeypatch) -> None:
-    """Alias `vertex` se normaliza y usa fallback canónico de Vertex AI."""
+def test_vertex_alias_uses_vertex_fallback(monkeypatch) -> None:
+    """Alias `vertex` se normaliza y usa fallback canónico de Vertex."""
     monkeypatch.setattr(model_discovery, "get_settings", lambda: _Settings())
 
     result = model_discovery.discover_models("vertex", "embedding", force_refresh=True)
 
-    assert result.provider == "vertex_ai"
+    assert result.provider == "vertex"
     assert result.source == "fallback"
     assert "text-embedding-005" in result.models
     assert result.warning == "missing_vertex_ai_api_key_or_project"

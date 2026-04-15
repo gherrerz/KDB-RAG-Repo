@@ -9,6 +9,7 @@ from uuid import uuid4
 from openai import OpenAI
 import requests
 
+from coderag.core.provider_model_catalog import normalize_provider_name
 from coderag.core.settings import ProviderName, get_settings
 from coderag.core.vertex_ai import build_vertex_labels, resolve_vertex_auth_context
 
@@ -91,7 +92,8 @@ class EmbeddingClient:
         if hasattr(settings, "resolve_embedding_provider"):
             self.provider = settings.resolve_embedding_provider(provider)
         else:
-            self.provider = "vertex_ai"
+            self.provider = "vertex"
+        self.provider = normalize_provider_name(self.provider)
 
         if hasattr(settings, "resolve_embedding_model"):
             self.model = settings.resolve_embedding_model(self.provider, model)
@@ -147,7 +149,7 @@ class EmbeddingClient:
 
     def _fallback_reason(self) -> str:
         """Devuelve motivo compacto para trazabilidad de fallback."""
-        if self.provider == "vertex_ai":
+        if self.provider == "vertex":
             settings = get_settings()
             if hasattr(settings, "is_vertex_ai_configured") and not settings.is_vertex_ai_configured():
                 return "missing_vertex_ai_api_key_or_project"
@@ -192,7 +194,7 @@ class EmbeddingClient:
             has_provider_runtime = self.client is not None
         elif self.provider == "gemini":
             has_provider_runtime = bool(self.api_key)
-        elif self.provider == "vertex_ai":
+        elif self.provider == "vertex":
             settings = get_settings()
             if hasattr(settings, "is_vertex_ai_configured"):
                 has_provider_runtime = bool(settings.is_vertex_ai_configured())
@@ -228,7 +230,7 @@ class EmbeddingClient:
                     batch_vectors = [item.embedding for item in response.data]
                 elif self.provider == "gemini":
                     batch_vectors = self._embed_with_gemini_rest(batch)
-                elif self.provider == "vertex_ai":
+                elif self.provider == "vertex":
                     batch_vectors = self._embed_with_vertex_ai_rest(
                         batch,
                         labels=labels,

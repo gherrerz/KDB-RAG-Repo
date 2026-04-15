@@ -10,8 +10,10 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from coderag.core.provider_model_catalog import normalize_provider_name
 
-ProviderName = Literal["openai", "gemini", "vertex_ai"]
+
+ProviderName = Literal["openai", "gemini", "vertex", "vertex_ai"]
 HnswSpaceName = Literal["l2", "cosine"]
 IngestionExecutionMode = Literal["thread", "rq"]
 VertexAuthMode = Literal["service_account"]
@@ -23,12 +25,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    llm_provider: ProviderName = Field(default="vertex_ai", alias="LLM_PROVIDER")
+    llm_provider: ProviderName = Field(default="vertex", alias="LLM_PROVIDER")
     llm_answer_model: str = Field(default="", alias="LLM_ANSWER_MODEL")
     llm_verifier_model: str = Field(default="", alias="LLM_VERIFIER_MODEL")
     llm_verify_enabled: bool = Field(default=True, alias="LLM_VERIFY_ENABLED")
     embedding_provider: ProviderName = Field(
-        default="vertex_ai",
+        default="vertex",
         alias="EMBEDDING_PROVIDER",
     )
     embedding_model: str = Field(default="", alias="EMBEDDING_MODEL")
@@ -231,10 +233,11 @@ class Settings(BaseSettings):
 
     def resolve_embedding_provider(self, override: str | None = None) -> ProviderName:
         """Resuelve el proveedor de embeddings con prioridad override > env."""
-        provider = (override or self.embedding_provider or "vertex_ai").strip().lower()
-        if provider in {"openai", "gemini", "vertex_ai"}:
-            return provider  # type: ignore[return-value]
-        return "vertex_ai"
+        provider = (override or self.embedding_provider or "vertex").strip().lower()
+        normalized = normalize_provider_name(provider)
+        if normalized in {"openai", "gemini", "vertex"}:
+            return normalized  # type: ignore[return-value]
+        return "vertex"
 
     def resolve_chroma_hnsw_space(
         self,
@@ -301,24 +304,26 @@ class Settings(BaseSettings):
 
     def resolve_embedding_model(self, provider: ProviderName, override: str | None = None) -> str:
         """Resuelve modelo de embeddings con fallback por provider."""
+        normalized_provider = normalize_provider_name(provider)
         if override and override.strip():
             return override.strip()
         if self.embedding_model.strip():
             return self.embedding_model.strip()
-        if provider == "openai":
+        if normalized_provider == "openai":
             return "text-embedding-3-small"
-        if provider == "gemini":
+        if normalized_provider == "gemini":
             return "text-embedding-004"
-        if provider == "vertex_ai":
+        if normalized_provider == "vertex":
             return "text-embedding-005"
         return "text-embedding-005"
 
     def resolve_llm_provider(self, override: str | None = None) -> ProviderName:
         """Resuelve el proveedor LLM con prioridad override > env."""
-        provider = (override or self.llm_provider or "vertex_ai").strip().lower()
-        if provider in {"openai", "gemini", "vertex_ai"}:
-            return provider  # type: ignore[return-value]
-        return "vertex_ai"
+        provider = (override or self.llm_provider or "vertex").strip().lower()
+        normalized = normalize_provider_name(provider)
+        if normalized in {"openai", "gemini", "vertex"}:
+            return normalized  # type: ignore[return-value]
+        return "vertex"
 
     def resolve_ingestion_retry_intervals(self) -> list[int]:
         """Resuelve intervalos válidos de reintento para jobs de ingesta."""
@@ -342,37 +347,40 @@ class Settings(BaseSettings):
 
     def resolve_answer_model(self, provider: ProviderName, override: str | None = None) -> str:
         """Resuelve el modelo answer con fallback a configuración actual."""
+        normalized_provider = normalize_provider_name(provider)
         if override and override.strip():
             return override.strip()
         if self.llm_answer_model.strip():
             return self.llm_answer_model.strip()
-        if provider == "openai":
+        if normalized_provider == "openai":
             return "gpt-4.1-mini"
-        if provider == "gemini":
+        if normalized_provider == "gemini":
             return "gemini-2.0-flash"
-        if provider == "vertex_ai":
+        if normalized_provider == "vertex":
             return "gemini-2.0-flash"
         return "gemini-2.0-flash"
 
     def resolve_verifier_model(self, provider: ProviderName, override: str | None = None) -> str:
         """Resuelve el modelo verifier con fallback a configuración actual."""
+        normalized_provider = normalize_provider_name(provider)
         if override and override.strip():
             return override.strip()
         if self.llm_verifier_model.strip():
             return self.llm_verifier_model.strip()
-        if provider == "openai":
+        if normalized_provider == "openai":
             return "gpt-4.1-mini"
-        if provider == "gemini":
+        if normalized_provider == "gemini":
             return "gemini-2.0-flash"
-        if provider == "vertex_ai":
+        if normalized_provider == "vertex":
             return "gemini-2.0-flash"
         return "gemini-2.0-flash"
 
     def resolve_api_key(self, provider: ProviderName) -> str:
         """Obtiene la API key efectiva por proveedor."""
-        if provider == "gemini":
+        normalized_provider = normalize_provider_name(provider)
+        if normalized_provider == "gemini":
             return self.gemini_api_key
-        if provider == "vertex_ai":
+        if normalized_provider == "vertex":
             return ""
         return self.openai_api_key
 
@@ -429,20 +437,36 @@ class Settings(BaseSettings):
 
     def embedding_provider_capabilities(self, provider: ProviderName) -> dict[str, str | bool]:
         """Devuelve capacidades/configuración del provider de embeddings."""
-        if provider == "openai":
+        normalized_provider = normalize_provider_name(provider)
+        if normalized_provider == "openai":
             configured = bool(self.openai_api_key)
             reason = "ok" if configured else "missing_openai_api_key"
-            return {"provider": provider, "supported": True, "configured": configured, "reason": reason}
-        if provider == "gemini":
+            return {
+                "provider": normalized_provider,
+                "supported": True,
+                "configured": configured,
+                "reason": reason,
+            }
+        if normalized_provider == "gemini":
             configured = bool(self.gemini_api_key)
             reason = "ok" if configured else "missing_gemini_api_key"
-            return {"provider": provider, "supported": True, "configured": configured, "reason": reason}
-        if provider == "vertex_ai":
+            return {
+                "provider": normalized_provider,
+                "supported": True,
+                "configured": configured,
+                "reason": reason,
+            }
+        if normalized_provider == "vertex":
             configured = self.is_vertex_ai_configured()
             reason = "ok" if configured else self.vertex_ai_missing_reason()
-            return {"provider": provider, "supported": True, "configured": configured, "reason": reason}
+            return {
+                "provider": normalized_provider,
+                "supported": True,
+                "configured": configured,
+                "reason": reason,
+            }
         return {
-            "provider": provider,
+            "provider": normalized_provider,
             "supported": False,
             "configured": False,
             "reason": "provider_without_embedding_backend",
@@ -450,22 +474,23 @@ class Settings(BaseSettings):
 
     def llm_provider_capabilities(self, provider: ProviderName) -> dict[str, str | bool]:
         """Devuelve capacidades/configuración del provider LLM."""
-        if provider == "openai":
+        normalized_provider = normalize_provider_name(provider)
+        if normalized_provider == "openai":
             configured = bool(self.openai_api_key)
             reason = "ok" if configured else "missing_openai_api_key"
             return {
-                "provider": provider,
+                "provider": normalized_provider,
                 "supported": True,
                 "configured": configured,
                 "answer": True,
                 "verify": True,
                 "reason": reason,
             }
-        if provider == "gemini":
+        if normalized_provider == "gemini":
             configured = bool(self.gemini_api_key)
             reason = "ok" if configured else "missing_gemini_api_key"
             return {
-                "provider": provider,
+                "provider": normalized_provider,
                 "supported": True,
                 "configured": configured,
                 "answer": True,
@@ -475,7 +500,7 @@ class Settings(BaseSettings):
         configured = self.is_vertex_ai_configured()
         reason = "ok" if configured else self.vertex_ai_missing_reason()
         return {
-            "provider": provider,
+            "provider": normalized_provider,
             "supported": True,
             "configured": configured,
             "answer": True,

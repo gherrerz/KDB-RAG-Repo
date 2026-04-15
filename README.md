@@ -57,6 +57,8 @@ $env:VERTEX_AI_SERVICE_ACCOUNT_FILE = 'C:/ruta/segura/service-account.json'
 Variables mínimas en `.env` para Vertex:
 
 ```dotenv
+LLM_PROVIDER=vertex
+EMBEDDING_PROVIDER=vertex
 VERTEX_AI_AUTH_MODE=service_account
 VERTEX_AI_SERVICE_ACCOUNT_JSON_B64=<base64_json_sa>
 VERTEX_AI_PROJECT_ID=your_project

@@ -1,8 +1,9 @@
 """Catálogos fallback de modelos por provider para UI y backend."""
 
 PROVIDER_ALIASES: dict[str, str] = {
-    "vertex": "vertex_ai",
-    "vertexai": "vertex_ai",
+    "vertex": "vertex",
+    "vertex_ai": "vertex",
+    "vertexai": "vertex",
 }
 
 EMBEDDING_MODEL_OPTIONS: dict[str, list[str]] = {
@@ -14,7 +15,7 @@ EMBEDDING_MODEL_OPTIONS: dict[str, list[str]] = {
     "gemini": [
         "text-embedding-004",
     ],
-    "vertex_ai": [
+    "vertex": [
         "text-embedding-005",
         "text-multilingual-embedding-002",
     ],
@@ -30,7 +31,7 @@ LLM_MODEL_OPTIONS: dict[str, list[str]] = {
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
     ],
-    "vertex_ai": [
+    "vertex": [
         "gemini-2.0-flash",
         "gemini-1.5-pro",
     ],
@@ -39,13 +40,13 @@ LLM_MODEL_OPTIONS: dict[str, list[str]] = {
 DEFAULT_EMBEDDING_MODELS: dict[str, str] = {
     "openai": "text-embedding-3-small",
     "gemini": "text-embedding-004",
-    "vertex_ai": "text-embedding-005",
+    "vertex": "text-embedding-005",
 }
 
 DEFAULT_LLM_MODELS: dict[str, str] = {
     "openai": "gpt-4.1-mini",
     "gemini": "gemini-2.0-flash",
-    "vertex_ai": "gemini-2.0-flash",
+    "vertex": "gemini-2.0-flash",
 }
 
 

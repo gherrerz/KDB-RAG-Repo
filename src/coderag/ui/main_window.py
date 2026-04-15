@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from coderag.core.provider_model_catalog import normalize_provider_name
 from coderag.core.settings import get_settings
 from coderag.ui.provider_action_state import (
     ActionState,
@@ -889,7 +890,9 @@ class MainWindow(QMainWindow):
         runtime_provider = str(payload.get("last_embedding_provider") or "").strip()
         runtime_model = str(payload.get("last_embedding_model") or "").strip()
         if runtime_provider:
-            self.query_view.embedding_provider.setCurrentText(runtime_provider)
+            self.query_view.embedding_provider.setCurrentText(
+                normalize_provider_name(runtime_provider)
+            )
 
         if runtime_model:
             combo = self.query_view.embedding_model

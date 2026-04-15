@@ -90,7 +90,7 @@ def _discover_uncached(provider: str, kind: ModelKind) -> ModelDiscoveryResult:
     """Resuelve discovery real por provider con fallback local."""
     if provider == "openai":
         return _discover_openai(kind)
-    if provider == "vertex_ai":
+    if provider == "vertex":
         return _discover_vertex(kind)
     if provider == "gemini":
         return _discover_gemini(kind)
@@ -142,7 +142,7 @@ def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
     )
     if not is_configured or not project_id:
         return _fallback(
-            "vertex_ai",
+            "vertex",
             kind,
             warning="missing_vertex_ai_api_key_or_project",
         )
@@ -159,10 +159,10 @@ def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
             bearer_token=auth_context.access_token,
             api_key=None,
         )
-        models = _filter_models(names, kind, provider="vertex_ai")
+        models = _filter_models(names, kind, provider="vertex")
         if models:
             return ModelDiscoveryResult(
-                provider="vertex_ai",
+                provider="vertex",
                 kind=kind,
                 models=models,
                 source="remote",
@@ -181,10 +181,10 @@ def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
                 api_key=compatible_key,
                 timeout=timeout,
             )
-            models = _filter_models(names, kind, provider="vertex_ai")
+            models = _filter_models(names, kind, provider="vertex")
             if models:
                 return ModelDiscoveryResult(
-                    provider="vertex_ai",
+                    provider="vertex",
                     kind=kind,
                     models=models,
                     source="remote",
@@ -193,7 +193,7 @@ def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
         except Exception:
             continue
 
-    return _fallback("vertex_ai", kind, warning=publisher_warning or "vertex_remote_catalog_failed")
+    return _fallback("vertex", kind, warning=publisher_warning or "vertex_remote_catalog_failed")
 
 
 def _discover_vertex_publisher_names(
@@ -428,7 +428,7 @@ def _filter_models(entries: list[str], kind: ModelKind, *, provider: ProviderNam
                 or lowered.startswith("o3")
             ):
                 continue
-            if provider in {"gemini", "vertex_ai"} and "gemini" not in lowered:
+            if provider in {"gemini", "vertex"} and "gemini" not in lowered:
                 continue
         unique[name] = None
         if len(unique) >= max_items:

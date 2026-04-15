@@ -32,7 +32,7 @@ def test_ingestion_provider_autofill_and_warning(
 
     class _Settings:
         def embedding_provider_capabilities(self, provider: str) -> dict[str, str | bool]:
-            if provider == "vertex_ai":
+            if provider == "vertex":
                 return {
                     "provider": provider,
                     "supported": True,
@@ -59,7 +59,7 @@ def test_ingestion_provider_autofill_and_warning(
                 source="remote",
                 warning=None,
             )
-        if provider == "vertex_ai" and kind == "embedding":
+        if provider == "vertex" and kind == "embedding":
             return UIModelCatalogResult(
                 models=["text-embedding-005", "text-multilingual-embedding-002"],
                 source="fallback",
@@ -87,7 +87,7 @@ def test_ingestion_provider_autofill_and_warning(
     assert view.embedding_status_chip.text() == "Embeddings: Listo"
     assert view.embedding_status_chip.property("state") == "ready"
 
-    view.embedding_provider.setCurrentText("vertex_ai")
+    view.embedding_provider.setCurrentText("vertex")
     assert "no configurado" in view.embedding_warning.text().lower()
     assert "no listo" in view.embedding_status_chip.text().lower()
     assert view.embedding_status_chip.property("state") == "blocked"
@@ -101,7 +101,7 @@ def test_query_provider_autofill_and_warnings(
 
     class _Settings:
         def embedding_provider_capabilities(self, provider: str) -> dict[str, str | bool]:
-            if provider == "vertex_ai":
+            if provider == "vertex":
                 return {
                     "provider": provider,
                     "supported": True,
@@ -141,7 +141,7 @@ def test_query_provider_autofill_and_warnings(
         force_refresh: bool = False,
     ) -> UIModelCatalogResult:
         _ = force_refresh
-        if provider == "vertex_ai" and kind == "embedding":
+        if provider == "vertex" and kind == "embedding":
             return UIModelCatalogResult(
                 models=["text-embedding-005", "text-multilingual-embedding-002"],
                 source="fallback",
@@ -167,7 +167,7 @@ def test_query_provider_autofill_and_warnings(
     )
     view = QueryView()
 
-    view.embedding_provider.setCurrentText("vertex_ai")
+    view.embedding_provider.setCurrentText("vertex")
     assert view.embedding_model.currentText() == "text-embedding-005"
     assert "no configurado" in view.embedding_warning.text().lower()
     assert "no listo" in view.embedding_status_chip.text().lower()
@@ -209,7 +209,7 @@ def test_ingestion_vertex_refresh_keeps_catalog_behavior(
         force_refresh: bool = False,
     ):
         calls.append((provider, kind, force_refresh))
-        if provider == "vertex_ai" and kind == "embedding":
+        if provider == "vertex" and kind == "embedding":
             return UIModelCatalogResult(
                 models=[
                     "text-embedding-005",
@@ -233,17 +233,17 @@ def test_ingestion_vertex_refresh_keeps_catalog_behavior(
 
     view = IngestionView()
     calls.clear()
-    view.embedding_provider.setCurrentText("vertex_ai")
+    view.embedding_provider.setCurrentText("vertex")
 
     assert view.embedding_model.currentText() == "text-embedding-005"
     assert [
         view.embedding_model.itemText(i) for i in range(view.embedding_model.count())
     ] == ["text-embedding-005", "text-multilingual-embedding-002"]
-    assert calls[-1] == ("vertex_ai", "embedding", False)
+    assert calls[-1] == ("vertex", "embedding", False)
 
     view.refresh_embedding_models_button.click()
 
-    assert calls[-1] == ("vertex_ai", "embedding", True)
+    assert calls[-1] == ("vertex", "embedding", True)
     assert [
         view.embedding_model.itemText(i) for i in range(view.embedding_model.count())
     ] == ["text-embedding-005", "text-multilingual-embedding-002"]
@@ -283,13 +283,13 @@ def test_query_vertex_refresh_keeps_embedding_and_llm_catalogs(
         force_refresh: bool = False,
     ):
         calls.append((provider, kind, force_refresh))
-        if provider == "vertex_ai" and kind == "embedding":
+        if provider == "vertex" and kind == "embedding":
             return UIModelCatalogResult(
                 models=["text-embedding-005", "text-multilingual-embedding-002"],
                 source="fallback",
                 warning="missing_vertex_ai_api_key_or_project",
             )
-        if provider == "vertex_ai" and kind == "llm":
+        if provider == "vertex" and kind == "llm":
             return UIModelCatalogResult(
                 models=["gemini-2.0-flash", "gemini-1.5-pro"],
                 source="fallback",
@@ -310,18 +310,18 @@ def test_query_vertex_refresh_keeps_embedding_and_llm_catalogs(
 
     view = QueryView()
     calls.clear()
-    view.embedding_provider.setCurrentText("vertex_ai")
-    view.llm_provider.setCurrentText("vertex_ai")
+    view.embedding_provider.setCurrentText("vertex")
+    view.llm_provider.setCurrentText("vertex")
 
     assert view.embedding_model.currentText() == "text-embedding-005"
     assert view.answer_model.currentText() == "gemini-2.0-flash"
     assert view.verifier_model.currentText() == "gemini-2.0-flash"
-    assert calls[-1] == ("vertex_ai", "llm", False)
+    assert calls[-1] == ("vertex", "llm", False)
 
     view.refresh_models_button.click()
 
-    assert ("vertex_ai", "embedding", True) in calls
-    assert ("vertex_ai", "llm", True) in calls
+    assert ("vertex", "embedding", True) in calls
+    assert ("vertex", "llm", True) in calls
     assert [
         view.embedding_model.itemText(i) for i in range(view.embedding_model.count())
     ] == ["text-embedding-005", "text-multilingual-embedding-002"]
@@ -432,7 +432,7 @@ def test_query_vertex_remote_catalog_replaces_stale_default(
         force_refresh: bool = False,
     ) -> UIModelCatalogResult:
         _ = force_refresh
-        if provider == "vertex_ai" and kind == "llm":
+        if provider == "vertex" and kind == "llm":
             return UIModelCatalogResult(
                 models=["gemini-2.5-pro", "gemini-2.5-flash"],
                 source="remote",
@@ -450,7 +450,7 @@ def test_query_vertex_remote_catalog_replaces_stale_default(
     )
 
     view = QueryView()
-    view.llm_provider.setCurrentText("vertex_ai")
+    view.llm_provider.setCurrentText("vertex")
 
     answer_models = [
         view.answer_model.itemText(i) for i in range(view.answer_model.count())
@@ -464,3 +464,4 @@ def test_query_vertex_remote_catalog_replaces_stale_default(
     assert answer_models == ["gemini-2.5-pro", "gemini-2.5-flash"]
     assert verifier_models == ["gemini-2.5-pro", "gemini-2.5-flash"]
     assert "gemini-2.0-flash" not in answer_models
+

@@ -372,14 +372,14 @@ def test_query_status_preflight_sends_selected_embedding_configuration(
     )
 
     window.query_view.repo_id.setCurrentText("repo-a")
-    window.query_view.embedding_provider.setCurrentText("vertex_ai")
+    window.query_view.embedding_provider.setCurrentText("vertex")
     window.query_view.embedding_model.setCurrentText("text-embedding-005")
     window.query_view.query_input.setText("hola")
 
     window._on_query()
 
     assert any(
-        "requested_embedding_provider=vertex_ai" in url
+        "requested_embedding_provider=vertex" in url
         and "requested_embedding_model=text-embedding-005" in url
         for url in captured_urls
         if "/repos/repo-a/status" in url

@@ -9,7 +9,11 @@ from uuid import uuid4
 from openai import OpenAI
 import requests
 
-from coderag.core.provider_model_catalog import default_llm_model, llm_models_for_provider
+from coderag.core.provider_model_catalog import (
+    default_llm_model,
+    llm_models_for_provider,
+    normalize_provider_name,
+)
 from coderag.core.settings import ProviderName, get_settings
 from coderag.core.vertex_ai import build_vertex_labels, resolve_vertex_auth_context
 from coderag.llm.prompts import (
@@ -241,8 +245,8 @@ def _vertex_model_candidates(primary_model: str) -> list[str]:
     ]
     for item in [
         primary_model,
-        default_llm_model("vertex_ai"),
-        *llm_models_for_provider("vertex_ai"),
+        default_llm_model("vertex"),
+        *llm_models_for_provider("vertex"),
         *resilient_fallbacks,
     ]:
         value = item.strip()
@@ -269,7 +273,8 @@ class AnswerClient:
         if hasattr(settings, "resolve_llm_provider"):
             self.provider = settings.resolve_llm_provider(provider)
         else:
-            self.provider = "vertex_ai"
+            self.provider = "vertex"
+        self.provider = normalize_provider_name(self.provider)
 
         if hasattr(settings, "resolve_api_key"):
             self.api_key = settings.resolve_api_key(self.provider)
@@ -335,7 +340,7 @@ class AnswerClient:
             return self._call_openai(model, prompt, timeout_seconds=timeout_seconds)
         if self.provider == "gemini":
             return self._call_gemini(model, prompt, timeout_seconds=timeout_seconds)
-        if self.provider == "vertex_ai":
+        if self.provider == "vertex":
             return self._call_vertex_ai(
                 model,
                 prompt,
@@ -588,7 +593,7 @@ class AnswerClient:
             return self.client is not None
         if self.provider == "gemini":
             return bool(self.api_key)
-        if self.provider == "vertex_ai":
+        if self.provider == "vertex":
             settings = get_settings()
             if hasattr(settings, "is_vertex_ai_configured"):
                 return bool(settings.is_vertex_ai_configured())
