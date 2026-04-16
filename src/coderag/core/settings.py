@@ -17,6 +17,7 @@ ProviderName = Literal["openai", "gemini", "vertex", "vertex_ai"]
 HnswSpaceName = Literal["l2", "cosine"]
 IngestionExecutionMode = Literal["thread", "rq"]
 VertexAuthMode = Literal["service_account"]
+GitSshStrictHostKeyChecking = Literal["yes", "accept-new", "no"]
 
 
 class Settings(BaseSettings):
@@ -114,6 +115,22 @@ class Settings(BaseSettings):
     ingestion_enqueue_lock_wait_seconds: int = Field(
         default=5,
         alias="INGESTION_ENQUEUE_LOCK_WAIT_SECONDS",
+    )
+    git_ssh_enable_agent: bool = Field(
+        default=True,
+        alias="GIT_SSH_ENABLE_AGENT",
+    )
+    git_ssh_key_path: Path = Field(
+        default=Path("~/.ssh/id_rsa"),
+        alias="GIT_SSH_KEY_PATH",
+    )
+    git_ssh_known_hosts_path: Path = Field(
+        default=Path("~/.ssh/known_hosts"),
+        alias="GIT_SSH_KNOWN_HOSTS_PATH",
+    )
+    git_ssh_strict_host_key_checking: GitSshStrictHostKeyChecking = Field(
+        default="yes",
+        alias="GIT_SSH_STRICT_HOST_KEY_CHECKING",
     )
     workspace_path: Path = Field(
         default=Path("./storage/workspace"),

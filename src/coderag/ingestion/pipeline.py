@@ -2,6 +2,7 @@
 
 from collections import Counter
 from collections import defaultdict
+from pathlib import Path
 from time import perf_counter
 from typing import Callable
 
@@ -156,12 +157,12 @@ def _purge_repo_indices(repo_id: str, logger: LoggerFn) -> None:
 
 
 def ingest_repository(
+    provider: str,
     repo_url: str,
     branch: str,
     commit: str | None,
+    token: str | None,
     logger: LoggerFn,
-    provider: str | None = None,
-    token: str | None = None,
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
     diagnostics_sink: dict[str, object] | None = None,
@@ -176,6 +177,16 @@ def ingest_repository(
         commit=commit,
         provider=provider,
         token=token,
+        ssh_enable_agent=bool(getattr(settings, "git_ssh_enable_agent", True)),
+        ssh_key_path=getattr(settings, "git_ssh_key_path", Path("~/.ssh/id_rsa")),
+        ssh_known_hosts_path=getattr(
+            settings,
+            "git_ssh_known_hosts_path",
+            Path("~/.ssh/known_hosts"),
+        ),
+        ssh_strict_host_key_checking=str(
+            getattr(settings, "git_ssh_strict_host_key_checking", "yes")
+        ),
     )
 
     if _repo_has_existing_index_data(repo_id=repo_id, logger=logger):

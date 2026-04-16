@@ -32,14 +32,10 @@ class RepoIngestRequest(BaseModel):
     )
     repo_url: str = Field(
         description="URL del repositorio remoto.",
-        examples=["https://github.com/macrozheng/mall.git"],
-    )
-    token: str | None = Field(
-        default=None,
-        description=(
-            "Token opcional para repositorios privados. Para Bitbucket "
-            "admite token simple o formato usuario:token."
-        ),
+        examples=[
+            "https://github.com/macrozheng/mall.git",
+            "git@bitbucket.org:workspace/proyecto.git",
+        ],
     )
     branch: str = Field(
         default="main",
@@ -49,6 +45,13 @@ class RepoIngestRequest(BaseModel):
     commit: str | None = Field(
         default=None,
         description="Hash commit opcional para fijar una revisión específica.",
+    )
+    token: str | None = Field(
+        default=None,
+        description=(
+            "Token opcional para autenticación HTTPS en GitHub "
+            "(usado cuando provider=github)."
+        ),
     )
     embedding_provider: str | None = Field(
         default=None,

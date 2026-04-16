@@ -88,10 +88,10 @@ def _execute_ingest_job(
         ingest_diagnostics: dict[str, object] = {}
 
         repo_id = ingest_repository(
+            provider=request.provider,
             repo_url=request.repo_url,
             branch=request.branch,
             commit=request.commit,
-            provider=request.provider,
             token=request.token,
             embedding_provider=request.embedding_provider,
             embedding_model=request.embedding_model,

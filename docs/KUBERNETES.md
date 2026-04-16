@@ -28,7 +28,7 @@ Guia tecnica consolidada para despliegue Kubernetes del proyecto.
   - `k8s/addons/redis/redis-services.yaml`
   - `k8s/addons/redis/redis-statefulset.yaml`
 - Overlays:
-  - `k8s/overlays/cloud/` (base + ingress + patch de imagen API)
+  - `k8s/overlays/cloud/` (base + ingress + patch de imagen API + ExternalSecret Git SSH)
   - `k8s/overlays/cloud-with-redis/` (cloud + addon Redis + worker + escalado API)
 
 ## Prerequisitos
@@ -38,6 +38,7 @@ Guia tecnica consolidada para despliegue Kubernetes del proyecto.
 - Soporte de Kustomize en `kubectl` (`apply -k`).
 - Registro de contenedores accesible desde el cluster.
 - Secretos reales para API provider y Neo4j (no usar placeholders en produccion).
+- External Secrets Operator instalado y `ClusterSecretStore` operativo.
 
 ## Build y push de imagen
 
@@ -63,20 +64,23 @@ Recomendacion:
 
 - `k8s/base/api-secret.yaml`
 - `k8s/base/neo4j-secret.yaml`
+- `k8s/overlays/cloud/git-ssh-externalsecret.yaml`
 
 Campos sensibles tipicos:
 
 - `OPENAI_API_KEY`
 - `GEMINI_API_KEY`, `service-account.json` (Vertex AI)
 - `VERTEX_AI_PROJECT_ID`
+- `id_rsa`, `known_hosts` (secreto remoto consumido por ExternalSecret)
 - `NEO4J_PASSWORD`
 - `NEO4J_AUTH` (en secreto Neo4j)
 
 ### Flujo recomendado
 
-1. Completar secretos en archivos base antes de aplicar overlays.
-2. Confirmar que no queden valores placeholder (`""`, `password`).
-3. Aplicar overlay correspondiente.
+1. Completar secretos base (`api-secret`, `neo4j-secret`) antes de aplicar overlays.
+2. Configurar `k8s/overlays/cloud/git-ssh-externalsecret.yaml` con tu `ClusterSecretStore` y keys remotos.
+3. Confirmar que no queden placeholders (`""`, `password`) en secretos base.
+4. Aplicar overlay correspondiente.
 
 ## Deploy en entorno dev
 

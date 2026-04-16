@@ -42,6 +42,10 @@ services:
       INGESTION_RETRY_MAX: ${INGESTION_RETRY_MAX:-3}
       INGESTION_RETRY_INTERVALS: ${INGESTION_RETRY_INTERVALS:-30,120,300}
       INGESTION_RETRY_TRANSIENT_ONLY: ${INGESTION_RETRY_TRANSIENT_ONLY:-true}
+      GIT_SSH_ENABLE_AGENT: ${GIT_SSH_ENABLE_AGENT:-false}
+      GIT_SSH_KEY_PATH: ${GIT_SSH_KEY_PATH:-/app/secrets/git/id_rsa}
+      GIT_SSH_KNOWN_HOSTS_PATH: ${GIT_SSH_KNOWN_HOSTS_PATH:-/app/secrets/git/known_hosts}
+      GIT_SSH_STRICT_HOST_KEY_CHECKING: ${GIT_SSH_STRICT_HOST_KEY_CHECKING:-yes}
       HEALTH_CHECK_STRICT: ${HEALTH_CHECK_STRICT:-true}
       HEALTH_CHECK_OPENAI: ${HEALTH_CHECK_OPENAI:-false}
       HEALTH_CHECK_REDIS: ${HEALTH_CHECK_REDIS:-false}
@@ -76,6 +80,7 @@ services:
     volumes:
       - api_storage:/app/storage
       - ${VERTEX_AI_SERVICE_ACCOUNT_FILE:-./secrets/vertex-service-account.json}:/app/secrets/vertex-service-account.json:ro
+      - ${GIT_SSH_SECRET_DIR:-./secrets/git}:/app/secrets/git:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 20s
@@ -167,6 +172,10 @@ services:
       INGESTION_RETRY_MAX: ${INGESTION_RETRY_MAX:-3}
       INGESTION_RETRY_INTERVALS: ${INGESTION_RETRY_INTERVALS:-30,120,300}
       INGESTION_RETRY_TRANSIENT_ONLY: ${INGESTION_RETRY_TRANSIENT_ONLY:-true}
+      GIT_SSH_ENABLE_AGENT: ${GIT_SSH_ENABLE_AGENT:-false}
+      GIT_SSH_KEY_PATH: ${GIT_SSH_KEY_PATH:-/app/secrets/git/id_rsa}
+      GIT_SSH_KNOWN_HOSTS_PATH: ${GIT_SSH_KNOWN_HOSTS_PATH:-/app/secrets/git/known_hosts}
+      GIT_SSH_STRICT_HOST_KEY_CHECKING: ${GIT_SSH_STRICT_HOST_KEY_CHECKING:-yes}
       CHROMA_HNSW_SPACE: ${CHROMA_HNSW_SPACE:-cosine}
       SCAN_MAX_FILE_SIZE_BYTES: ${SCAN_MAX_FILE_SIZE_BYTES:-200000}
       SCAN_EXCLUDED_DIRS: ${SCAN_EXCLUDED_DIRS:-.git,node_modules,dist,build,venv,.venv,__pycache__,.idea,.vscode,target,out,bin,obj,.gradle,.m2,.pytest_cache,.mypy_cache}
@@ -179,6 +188,7 @@ services:
     volumes:
       - api_storage:/app/storage
       - ${VERTEX_AI_SERVICE_ACCOUNT_FILE:-./secrets/vertex-service-account.json}:/app/secrets/vertex-service-account.json:ro
+      - ${GIT_SSH_SECRET_DIR:-./secrets/git}:/app/secrets/git:ro
     restart: unless-stopped
 
 volumes:

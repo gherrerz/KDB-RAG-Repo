@@ -1,9 +1,9 @@
 """Utilidades del cliente Git para clonar y preparar repositorios."""
 
-from contextlib import contextmanager
 import hashlib
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -62,78 +62,151 @@ def _safe_remove_tree(path: Path, retries: int = 3) -> bool:
     return False
 
 
-def _default_git_username(provider: str | None) -> str:
-    """Resuelve un usuario HTTP por defecto para autenticación con token."""
-    normalized = (provider or "").strip().lower()
-    if normalized == "github":
-        return "x-access-token"
-    if normalized == "gitlab":
-        return "oauth2"
-    return "x-token-auth"
+def _is_ssh_repo_url(repo_url: str) -> bool:
+    """Retorna True para URLs Git SSH (git@host:path o ssh://)."""
+    normalized = repo_url.strip().lower()
+    return normalized.startswith("git@") or normalized.startswith("ssh://")
 
 
-def _resolve_git_credentials(
-    token: str,
-    provider: str | None,
-) -> tuple[str, str]:
-    """Normaliza credenciales desde token simple o formato user:token."""
-    raw_token = token.strip()
-    if ":" in raw_token:
-        username, password = raw_token.split(":", maxsplit=1)
-        if password:
-            resolved_username = username or _default_git_username(provider)
-            return resolved_username, password
-    return _default_git_username(provider), raw_token
+def _normalize_provider(provider: str | None) -> str:
+    """Normaliza provider Git a un valor estable en minúsculas."""
+    return (provider or "github").strip().lower()
 
 
-@contextmanager
-def _build_git_auth_env(
+def _resolve_github_token_env(token: str) -> tuple[dict[str, str], tempfile.TemporaryDirectory[str]]:
+    """Construye entorno askpass para usar token GitHub sin exponerlo en args."""
+    temp_dir = tempfile.TemporaryDirectory(prefix="coderag_git_askpass_")
+    script_path = Path(temp_dir.name) / "askpass.sh"
+    script_path.write_text(
+        "#!/bin/sh\n"
+        "prompt=$(printf '%s' \"$1\" | tr '[:upper:]' '[:lower:]')\n"
+        "case \"$prompt\" in\n"
+        "  *username*) printf '%s\\n' 'x-access-token' ;;\n"
+        "  *) printf '%s\\n' \"$CODERAG_GITHUB_TOKEN\" ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    script_path.chmod(0o700)
+    return {
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": str(script_path),
+        "CODERAG_GITHUB_TOKEN": token,
+    }, temp_dir
+
+
+def _resolve_runtime_auth_env(
+    repo_url: str,
+    *,
+    provider: str,
     token: str | None,
-    provider: str | None,
-):
-    """Construye env temporal de autenticación Git usando GIT_ASKPASS."""
-    if not token or not token.strip():
-        yield None
-        return
+    ssh_enable_agent: bool,
+    ssh_key_path: Path,
+    ssh_known_hosts_path: Path,
+    ssh_strict_host_key_checking: str,
+) -> tuple[dict[str, str] | None, tempfile.TemporaryDirectory[str] | None]:
+    """Resuelve el entorno de autenticación según provider y tipo de URL."""
+    normalized_provider = _normalize_provider(provider)
+    is_ssh = _is_ssh_repo_url(repo_url)
 
-    username, password = _resolve_git_credentials(token, provider)
-    script_path: Path | None = None
+    if normalized_provider == "bitbucket":
+        return (
+            _resolve_ssh_env(
+                repo_url,
+                ssh_enable_agent=ssh_enable_agent,
+                ssh_key_path=ssh_key_path,
+                ssh_known_hosts_path=ssh_known_hosts_path,
+                ssh_strict_host_key_checking=ssh_strict_host_key_checking,
+            ),
+            None,
+        )
 
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            suffix=".sh",
-            prefix="coderag_git_askpass_",
-            delete=False,
-        ) as script:
-            script.write("#!/bin/sh\n")
-            script.write('case "$1" in\n')
-            script.write(
-                '  *Username*) printf "%s\\n" "$CODERAG_GIT_USERNAME" ;;\n'
+    if normalized_provider == "github":
+        cleaned_token = (token or "").strip()
+        if cleaned_token and not is_ssh:
+            return _resolve_github_token_env(cleaned_token)
+        if is_ssh:
+            return (
+                _resolve_ssh_env(
+                    repo_url,
+                    ssh_enable_agent=ssh_enable_agent,
+                    ssh_key_path=ssh_key_path,
+                    ssh_known_hosts_path=ssh_known_hosts_path,
+                    ssh_strict_host_key_checking=ssh_strict_host_key_checking,
+                ),
+                None,
             )
-            script.write(
-                '  *Password*) printf "%s\\n" "$CODERAG_GIT_PASSWORD" ;;\n'
-            )
-            script.write(
-                '  *) printf "%s\\n" "$CODERAG_GIT_PASSWORD" ;;\n'
-            )
-            script.write("esac\n")
-            script_path = Path(script.name)
+        return None, None
 
-        script_path.chmod(0o700)
-        yield {
-            "GIT_TERMINAL_PROMPT": "0",
-            "GIT_ASKPASS": str(script_path),
-            "CODERAG_GIT_USERNAME": username,
-            "CODERAG_GIT_PASSWORD": password,
-        }
-    finally:
-        if script_path and script_path.exists():
-            try:
-                script_path.unlink()
-            except OSError:
-                pass
+    # Compatibilidad: otros providers mantienen resolución por tipo de URL.
+    if is_ssh:
+        return (
+            _resolve_ssh_env(
+                repo_url,
+                ssh_enable_agent=ssh_enable_agent,
+                ssh_key_path=ssh_key_path,
+                ssh_known_hosts_path=ssh_known_hosts_path,
+                ssh_strict_host_key_checking=ssh_strict_host_key_checking,
+            ),
+            None,
+        )
+
+    cleaned_token = (token or "").strip()
+    if cleaned_token:
+        return _resolve_github_token_env(cleaned_token)
+    return None, None
+
+
+def _resolve_ssh_env(
+    repo_url: str,
+    *,
+    ssh_enable_agent: bool,
+    ssh_key_path: Path,
+    ssh_known_hosts_path: Path,
+    ssh_strict_host_key_checking: str,
+) -> dict[str, str] | None:
+    """Construye entorno SSH para clones privados sin exponer credenciales por request."""
+    if not _is_ssh_repo_url(repo_url):
+        return None
+
+    strict_mode = str(ssh_strict_host_key_checking or "yes").strip().lower()
+    if strict_mode not in {"yes", "accept-new", "no"}:
+        raise RuntimeError(
+            "GIT_SSH_STRICT_HOST_KEY_CHECKING debe ser uno de: yes, accept-new, no."
+        )
+
+    known_hosts = Path(ssh_known_hosts_path).expanduser()
+    if strict_mode == "yes" and not known_hosts.exists():
+        raise RuntimeError(
+            "No se encontró archivo known_hosts requerido para SSH estricto. "
+            f"Ruta esperada: {known_hosts}"
+        )
+
+    ssh_parts = [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        f"StrictHostKeyChecking={strict_mode}",
+    ]
+
+    if known_hosts.exists():
+        ssh_parts.extend(["-o", f"UserKnownHostsFile={known_hosts}"])
+
+    use_agent = bool(ssh_enable_agent and os.environ.get("SSH_AUTH_SOCK"))
+    if not use_agent:
+        key_file = Path(ssh_key_path).expanduser()
+        if not key_file.exists():
+            raise RuntimeError(
+                "No se encontró clave SSH privada para clonar repositorio. "
+                f"Ruta esperada: {key_file}"
+            )
+        ssh_parts.extend(["-i", str(key_file), "-o", "IdentitiesOnly=yes"])
+
+    command = " ".join(shlex.quote(part) for part in ssh_parts)
+    return {
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_SSH_COMMAND": command,
+    }
 
 
 def _run_git_command(
@@ -141,13 +214,13 @@ def _run_git_command(
     *,
     cwd: Path | None = None,
     check: bool = True,
-    auth_env: dict[str, str] | None = None,
+    runtime_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Ejecuta un comando Git con entorno de autenticación opcional."""
+    """Ejecuta un comando Git con entorno de runtime opcional."""
     env = None
-    if auth_env:
+    if runtime_env:
         env = os.environ.copy()
-        env.update(auth_env)
+        env.update(runtime_env)
 
     return subprocess.run(
         command,
@@ -164,8 +237,12 @@ def clone_repository(
     destination_root: Path,
     branch: str = "main",
     commit: str | None = None,
-    provider: str | None = None,
+    provider: str = "github",
     token: str | None = None,
+    ssh_enable_agent: bool = True,
+    ssh_key_path: Path = Path("~/.ssh/id_rsa"),
+    ssh_known_hosts_path: Path = Path("~/.ssh/known_hosts"),
+    ssh_strict_host_key_checking: str = "yes",
 ) -> tuple[str, Path]:
     """Clona el repositorio en el espacio de trabajo y devuelve repo_id y la ruta local."""
     repo_id = build_repo_id(repo_url, branch)
@@ -185,9 +262,18 @@ def clone_repository(
         repo_url,
         str(destination),
     ]
-    with _build_git_auth_env(token=token, provider=provider) as auth_env:
+    runtime_env, askpass_temp_dir = _resolve_runtime_auth_env(
+        repo_url,
+        provider=provider,
+        token=token,
+        ssh_enable_agent=ssh_enable_agent,
+        ssh_key_path=ssh_key_path,
+        ssh_known_hosts_path=ssh_known_hosts_path,
+        ssh_strict_host_key_checking=ssh_strict_host_key_checking,
+    )
+    try:
         try:
-            _run_git_command(command, check=True, auth_env=auth_env)
+            _run_git_command(command, check=True, runtime_env=runtime_env)
         except subprocess.CalledProcessError as exc:
             if destination.exists():
                 _safe_remove_tree(destination)
@@ -201,7 +287,7 @@ def clone_repository(
                 str(destination),
             ]
             try:
-                _run_git_command(fallback, check=True, auth_env=auth_env)
+                _run_git_command(fallback, check=True, runtime_env=runtime_env)
             except subprocess.CalledProcessError as fallback_exc:
                 stderr = (fallback_exc.stderr or "").strip()
                 stdout = (fallback_exc.stdout or "").strip()
@@ -217,6 +303,7 @@ def clone_repository(
                     ["git", "checkout", commit],
                     check=False,
                     cwd=destination,
+                    runtime_env=runtime_env,
                 )
                 if checkout_result.returncode != 0:
                     stderr = (checkout_result.stderr or "").strip()
@@ -226,11 +313,15 @@ def clone_repository(
                     ) from exc
                 return repo_id, destination
 
-    if commit:
-        _run_git_command(
-            ["git", "checkout", commit],
-            check=True,
-            cwd=destination,
-        )
+        if commit:
+            _run_git_command(
+                ["git", "checkout", commit],
+                check=True,
+                cwd=destination,
+                runtime_env=runtime_env,
+            )
+    finally:
+        if askpass_temp_dir is not None:
+            askpass_temp_dir.cleanup()
 
     return repo_id, destination

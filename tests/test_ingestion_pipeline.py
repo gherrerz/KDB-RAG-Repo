@@ -106,9 +106,11 @@ def test_ingest_repository_continues_on_graph_failure(
 
     logs: list[str] = []
     repo_id = pipeline.ingest_repository(
+        provider="github",
         repo_url="https://example.com/repo.git",
         branch="main",
         commit=None,
+        token=None,
         logger=logs.append,
     )
 
@@ -215,9 +217,11 @@ def test_ingest_repository_purges_existing_repo_before_reindex(
 
     logs: list[str] = []
     pipeline.ingest_repository(
+        provider="github",
         repo_url="https://example.com/repo.git",
         branch="main",
         commit=None,
+        token=None,
         logger=logs.append,
     )
 
@@ -226,11 +230,11 @@ def test_ingest_repository_purges_existing_repo_before_reindex(
     assert any("Observabilidad símbolos:" in item for item in logs)
 
 
-def test_ingest_repository_forwards_provider_and_token_to_clone(
+def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Propaga provider/token al clonador para autenticación de repos privados."""
+    """Propaga configuración SSH de runtime al clonador para repos privados."""
     scanned = [ScannedFile(path="a.py", language="python", content="print('ok')")]
     symbols = [
         SymbolChunk(
@@ -252,6 +256,10 @@ def test_ingest_repository_forwards_provider_and_token_to_clone(
         scan_excluded_dirs = ".git,node_modules"
         scan_excluded_extensions = ".png,.zip"
         scan_excluded_files = ".gitignore,.env"
+        git_ssh_enable_agent = True
+        git_ssh_key_path = Path("/secrets/git/id_rsa")
+        git_ssh_known_hosts_path = Path("/secrets/git/known_hosts")
+        git_ssh_strict_host_key_checking = "yes"
 
     captured: dict[str, object] = {}
 
@@ -260,8 +268,12 @@ def test_ingest_repository_forwards_provider_and_token_to_clone(
         destination_root: Path,
         branch: str,
         commit: str | None,
-        provider: str | None = None,
+        provider: str = "github",
         token: str | None = None,
+        ssh_enable_agent: bool = True,
+        ssh_key_path: Path = Path("~/.ssh/id_rsa"),
+        ssh_known_hosts_path: Path = Path("~/.ssh/known_hosts"),
+        ssh_strict_host_key_checking: str = "yes",
     ) -> tuple[str, Path]:
         captured["repo_url"] = repo_url
         captured["destination_root"] = destination_root
@@ -269,6 +281,10 @@ def test_ingest_repository_forwards_provider_and_token_to_clone(
         captured["commit"] = commit
         captured["provider"] = provider
         captured["token"] = token
+        captured["ssh_enable_agent"] = ssh_enable_agent
+        captured["ssh_key_path"] = ssh_key_path
+        captured["ssh_known_hosts_path"] = ssh_known_hosts_path
+        captured["ssh_strict_host_key_checking"] = ssh_strict_host_key_checking
         return "r1", tmp_path
 
     monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
@@ -317,16 +333,20 @@ def test_ingest_repository_forwards_provider_and_token_to_clone(
 
     logs: list[str] = []
     pipeline.ingest_repository(
+        provider="bitbucket",
         repo_url="https://bitbucket.example/scm/acme/repo.git",
         branch="master",
         commit=None,
+        token=None,
         logger=logs.append,
-        provider="bitbucket",
-        token="svc-ci:token-abc",
     )
 
     assert captured["provider"] == "bitbucket"
-    assert captured["token"] == "svc-ci:token-abc"
+    assert captured["token"] is None
+    assert captured["ssh_enable_agent"] is True
+    assert captured["ssh_key_path"] == Path("/secrets/git/id_rsa")
+    assert captured["ssh_known_hosts_path"] == Path("/secrets/git/known_hosts")
+    assert captured["ssh_strict_host_key_checking"] == "yes"
 
 
 def test_index_graph_adds_semantic_relations_when_enabled(
@@ -895,9 +915,11 @@ def test_ingest_repository_fails_when_purge_fails(
     logs: list[str] = []
     with pytest.raises(RuntimeError) as exc_info:
         pipeline.ingest_repository(
+            provider="github",
             repo_url="https://example.com/repo.git",
             branch="main",
             commit=None,
+            token=None,
             logger=logs.append,
         )
 

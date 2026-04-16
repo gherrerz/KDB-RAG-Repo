@@ -36,7 +36,7 @@ RUN groupadd --system app \
     && useradd --system --gid app --create-home app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /wheels /wheels

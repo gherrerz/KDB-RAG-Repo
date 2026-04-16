@@ -162,16 +162,16 @@ Limpia todo el estado indexado.
 |---|---|---|---|
 | `provider` | `str` | no | `"github"` |
 | `repo_url` | `str` | sí | - |
-| `token` | `str | null` | no | `null` |
 | `branch` | `str` | no | `"main"` |
 | `commit` | `str | null` | no | `null` |
+| `token` | `str | null` | no | `null` |
 | `embedding_provider` | `str | null` | no | `null` |
 | `embedding_model` | `str | null` | no | `null` |
 
-Notas para `token` en repos privados:
+Notas para repos privados:
 
-- Para Bitbucket se acepta token simple (usa usuario HTTP por defecto).
-- Para Bitbucket Server/Data Center se recomienda `usuario:token`.
+- `provider=github`: usa URL HTTPS (`https://github.com/...`) y envía `token`.
+- `provider=bitbucket`: usa URL SSH (`git@...` o `ssh://...`) con configuración SSH del entorno.
 
 ### JobInfo
 
@@ -422,9 +422,8 @@ Request (Bitbucket privado):
 ```json
 {
   "provider": "bitbucket",
-  "repo_url": "https://bitbucket.example/scm/team/proyecto.git",
-  "branch": "master",
-  "token": "usuario_ci:token_privado"
+  "repo_url": "git@bitbucket.example:team/proyecto.git",
+  "branch": "master"
 }
 ```
 

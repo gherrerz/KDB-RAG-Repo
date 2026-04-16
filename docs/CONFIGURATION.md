@@ -67,6 +67,18 @@ Compatibilidad temporal de naming:
 - `INGESTION_ENQUEUE_LOCK_SECONDS`: TTL del lock distribuido por `repo_id`. Default: `30`.
 - `INGESTION_ENQUEUE_LOCK_WAIT_SECONDS`: espera maxima para adquirir lock. Default: `5`.
 
+### Git SSH para repos privados
+
+- `GIT_SSH_ENABLE_AGENT`: habilita uso de `SSH_AUTH_SOCK` cuando está disponible. Default: `true`.
+- `GIT_SSH_KEY_PATH`: ruta al private key usado cuando no hay agent disponible. Default: `~/.ssh/id_rsa`.
+- `GIT_SSH_KNOWN_HOSTS_PATH`: ruta a `known_hosts` para verificación de host key. Default: `~/.ssh/known_hosts`.
+- `GIT_SSH_STRICT_HOST_KEY_CHECKING`: política SSH (`yes`, `accept-new`, `no`). Default: `yes`.
+
+Notas operativas SSH:
+
+- Con `GIT_SSH_STRICT_HOST_KEY_CHECKING=yes`, `known_hosts` debe existir y contener la huella del host Git remoto.
+- En contenedores/Kubernetes se recomienda montar key y `known_hosts` desde Secret en modo `readOnly`.
+
 ### Escaneo de ingesta
 
 - `SCAN_MAX_FILE_SIZE_BYTES`: limite de bytes por archivo escaneable. Default en settings: `None`; default en compose: `200000`.

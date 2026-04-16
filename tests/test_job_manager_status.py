@@ -63,7 +63,6 @@ def test_job_manager_marks_partial_when_repo_not_query_ready(
         provider="github",
         repo_url="https://github.com/acme/demo.git",
         branch="main",
-        token=None,
         commit=None,
     )
     created = manager.create_ingest_job(request)
@@ -146,7 +145,6 @@ def test_job_manager_marks_completed_when_repo_query_ready(
         provider="github",
         repo_url="https://github.com/acme/ready.git",
         branch="main",
-        token=None,
         commit=None,
     )
     created = manager.create_ingest_job(request)
@@ -178,11 +176,11 @@ def test_job_manager_marks_completed_when_repo_query_ready(
     assert runtime["last_embedding_model"] is None
 
 
-def test_job_manager_passes_provider_and_token_to_ingestion_pipeline(
+def test_job_manager_forwards_provider_and_token_to_pipeline(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """Propaga provider/token del request al pipeline de ingesta."""
+    """Propaga provider/token para que pipeline decida estrategia de autenticación."""
 
     class _Settings:
         workspace_path = tmp_path / "workspace"
@@ -214,8 +212,7 @@ def test_job_manager_passes_provider_and_token_to_ingestion_pipeline(
         captured["repo_url"] = repo_url
         captured["branch"] = branch
         captured["commit"] = commit
-        captured["provider"] = kwargs.get("provider")
-        captured["token"] = kwargs.get("token")
+        captured["kwargs"] = dict(kwargs)
         return "repo-private"
 
     monkeypatch.setattr(
@@ -235,16 +232,16 @@ def test_job_manager_passes_provider_and_token_to_ingestion_pipeline(
     )
 
     request = RepoIngestRequest(
-        provider="bitbucket",
-        repo_url="https://bitbucket.example/scm/acme/private.git",
+        provider="github",
+        repo_url="https://github.com/acme/private.git",
         branch="master",
-        token="svc-ci:top-secret",
         commit=None,
+        token="ghp_test_token",
     )
     manager.create_ingest_job(request)
 
-    assert captured["provider"] == "bitbucket"
-    assert captured["token"] == "svc-ci:top-secret"
+    assert captured["kwargs"]["provider"] == "github"
+    assert captured["kwargs"]["token"] == "ghp_test_token"
 
 
 def test_job_manager_recovers_interrupted_running_jobs(
@@ -315,7 +312,6 @@ def test_job_manager_enqueues_job_when_rq_mode_enabled(
         provider="github",
         repo_url="https://github.com/acme/rq-demo.git",
         branch="main",
-        token=None,
         commit=None,
     )
     created = manager.create_ingest_job(request)
@@ -385,7 +381,6 @@ def test_job_manager_rejects_duplicate_active_repo_ingest(
         provider="github",
         repo_url="https://github.com/acme/dup-repo.git",
         branch="main",
-        token=None,
         commit=None,
     )
 
@@ -425,7 +420,6 @@ def test_job_manager_uses_repo_lock_in_rq_mode(
         provider="github",
         repo_url="https://github.com/acme/locked-repo.git",
         branch="main",
-        token=None,
         commit=None,
     )
     created = manager.create_ingest_job(request)

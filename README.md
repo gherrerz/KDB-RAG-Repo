@@ -109,8 +109,12 @@ $body = @{
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/repos/ingest -ContentType 'application/json' -Body $body
 ```
 
-Para repos privados en Bitbucket, agrega `token` al body. Se admite token
-simple y formato `usuario:token` (recomendado para Bitbucket Server/DC).
+Para repos privados en GitHub, usa URL HTTPS y envía `token` en el request de
+ingesta.
+
+Para repos privados en Bitbucket, usa URL SSH (por ejemplo
+`git@bitbucket.org:workspace/proyecto.git`). La autenticacion se resuelve en
+runtime via SSH agent o key file montada en contenedor/pod.
 
 4. Consulta estado del job.
 

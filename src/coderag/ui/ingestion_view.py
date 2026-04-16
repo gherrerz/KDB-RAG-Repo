@@ -98,10 +98,16 @@ class IngestionView(QWidget):
         self.ingest_action_hint.setWordWrap(True)
 
         self.repo_url = QLineEdit()
-        self.repo_url.setPlaceholderText("https://github.com/org/repo.git")
-
+        self.repo_url.setPlaceholderText("git@bitbucket.org:workspace/repo.git")
+        self.token_label = QLabel("Token (GitHub)")
         self.token = QLineEdit()
         self.token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.token.setPlaceholderText("ghp_... (solo GitHub HTTPS privado)")
+        self.ssh_hint = QLabel(
+            "Autenticacion Git privada via SSH (agent o key file en runtime)."
+        )
+        self.ssh_hint.setObjectName("providerWarning")
+        self.ssh_hint.setWordWrap(True)
 
         self.branch = QLineEdit("main")
         self.ingest_button = QPushButton("Ingestar")
@@ -191,7 +197,8 @@ class IngestionView(QWidget):
         form.addRow("", self.embedding_status_chip)
         form.addRow("", self.force_fallback)
         form.addRow("Repo URL", self.repo_url)
-        form.addRow("Token", self.token)
+        form.addRow(self.token_label, self.token)
+        form.addRow("", self.ssh_hint)
         form.addRow("Branch", self.branch)
         form.addRow("Job ID", self.job_id)
         form.addRow("Repo ID", self.repo_id)
@@ -254,6 +261,7 @@ class IngestionView(QWidget):
         self.refresh_embedding_models_button.clicked.connect(
             lambda: self._flash_button(self.refresh_embedding_models_button)
         )
+        self.provider.currentTextChanged.connect(self._on_git_provider_changed)
 
         self.setStyleSheet(
             """
@@ -329,6 +337,7 @@ class IngestionView(QWidget):
             self._on_embedding_provider_changed
         )
         self._load_layout_preferences()
+        self._on_git_provider_changed(self.provider.currentText())
         self._on_embedding_provider_changed(self.embedding_provider.currentText())
 
     def showEvent(self, event) -> None:
@@ -598,6 +607,25 @@ class IngestionView(QWidget):
     def set_ingest_action_hint(self, text: str) -> None:
         """Actualiza el mensaje inline asociado al botón de ingesta."""
         self.ingest_action_hint.setText(text.strip())
+
+    def _on_git_provider_changed(self, provider: str) -> None:
+        """Ajusta inputs de auth Git según provider seleccionado."""
+        selected = (provider or "").strip().lower()
+        is_github = selected == "github"
+        is_bitbucket = selected == "bitbucket"
+
+        self.token_label.setVisible(is_github)
+        self.token.setVisible(is_github)
+        self.ssh_hint.setVisible(is_bitbucket)
+
+        if is_github and self.repo_url.placeholderText().startswith("git@bitbucket.org"):
+            self.repo_url.setPlaceholderText("https://github.com/owner/repo.git")
+        if is_bitbucket and self.repo_url.placeholderText().startswith("https://github.com"):
+            self.repo_url.setPlaceholderText("git@bitbucket.org:workspace/repo.git")
+
+    def get_token(self) -> str:
+        """Devuelve token GitHub ingresado en la UI (si aplica)."""
+        return self.token.text().strip()
 
     def get_embedding_model(self) -> str:
         """Devuelve el modelo de embeddings actual para payload de ingesta."""

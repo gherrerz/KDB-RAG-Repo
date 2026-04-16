@@ -1114,7 +1114,6 @@ def test_ingest_endpoint_blocks_when_storage_preflight_fails(monkeypatch) -> Non
             "repo_url": "https://github.com/acme/mall",
             "branch": "main",
             "commit": None,
-            "token": None,
         },
     )
     assert response.status_code == 503

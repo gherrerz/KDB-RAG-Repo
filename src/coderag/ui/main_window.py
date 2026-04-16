@@ -303,11 +303,14 @@ class MainWindow(QMainWindow):
         payload = {
             "provider": self.ingestion_view.provider.currentText(),
             "repo_url": repo_url,
-            "token": self.ingestion_view.token.text().strip() or None,
             "branch": self.ingestion_view.branch.text().strip() or "main",
             "embedding_provider": self.ingestion_view.embedding_provider.currentText(),
             "embedding_model": self.ingestion_view.get_embedding_model() or None,
         }
+        if payload["provider"] == "github":
+            token = self.ingestion_view.get_token()
+            if token:
+                payload["token"] = token
         self.ingestion_view.set_running(True)
         self.ingestion_view.set_status("running", "En progreso")
         self.ingestion_view.set_progress(5)
