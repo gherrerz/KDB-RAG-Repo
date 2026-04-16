@@ -1,5 +1,6 @@
 """Pruebas de resiliencia a la clonación de repositorios."""
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -120,16 +121,12 @@ def test_clone_repository_uses_github_token_for_https_urls(
     assert "GIT_SSH_COMMAND" not in captured_env
 
 
-def test_clone_repository_uses_ssh_key_file_for_ssh_urls(
+def test_clone_repository_uses_ssh_content_for_ssh_urls(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Configura GIT_SSH_COMMAND con key file y known_hosts en modo estricto."""
+    """Configura GIT_SSH_COMMAND con key y known_hosts desde variables en modo estricto."""
     captured_env: dict[str, str] = {}
-    key_path = tmp_path / "id_rsa"
-    key_path.write_text("PRIVATE KEY", encoding="utf-8")
-    known_hosts = tmp_path / "known_hosts"
-    known_hosts.write_text("bitbucket.example ssh-ed25519 AAAA", encoding="utf-8")
 
     def fake_run(*args, **kwargs):
         command = args[0]
@@ -147,9 +144,9 @@ def test_clone_repository_uses_ssh_key_file_for_ssh_urls(
         destination_root=tmp_path,
         branch="main",
         commit=None,
-        ssh_enable_agent=False,
-        ssh_key_path=key_path,
-        ssh_known_hosts_path=known_hosts,
+        provider="bitbucket",
+        ssh_key_content="PRIVATE KEY",
+        ssh_known_hosts_content="bitbucket.example ssh-ed25519 AAAA",
         ssh_strict_host_key_checking="yes",
     )
 
@@ -157,16 +154,60 @@ def test_clone_repository_uses_ssh_key_file_for_ssh_urls(
     assert "StrictHostKeyChecking=yes" in captured_env["GIT_SSH_COMMAND"]
     assert "UserKnownHostsFile=" in captured_env["GIT_SSH_COMMAND"]
     assert " -i " in captured_env["GIT_SSH_COMMAND"]
-
-
-def test_clone_repository_uses_ssh_agent_when_available(
+def test_clone_repository_uses_ssh_content_from_env_for_bitbucket(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Prefiere SSH agent cuando está habilitado y SSH_AUTH_SOCK existe."""
+    """Prioriza contenido SSH desde variables para Bitbucket sin depender de archivos."""
     captured_env: dict[str, str] = {}
-    known_hosts = tmp_path / "known_hosts"
-    known_hosts.write_text("bitbucket.example ssh-ed25519 AAAA", encoding="utf-8")
+    materialized_key_path: Path | None = None
+    materialized_known_hosts_path: Path | None = None
+
+    def fake_run(*args, **kwargs):
+        nonlocal materialized_key_path, materialized_known_hosts_path
+        command = args[0]
+        env = kwargs.get("env") or {}
+        captured_env.update({k: str(v) for k, v in env.items()})
+
+        ssh_parts = shlex.split(captured_env["GIT_SSH_COMMAND"])
+        materialized_key_path = Path(ssh_parts[ssh_parts.index("-i") + 1])
+        known_hosts_option = next(
+            part for part in ssh_parts if part.startswith("UserKnownHostsFile=")
+        )
+        materialized_known_hosts_path = Path(
+            known_hosts_option.split("=", maxsplit=1)[1]
+        )
+
+        destination = Path(command[-1])
+        destination.mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(args=command, returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    clone_repository(
+        repo_url="git@bitbucket.example:acme/private-repo.git",
+        destination_root=tmp_path,
+        branch="main",
+        commit=None,
+        provider="bitbucket",
+        ssh_key_content="PRIVATE KEY FROM ENV",
+        ssh_known_hosts_content="bitbucket.example ssh-ed25519 AAAA",
+        ssh_strict_host_key_checking="yes",
+    )
+
+    assert captured_env["GIT_TERMINAL_PROMPT"] == "0"
+    assert materialized_key_path is not None
+    assert materialized_known_hosts_path is not None
+    assert not materialized_key_path.exists()
+    assert not materialized_known_hosts_path.exists()
+
+
+def test_clone_repository_accepts_base64_ssh_content_for_bitbucket(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Decodifica contenido base64 para SSH de Bitbucket cuando no hay archivos."""
+    captured_env: dict[str, str] = {}
 
     def fake_run(*args, **kwargs):
         command = args[0]
@@ -178,42 +219,121 @@ def test_clone_repository_uses_ssh_agent_when_available(
         return subprocess.CompletedProcess(args=command, returncode=0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/ssh-agent.sock")
 
     clone_repository(
         repo_url="git@bitbucket.example:acme/private-repo.git",
         destination_root=tmp_path,
         branch="main",
         commit=None,
-        ssh_enable_agent=True,
-        ssh_key_path=tmp_path / "id_rsa_does_not_matter_with_agent",
-        ssh_known_hosts_path=known_hosts,
+        provider="bitbucket",
+        ssh_key_content_b64="UFJJVkFURSBLRVkgRlJPTSBFTlY=",
+        ssh_known_hosts_content_b64="Yml0YnVja2V0LmV4YW1wbGUgc3NoLWVkMjU1MTkgQUFBQQ==",
         ssh_strict_host_key_checking="yes",
     )
 
-    assert captured_env["GIT_TERMINAL_PROMPT"] == "0"
-    assert "StrictHostKeyChecking=yes" in captured_env["GIT_SSH_COMMAND"]
-    assert " -i " not in captured_env["GIT_SSH_COMMAND"]
+    assert "UserKnownHostsFile=" in captured_env["GIT_SSH_COMMAND"]
+    assert " -i " in captured_env["GIT_SSH_COMMAND"]
 
 
-def test_clone_repository_requires_known_hosts_when_strict_mode_is_enabled(
+def test_clone_repository_prefers_raw_ssh_content_over_base64(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Falla temprano si strict=yes y known_hosts no está presente."""
-    key_path = tmp_path / "id_rsa"
-    key_path.write_text("PRIVATE KEY", encoding="utf-8")
-    missing_known_hosts = tmp_path / "missing_known_hosts"
+    """Usa contenido raw antes que la variante base64 cuando ambas están presentes."""
+    captured_env: dict[str, str] = {}
+    materialized_key_path: Path | None = None
+    materialized_known_hosts_path: Path | None = None
 
+    def fake_run(*args, **kwargs):
+        nonlocal materialized_key_path, materialized_known_hosts_path
+        command = args[0]
+        env = kwargs.get("env") or {}
+        captured_env.update({k: str(v) for k, v in env.items()})
+
+        ssh_parts = shlex.split(captured_env["GIT_SSH_COMMAND"])
+        materialized_key_path = Path(ssh_parts[ssh_parts.index("-i") + 1])
+        materialized_known_hosts_path = Path(
+            next(
+                part.split("=", maxsplit=1)[1]
+                for part in ssh_parts
+                if part.startswith("UserKnownHostsFile=")
+            )
+        )
+
+        destination = Path(command[-1])
+        destination.mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(args=command, returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    clone_repository(
+        repo_url="git@bitbucket.example:acme/private-repo.git",
+        destination_root=tmp_path,
+        branch="main",
+        commit=None,
+        provider="bitbucket",
+        ssh_key_content="PRIVATE KEY FROM ENV",
+        ssh_key_content_b64="UFJJVkFURSBLRVkgRlJPTSBCRTY0",
+        ssh_known_hosts_content="bitbucket.example ssh-ed25519 AAAA",
+        ssh_known_hosts_content_b64="Yml0YnVja2V0LmV4YW1wbGUgc3NoLWVkMjU1MTkgQkJCQg==",
+        ssh_strict_host_key_checking="yes",
+    )
+
+    assert materialized_key_path is not None
+    assert materialized_known_hosts_path is not None
+    assert not materialized_key_path.exists()
+    assert not materialized_known_hosts_path.exists()
+
+
+def test_clone_repository_rejects_invalid_base64_ssh_content(
+    tmp_path: Path,
+) -> None:
+    """Falla con error descriptivo cuando el secreto SSH base64 es inválido."""
     with pytest.raises(RuntimeError) as exc:
         clone_repository(
             repo_url="git@bitbucket.example:acme/private-repo.git",
             destination_root=tmp_path,
             branch="main",
             commit=None,
-            ssh_enable_agent=False,
-            ssh_key_path=key_path,
-            ssh_known_hosts_path=missing_known_hosts,
+            provider="bitbucket",
+            ssh_key_content_b64="***not-base64***",
+            ssh_known_hosts_content="bitbucket.example ssh-ed25519 AAAA",
+            ssh_strict_host_key_checking="yes",
+        )
+
+    assert "GIT_SSH_KEY_CONTENT_B64" in str(exc.value)
+
+
+def test_clone_repository_requires_known_hosts_when_strict_mode_is_enabled(
+    tmp_path: Path,
+) -> None:
+    """Falla temprano si strict=yes y known_hosts no está presente."""
+    with pytest.raises(RuntimeError) as exc:
+        clone_repository(
+            repo_url="git@bitbucket.example:acme/private-repo.git",
+            destination_root=tmp_path,
+            branch="main",
+            commit=None,
+            ssh_key_content="PRIVATE KEY",
             ssh_strict_host_key_checking="yes",
         )
 
     assert "known_hosts" in str(exc.value)
+
+
+def test_clone_repository_requires_key_content_when_missing(
+    tmp_path: Path,
+) -> None:
+    """Falla temprano si no se configuró contenido de clave SSH."""
+    with pytest.raises(RuntimeError) as exc:
+        clone_repository(
+            repo_url="git@bitbucket.example:acme/private-repo.git",
+            destination_root=tmp_path,
+            branch="main",
+            commit=None,
+            provider="bitbucket",
+            ssh_known_hosts_content="bitbucket.example ssh-ed25519 AAAA",
+            ssh_strict_host_key_checking="yes",
+        )
+
+    assert "GIT_SSH_KEY_CONTENT" in str(exc.value)

@@ -256,9 +256,10 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
         scan_excluded_dirs = ".git,node_modules"
         scan_excluded_extensions = ".png,.zip"
         scan_excluded_files = ".gitignore,.env"
-        git_ssh_enable_agent = True
-        git_ssh_key_path = Path("/secrets/git/id_rsa")
-        git_ssh_known_hosts_path = Path("/secrets/git/known_hosts")
+        git_ssh_key_content = "PRIVATE KEY FROM ENV"
+        git_ssh_key_content_b64 = ""
+        git_ssh_known_hosts_content = "bitbucket.example ssh-ed25519 AAAA"
+        git_ssh_known_hosts_content_b64 = ""
         git_ssh_strict_host_key_checking = "yes"
 
     captured: dict[str, object] = {}
@@ -270,9 +271,10 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
         commit: str | None,
         provider: str = "github",
         token: str | None = None,
-        ssh_enable_agent: bool = True,
-        ssh_key_path: Path = Path("~/.ssh/id_rsa"),
-        ssh_known_hosts_path: Path = Path("~/.ssh/known_hosts"),
+        ssh_key_content: str | None = None,
+        ssh_key_content_b64: str | None = None,
+        ssh_known_hosts_content: str | None = None,
+        ssh_known_hosts_content_b64: str | None = None,
         ssh_strict_host_key_checking: str = "yes",
     ) -> tuple[str, Path]:
         captured["repo_url"] = repo_url
@@ -281,9 +283,10 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
         captured["commit"] = commit
         captured["provider"] = provider
         captured["token"] = token
-        captured["ssh_enable_agent"] = ssh_enable_agent
-        captured["ssh_key_path"] = ssh_key_path
-        captured["ssh_known_hosts_path"] = ssh_known_hosts_path
+        captured["ssh_key_content"] = ssh_key_content
+        captured["ssh_key_content_b64"] = ssh_key_content_b64
+        captured["ssh_known_hosts_content"] = ssh_known_hosts_content
+        captured["ssh_known_hosts_content_b64"] = ssh_known_hosts_content_b64
         captured["ssh_strict_host_key_checking"] = ssh_strict_host_key_checking
         return "r1", tmp_path
 
@@ -343,9 +346,12 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
 
     assert captured["provider"] == "bitbucket"
     assert captured["token"] is None
-    assert captured["ssh_enable_agent"] is True
-    assert captured["ssh_key_path"] == Path("/secrets/git/id_rsa")
-    assert captured["ssh_known_hosts_path"] == Path("/secrets/git/known_hosts")
+    assert captured["ssh_key_content"] == "PRIVATE KEY FROM ENV"
+    assert captured["ssh_key_content_b64"] == ""
+    assert captured["ssh_known_hosts_content"] == (
+        "bitbucket.example ssh-ed25519 AAAA"
+    )
+    assert captured["ssh_known_hosts_content_b64"] == ""
     assert captured["ssh_strict_host_key_checking"] == "yes"
 
 

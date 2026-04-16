@@ -69,15 +69,41 @@ Compatibilidad temporal de naming:
 
 ### Git SSH para repos privados
 
-- `GIT_SSH_ENABLE_AGENT`: habilita uso de `SSH_AUTH_SOCK` cuando está disponible. Default: `true`.
-- `GIT_SSH_KEY_PATH`: ruta al private key usado cuando no hay agent disponible. Default: `~/.ssh/id_rsa`.
-- `GIT_SSH_KNOWN_HOSTS_PATH`: ruta a `known_hosts` para verificación de host key. Default: `~/.ssh/known_hosts`.
+- `GIT_SSH_KEY_CONTENT`: private key SSH en texto plano. Solo se usa para Bitbucket. Default: vacio.
+- `GIT_SSH_KEY_CONTENT_B64`: private key SSH codificada en base64. Solo se usa para Bitbucket si `GIT_SSH_KEY_CONTENT` está vacío. Default: vacio.
+- `GIT_SSH_KNOWN_HOSTS_CONTENT`: contenido de `known_hosts` en texto plano. Solo se usa para Bitbucket. Default: vacio.
+- `GIT_SSH_KNOWN_HOSTS_CONTENT_B64`: contenido de `known_hosts` codificado en base64. Solo se usa para Bitbucket si `GIT_SSH_KNOWN_HOSTS_CONTENT` está vacío. Default: vacio.
 - `GIT_SSH_STRICT_HOST_KEY_CHECKING`: política SSH (`yes`, `accept-new`, `no`). Default: `yes`.
 
 Notas operativas SSH:
 
-- Con `GIT_SSH_STRICT_HOST_KEY_CHECKING=yes`, `known_hosts` debe existir y contener la huella del host Git remoto.
-- En contenedores/Kubernetes se recomienda montar key y `known_hosts` desde Secret en modo `readOnly`.
+- GitHub privado mantiene autenticación por token HTTPS; estas variables SSH nuevas no alteran ese flujo.
+- Para Bitbucket, la precedencia es `*_CONTENT` > `*_CONTENT_B64`.
+- Con `GIT_SSH_STRICT_HOST_KEY_CHECKING=yes`, debes definir `GIT_SSH_KNOWN_HOSTS_CONTENT` o `GIT_SSH_KNOWN_HOSTS_CONTENT_B64` con la huella del host Git remoto.
+- Debes definir `GIT_SSH_KEY_CONTENT` o `GIT_SSH_KEY_CONTENT_B64`; no existe fallback por agent ni por variables del sistema.
+
+Ejemplo recomendado para Compose o `.env` usando base64:
+
+```dotenv
+GIT_SSH_KEY_CONTENT_B64=<base64_private_key_openssh>
+GIT_SSH_KNOWN_HOSTS_CONTENT_B64=<base64_known_hosts>
+GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
+```
+
+Ejemplo equivalente usando texto plano:
+
+```dotenv
+GIT_SSH_KEY_CONTENT="-----BEGIN OPENSSH PRIVATE KEY-----
+...
+-----END OPENSSH PRIVATE KEY-----"
+GIT_SSH_KNOWN_HOSTS_CONTENT="bitbucket.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
+GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
+```
+
+Recomendacion practica:
+
+- En contenedores, CI/CD y secret managers suele ser mejor `*_B64` para evitar problemas de multilinea y escaping.
+- En local manual, `*_CONTENT` puede ser suficiente si tu shell y tu archivo `.env` preservan correctamente los saltos de linea.
 
 ### Escaneo de ingesta
 
@@ -145,6 +171,9 @@ NEO4J_PASSWORD=neo4jpassword
 SCAN_MAX_FILE_SIZE_BYTES=200000
 SCAN_EXCLUDED_DIRS=.git,node_modules,dist,build,.venv,__pycache__
 SCAN_EXCLUDED_EXTENSIONS=.png,.jpg,.jpeg,.gif,.webp,.ico,.mp3,.mp4,.wav,.ogg,.pdf,.zip,.tar,.gz,.7z,.rar,.jar,.war,.ear,.class,.dll,.exe,.so,.dylib,.o,.a,.bin,.sqlite,.db
+GIT_SSH_KEY_CONTENT_B64=<base64_private_key_openssh>
+GIT_SSH_KNOWN_HOSTS_CONTENT_B64=<base64_known_hosts>
+GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
 ```
 
 ## Notas operativas

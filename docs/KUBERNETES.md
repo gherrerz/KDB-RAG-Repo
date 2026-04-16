@@ -71,7 +71,7 @@ Campos sensibles tipicos:
 - `OPENAI_API_KEY`
 - `GEMINI_API_KEY`, `service-account.json` (Vertex AI)
 - `VERTEX_AI_PROJECT_ID`
-- `id_rsa`, `known_hosts` (secreto remoto consumido por ExternalSecret)
+- `GIT_SSH_KEY_CONTENT`, `GIT_SSH_KNOWN_HOSTS_CONTENT` en el Secret Kubernetes generado; el ExternalSecret puede mapear desde propiedades remotas existentes como `id_rsa` y `known_hosts`
 - `NEO4J_PASSWORD`
 - `NEO4J_AUTH` (en secreto Neo4j)
 
@@ -81,6 +81,23 @@ Campos sensibles tipicos:
 2. Configurar `k8s/overlays/cloud/git-ssh-externalsecret.yaml` con tu `ClusterSecretStore` y keys remotos.
 3. Confirmar que no queden placeholders (`""`, `password`) en secretos base.
 4. Aplicar overlay correspondiente.
+
+Ejemplo de secreto Kubernetes directo sin ExternalSecret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: coderag-git-ssh-secret
+type: Opaque
+stringData:
+  GIT_SSH_KEY_CONTENT_B64: <base64_private_key_openssh>
+  GIT_SSH_KNOWN_HOSTS_CONTENT_B64: <base64_known_hosts>
+```
+
+Si ya usas ExternalSecret y tu secreto remoto expone `id_rsa` y `known_hosts`
+en texto plano, puedes seguir mapeandolos a `GIT_SSH_KEY_CONTENT` y
+`GIT_SSH_KNOWN_HOSTS_CONTENT` como hace el overlay actual.
 
 ## Deploy en entorno dev
 

@@ -1,5 +1,7 @@
 """Utilidades del cliente Git para clonar y preparar repositorios."""
 
+import base64
+import binascii
 import hashlib
 import os
 import re
@@ -94,14 +96,80 @@ def _resolve_github_token_env(token: str) -> tuple[dict[str, str], tempfile.Temp
     }, temp_dir
 
 
+def _decode_ssh_secret_content(
+    raw_content: str | None,
+    b64_content: str | None,
+    *,
+    secret_name: str,
+) -> bytes | None:
+    """Decodifica contenido SSH desde variables raw o base64 con precedencia raw."""
+    raw_value = raw_content or ""
+    if raw_value.strip():
+        return raw_value.encode("utf-8")
+
+    b64_value = b64_content or ""
+    if not b64_value.strip():
+        return None
+
+    try:
+        return base64.b64decode(b64_value, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise RuntimeError(
+            f"{secret_name} contiene base64 inválido."
+        ) from exc
+
+
+def _materialize_ssh_runtime_files(
+    *,
+    ssh_key_content: str | None,
+    ssh_key_content_b64: str | None,
+    ssh_known_hosts_content: str | None,
+    ssh_known_hosts_content_b64: str | None,
+) -> tuple[
+    Path | None,
+    Path | None,
+    tempfile.TemporaryDirectory[str] | None,
+]:
+    """Materializa archivos temporales SSH cuando las credenciales llegan por entorno."""
+    key_bytes = _decode_ssh_secret_content(
+        ssh_key_content,
+        ssh_key_content_b64,
+        secret_name="GIT_SSH_KEY_CONTENT_B64",
+    )
+    known_hosts_bytes = _decode_ssh_secret_content(
+        ssh_known_hosts_content,
+        ssh_known_hosts_content_b64,
+        secret_name="GIT_SSH_KNOWN_HOSTS_CONTENT_B64",
+    )
+    if key_bytes is None and known_hosts_bytes is None:
+        return None, None, None
+
+    temp_dir = tempfile.TemporaryDirectory(prefix="coderag_git_ssh_")
+    temp_root = Path(temp_dir.name)
+    key_path: Path | None = None
+    known_hosts_path: Path | None = None
+
+    if key_bytes is not None:
+        key_path = temp_root / "id_key"
+        key_path.write_bytes(key_bytes)
+        key_path.chmod(0o600)
+
+    if known_hosts_bytes is not None:
+        known_hosts_path = temp_root / "known_hosts"
+        known_hosts_path.write_bytes(known_hosts_bytes)
+
+    return key_path, known_hosts_path, temp_dir
+
+
 def _resolve_runtime_auth_env(
     repo_url: str,
     *,
     provider: str,
     token: str | None,
-    ssh_enable_agent: bool,
-    ssh_key_path: Path,
-    ssh_known_hosts_path: Path,
+    ssh_key_content: str | None,
+    ssh_key_content_b64: str | None,
+    ssh_known_hosts_content: str | None,
+    ssh_known_hosts_content_b64: str | None,
     ssh_strict_host_key_checking: str,
 ) -> tuple[dict[str, str] | None, tempfile.TemporaryDirectory[str] | None]:
     """Resuelve el entorno de autenticación según provider y tipo de URL."""
@@ -109,15 +177,13 @@ def _resolve_runtime_auth_env(
     is_ssh = _is_ssh_repo_url(repo_url)
 
     if normalized_provider == "bitbucket":
-        return (
-            _resolve_ssh_env(
-                repo_url,
-                ssh_enable_agent=ssh_enable_agent,
-                ssh_key_path=ssh_key_path,
-                ssh_known_hosts_path=ssh_known_hosts_path,
-                ssh_strict_host_key_checking=ssh_strict_host_key_checking,
-            ),
-            None,
+        return _resolve_ssh_env(
+            repo_url,
+            ssh_key_content=ssh_key_content,
+            ssh_key_content_b64=ssh_key_content_b64,
+            ssh_known_hosts_content=ssh_known_hosts_content,
+            ssh_known_hosts_content_b64=ssh_known_hosts_content_b64,
+            ssh_strict_host_key_checking=ssh_strict_host_key_checking,
         )
 
     if normalized_provider == "github":
@@ -125,29 +191,25 @@ def _resolve_runtime_auth_env(
         if cleaned_token and not is_ssh:
             return _resolve_github_token_env(cleaned_token)
         if is_ssh:
-            return (
-                _resolve_ssh_env(
-                    repo_url,
-                    ssh_enable_agent=ssh_enable_agent,
-                    ssh_key_path=ssh_key_path,
-                    ssh_known_hosts_path=ssh_known_hosts_path,
-                    ssh_strict_host_key_checking=ssh_strict_host_key_checking,
-                ),
-                None,
+            return _resolve_ssh_env(
+                repo_url,
+                ssh_key_content="",
+                ssh_key_content_b64="",
+                ssh_known_hosts_content="",
+                ssh_known_hosts_content_b64="",
+                ssh_strict_host_key_checking=ssh_strict_host_key_checking,
             )
         return None, None
 
     # Compatibilidad: otros providers mantienen resolución por tipo de URL.
     if is_ssh:
-        return (
-            _resolve_ssh_env(
-                repo_url,
-                ssh_enable_agent=ssh_enable_agent,
-                ssh_key_path=ssh_key_path,
-                ssh_known_hosts_path=ssh_known_hosts_path,
-                ssh_strict_host_key_checking=ssh_strict_host_key_checking,
-            ),
-            None,
+        return _resolve_ssh_env(
+            repo_url,
+            ssh_key_content="",
+            ssh_key_content_b64="",
+            ssh_known_hosts_content="",
+            ssh_known_hosts_content_b64="",
+            ssh_strict_host_key_checking=ssh_strict_host_key_checking,
         )
 
     cleaned_token = (token or "").strip()
@@ -159,14 +221,24 @@ def _resolve_runtime_auth_env(
 def _resolve_ssh_env(
     repo_url: str,
     *,
-    ssh_enable_agent: bool,
-    ssh_key_path: Path,
-    ssh_known_hosts_path: Path,
+    ssh_key_content: str | None,
+    ssh_key_content_b64: str | None,
+    ssh_known_hosts_content: str | None,
+    ssh_known_hosts_content_b64: str | None,
     ssh_strict_host_key_checking: str,
-) -> dict[str, str] | None:
+) -> tuple[dict[str, str] | None, tempfile.TemporaryDirectory[str] | None]:
     """Construye entorno SSH para clones privados sin exponer credenciales por request."""
     if not _is_ssh_repo_url(repo_url):
-        return None
+        return None, None
+
+    materialized_key_path, materialized_known_hosts_path, temp_dir = (
+        _materialize_ssh_runtime_files(
+            ssh_key_content=ssh_key_content,
+            ssh_key_content_b64=ssh_key_content_b64,
+            ssh_known_hosts_content=ssh_known_hosts_content,
+            ssh_known_hosts_content_b64=ssh_known_hosts_content_b64,
+        )
+    )
 
     strict_mode = str(ssh_strict_host_key_checking or "yes").strip().lower()
     if strict_mode not in {"yes", "accept-new", "no"}:
@@ -174,11 +246,12 @@ def _resolve_ssh_env(
             "GIT_SSH_STRICT_HOST_KEY_CHECKING debe ser uno de: yes, accept-new, no."
         )
 
-    known_hosts = Path(ssh_known_hosts_path).expanduser()
-    if strict_mode == "yes" and not known_hosts.exists():
+    known_hosts = materialized_known_hosts_path
+    if strict_mode == "yes" and known_hosts is None:
         raise RuntimeError(
-            "No se encontró archivo known_hosts requerido para SSH estricto. "
-            f"Ruta esperada: {known_hosts}"
+            "Falta known_hosts para SSH estricto. Define "
+            "GIT_SSH_KNOWN_HOSTS_CONTENT o "
+            "GIT_SSH_KNOWN_HOSTS_CONTENT_B64."
         )
 
     ssh_parts = [
@@ -189,24 +262,22 @@ def _resolve_ssh_env(
         f"StrictHostKeyChecking={strict_mode}",
     ]
 
-    if known_hosts.exists():
+    if known_hosts is not None:
         ssh_parts.extend(["-o", f"UserKnownHostsFile={known_hosts}"])
 
-    use_agent = bool(ssh_enable_agent and os.environ.get("SSH_AUTH_SOCK"))
-    if not use_agent:
-        key_file = Path(ssh_key_path).expanduser()
-        if not key_file.exists():
-            raise RuntimeError(
-                "No se encontró clave SSH privada para clonar repositorio. "
-                f"Ruta esperada: {key_file}"
-            )
-        ssh_parts.extend(["-i", str(key_file), "-o", "IdentitiesOnly=yes"])
+    key_file = materialized_key_path
+    if key_file is None:
+        raise RuntimeError(
+            "Falta clave SSH privada para clonar repositorio. Define "
+            "GIT_SSH_KEY_CONTENT o GIT_SSH_KEY_CONTENT_B64."
+        )
+    ssh_parts.extend(["-i", str(key_file), "-o", "IdentitiesOnly=yes"])
 
     command = " ".join(shlex.quote(part) for part in ssh_parts)
     return {
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_SSH_COMMAND": command,
-    }
+    }, temp_dir
 
 
 def _run_git_command(
@@ -239,9 +310,10 @@ def clone_repository(
     commit: str | None = None,
     provider: str = "github",
     token: str | None = None,
-    ssh_enable_agent: bool = True,
-    ssh_key_path: Path = Path("~/.ssh/id_rsa"),
-    ssh_known_hosts_path: Path = Path("~/.ssh/known_hosts"),
+    ssh_key_content: str | None = None,
+    ssh_key_content_b64: str | None = None,
+    ssh_known_hosts_content: str | None = None,
+    ssh_known_hosts_content_b64: str | None = None,
     ssh_strict_host_key_checking: str = "yes",
 ) -> tuple[str, Path]:
     """Clona el repositorio en el espacio de trabajo y devuelve repo_id y la ruta local."""
@@ -266,9 +338,10 @@ def clone_repository(
         repo_url,
         provider=provider,
         token=token,
-        ssh_enable_agent=ssh_enable_agent,
-        ssh_key_path=ssh_key_path,
-        ssh_known_hosts_path=ssh_known_hosts_path,
+        ssh_key_content=ssh_key_content,
+        ssh_key_content_b64=ssh_key_content_b64,
+        ssh_known_hosts_content=ssh_known_hosts_content,
+        ssh_known_hosts_content_b64=ssh_known_hosts_content_b64,
         ssh_strict_host_key_checking=ssh_strict_host_key_checking,
     )
     try:

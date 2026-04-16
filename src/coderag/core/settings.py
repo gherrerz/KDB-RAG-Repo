@@ -116,17 +116,21 @@ class Settings(BaseSettings):
         default=5,
         alias="INGESTION_ENQUEUE_LOCK_WAIT_SECONDS",
     )
-    git_ssh_enable_agent: bool = Field(
-        default=True,
-        alias="GIT_SSH_ENABLE_AGENT",
+    git_ssh_key_content: str = Field(
+        default="",
+        alias="GIT_SSH_KEY_CONTENT",
     )
-    git_ssh_key_path: Path = Field(
-        default=Path("~/.ssh/id_rsa"),
-        alias="GIT_SSH_KEY_PATH",
+    git_ssh_key_content_b64: str = Field(
+        default="",
+        alias="GIT_SSH_KEY_CONTENT_B64",
     )
-    git_ssh_known_hosts_path: Path = Field(
-        default=Path("~/.ssh/known_hosts"),
-        alias="GIT_SSH_KNOWN_HOSTS_PATH",
+    git_ssh_known_hosts_content: str = Field(
+        default="",
+        alias="GIT_SSH_KNOWN_HOSTS_CONTENT",
+    )
+    git_ssh_known_hosts_content_b64: str = Field(
+        default="",
+        alias="GIT_SSH_KNOWN_HOSTS_CONTENT_B64",
     )
     git_ssh_strict_host_key_checking: GitSshStrictHostKeyChecking = Field(
         default="yes",

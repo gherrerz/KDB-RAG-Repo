@@ -2,7 +2,6 @@
 
 from collections import Counter
 from collections import defaultdict
-from pathlib import Path
 from time import perf_counter
 from typing import Callable
 
@@ -177,12 +176,15 @@ def ingest_repository(
         commit=commit,
         provider=provider,
         token=token,
-        ssh_enable_agent=bool(getattr(settings, "git_ssh_enable_agent", True)),
-        ssh_key_path=getattr(settings, "git_ssh_key_path", Path("~/.ssh/id_rsa")),
-        ssh_known_hosts_path=getattr(
-            settings,
-            "git_ssh_known_hosts_path",
-            Path("~/.ssh/known_hosts"),
+        ssh_key_content=str(getattr(settings, "git_ssh_key_content", "") or ""),
+        ssh_key_content_b64=str(
+            getattr(settings, "git_ssh_key_content_b64", "") or ""
+        ),
+        ssh_known_hosts_content=str(
+            getattr(settings, "git_ssh_known_hosts_content", "") or ""
+        ),
+        ssh_known_hosts_content_b64=str(
+            getattr(settings, "git_ssh_known_hosts_content_b64", "") or ""
         ),
         ssh_strict_host_key_checking=str(
             getattr(settings, "git_ssh_strict_host_key_checking", "yes")

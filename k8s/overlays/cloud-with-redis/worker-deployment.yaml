@@ -25,12 +25,11 @@ spec:
                 name: coderag-api-config
             - secretRef:
                 name: coderag-api-secret
+            - secretRef:
+                name: coderag-git-ssh-secret
           volumeMounts:
             - name: api-storage
               mountPath: /app/storage
-            - name: git-ssh-secret
-              mountPath: /app/secrets/git
-              readOnly: true
             - name: vertex-service-account
               mountPath: /var/run/secrets/google/service-account.json
               subPath: service-account.json
@@ -52,6 +51,3 @@ spec:
             items:
               - key: service-account.json
                 path: service-account.json
-        - name: git-ssh-secret
-          secret:
-            secretName: coderag-git-ssh-secret

@@ -114,7 +114,16 @@ ingesta.
 
 Para repos privados en Bitbucket, usa URL SSH (por ejemplo
 `git@bitbucket.org:workspace/proyecto.git`). La autenticacion se resuelve en
-runtime via SSH agent o key file montada en contenedor/pod.
+runtime via variables de entorno `GIT_SSH_KEY_CONTENT(_B64)` y
+`GIT_SSH_KNOWN_HOSTS_CONTENT(_B64)`.
+
+Ejemplo rapido para `.env` o Docker Compose:
+
+```dotenv
+GIT_SSH_KEY_CONTENT_B64=<base64_private_key_openssh>
+GIT_SSH_KNOWN_HOSTS_CONTENT_B64=<base64_known_hosts>
+GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
+```
 
 4. Consulta estado del job.
 
