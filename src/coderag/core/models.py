@@ -22,6 +22,53 @@ class JobStatus(str, Enum):
     failed = "failed"
 
 
+class RepoAuthConfig(BaseModel):
+    """Configuración explícita de autenticación Git para una ingesta."""
+
+    deployment: Literal["auto", "cloud", "server", "data_center"] = Field(
+        default="auto",
+        description="Tipo de despliegue Git objetivo para resolver defaults.",
+        examples=["auto", "cloud", "server"],
+    )
+    transport: Literal["auto", "https", "ssh"] = Field(
+        default="auto",
+        description="Transporte Git preferido para clonar el repositorio.",
+        examples=["auto", "https", "ssh"],
+    )
+    method: Literal["auto", "ssh_key", "http_basic", "http_token"] = Field(
+        default="auto",
+        description="Método de autenticación Git solicitado.",
+        examples=["auto", "ssh_key", "http_basic", "http_token"],
+    )
+    username: str | None = Field(
+        default=None,
+        description="Usuario opcional para autenticación HTTPS.",
+    )
+    secret: str | None = Field(
+        default=None,
+        description="Secreto opcional runtime para autenticación HTTPS.",
+    )
+
+    def has_explicit_values(self) -> bool:
+        """Indica si el bloque auth contiene datos distintos a defaults."""
+        return any(
+            (
+                self.deployment != "auto",
+                self.transport != "auto",
+                self.method != "auto",
+                bool((self.username or "").strip()),
+                bool((self.secret or "").strip()),
+            )
+        )
+
+    def normalized_copy(self) -> "RepoAuthConfig":
+        """Retorna una copia con strings saneados para consumo interno."""
+        copy = self.model_copy(deep=True)
+        copy.username = (copy.username or "").strip() or None
+        copy.secret = (copy.secret or "").strip() or None
+        return copy
+
+
 class RepoIngestRequest(BaseModel):
     """Modelo de entrada para solicitudes de ingesta de repositorio."""
 
@@ -49,8 +96,15 @@ class RepoIngestRequest(BaseModel):
     token: str | None = Field(
         default=None,
         description=(
-            "Token opcional para autenticación HTTPS en GitHub "
-            "(usado cuando provider=github)."
+            "Token legacy opcional para autenticación HTTPS. Se mantiene por "
+            "compatibilidad y se mapea al bloque auth cuando aplica."
+        ),
+    )
+    auth: RepoAuthConfig | None = Field(
+        default=None,
+        description=(
+            "Configuración explícita de autenticación Git para soportar "
+            "distintos providers y despliegues."
         ),
     )
     embedding_provider: str | None = Field(
@@ -62,6 +116,27 @@ class RepoIngestRequest(BaseModel):
         default=None,
         description="Modelo de embeddings opcional para esta ingesta.",
     )
+
+    def resolved_auth(self) -> RepoAuthConfig:
+        """Devuelve la configuración auth efectiva preservando compatibilidad."""
+        provider = (self.provider or "github").strip().lower()
+        auth = (
+            self.auth.normalized_copy()
+            if self.auth is not None
+            else RepoAuthConfig()
+        )
+
+        legacy_token = (self.token or "").strip()
+        if legacy_token and not auth.secret and provider == "github":
+            if auth.transport == "auto":
+                auth.transport = "https"
+            if auth.method == "auto":
+                auth.method = "http_token"
+            auth.secret = legacy_token
+            if not auth.username:
+                auth.username = "x-access-token"
+
+        return auth
 
 
 class JobInfo(BaseModel):

@@ -72,6 +72,19 @@ class IngestionView(QWidget):
         self.provider = QComboBox()
         self.provider.addItems(["github", "bitbucket"])
 
+        self.deployment = QComboBox()
+        self.deployment.addItems(["auto", "cloud", "server", "data_center"])
+
+        self.transport = QComboBox()
+        self.transport.addItems(["auto", "https", "ssh"])
+
+        self.auth_method = QComboBox()
+        self.auth_method.addItems(["auto", "http_token", "http_basic", "ssh_key"])
+
+        self.auth_username_label = QLabel("Auth Username")
+        self.auth_username = QLineEdit()
+        self.auth_username.setPlaceholderText("Usuario HTTPS cuando aplique")
+
         self.embedding_provider = QComboBox()
         self.embedding_provider.addItems(
             ["openai", "gemini", "vertex"]
@@ -99,12 +112,12 @@ class IngestionView(QWidget):
 
         self.repo_url = QLineEdit()
         self.repo_url.setPlaceholderText("git@bitbucket.org:workspace/repo.git")
-        self.token_label = QLabel("Token (GitHub)")
+        self.token_label = QLabel("Auth Secret")
         self.token = QLineEdit()
         self.token.setEchoMode(QLineEdit.EchoMode.Password)
-        self.token.setPlaceholderText("ghp_... (solo GitHub HTTPS privado)")
+        self.token.setPlaceholderText("Token, app password o secreto HTTPS")
         self.ssh_hint = QLabel(
-            "Autenticacion Git privada via SSH (agent o key file en runtime)."
+            "Autenticacion Git privada via SSH mediante secretos de runtime."
         )
         self.ssh_hint.setObjectName("providerWarning")
         self.ssh_hint.setWordWrap(True)
@@ -128,6 +141,10 @@ class IngestionView(QWidget):
         # asegurar consistencia entre pestañas.
         for control in (
             self.provider,
+            self.deployment,
+            self.transport,
+            self.auth_method,
+            self.auth_username,
             self.embedding_provider,
             self.embedding_model,
             self.repo_url,
@@ -190,6 +207,10 @@ class IngestionView(QWidget):
         form.setContentsMargins(14, 12, 14, 12)
         form.setVerticalSpacing(10)
         form.addRow("Provider", self.provider)
+        form.addRow("Deployment", self.deployment)
+        form.addRow("Transport", self.transport)
+        form.addRow("Auth Method", self.auth_method)
+        form.addRow(self.auth_username_label, self.auth_username)
         form.addRow("Embedding Provider", self.embedding_provider)
         form.addRow("Embedding Model", self.embedding_model)
         form.addRow("", self.refresh_embedding_models_button)
@@ -262,6 +283,15 @@ class IngestionView(QWidget):
             lambda: self._flash_button(self.refresh_embedding_models_button)
         )
         self.provider.currentTextChanged.connect(self._on_git_provider_changed)
+        self.transport.currentTextChanged.connect(
+            lambda _: self._on_git_provider_changed(self.provider.currentText())
+        )
+        self.auth_method.currentTextChanged.connect(
+            lambda _: self._on_git_provider_changed(self.provider.currentText())
+        )
+        self.repo_url.textChanged.connect(
+            lambda _: self._on_git_provider_changed(self.provider.currentText())
+        )
 
         self.setStyleSheet(
             """
@@ -491,6 +521,10 @@ class IngestionView(QWidget):
     def set_running(self, running: bool) -> None:
         """Habilite o deshabilite los controles de formulario según la ejecución de la ingesta."""
         self.provider.setDisabled(running)
+        self.deployment.setDisabled(running)
+        self.transport.setDisabled(running)
+        self.auth_method.setDisabled(running)
+        self.auth_username.setDisabled(running)
         self.embedding_provider.setDisabled(running)
         self.embedding_model.setDisabled(running)
         self.refresh_embedding_models_button.setDisabled(running)
@@ -504,6 +538,10 @@ class IngestionView(QWidget):
     def set_reset_running(self, running: bool) -> None:
         """Actualice la interfaz de usuario mientras se ejecuta la operación de reinicio completo."""
         self.provider.setDisabled(running)
+        self.deployment.setDisabled(running)
+        self.transport.setDisabled(running)
+        self.auth_method.setDisabled(running)
+        self.auth_username.setDisabled(running)
         self.embedding_provider.setDisabled(running)
         self.embedding_model.setDisabled(running)
         self.refresh_embedding_models_button.setDisabled(running)
@@ -613,19 +651,82 @@ class IngestionView(QWidget):
         selected = (provider or "").strip().lower()
         is_github = selected == "github"
         is_bitbucket = selected == "bitbucket"
+        selected_transport = (self.transport.currentText() or "auto").strip().lower()
+        selected_method = (self.auth_method.currentText() or "auto").strip().lower()
 
-        self.token_label.setVisible(is_github)
-        self.token.setVisible(is_github)
-        self.ssh_hint.setVisible(is_bitbucket)
+        allowed_methods = ["auto", "http_token", "http_basic", "ssh_key"]
+        if is_bitbucket:
+            allowed_methods = ["auto", "http_basic", "ssh_key"]
+
+        current_method = self.auth_method.currentText().strip()
+        self._set_combo_items(self.auth_method, allowed_methods, current_method)
+        selected_method = (self.auth_method.currentText() or "auto").strip().lower()
+
+        effective_transport = selected_transport
+        if effective_transport == "auto":
+            effective_transport = "ssh" if self.repo_url.text().strip().startswith("git@") else "https"
+
+        expects_ssh = effective_transport == "ssh" or selected_method == "ssh_key"
+        expects_https = not expects_ssh
+        needs_username = expects_https and (
+            selected_method == "http_basic" or (is_bitbucket and selected_method == "auto")
+        )
+
+        self.deployment.setVisible(is_bitbucket)
+        self.auth_username_label.setVisible(needs_username)
+        self.auth_username.setVisible(needs_username)
+        self.token_label.setVisible(expects_https)
+        self.token.setVisible(expects_https)
+        self.ssh_hint.setVisible(expects_ssh)
+
+        if is_github:
+            self.token_label.setText("Token")
+            self.token.setPlaceholderText("ghp_... o secreto HTTPS")
+        elif needs_username:
+            self.token_label.setText("Password / Secret")
+            self.token.setPlaceholderText("App password, PAT o secreto HTTPS")
+        else:
+            self.token_label.setText("Auth Secret")
+            self.token.setPlaceholderText("Token, app password o secreto HTTPS")
 
         if is_github and self.repo_url.placeholderText().startswith("git@bitbucket.org"):
             self.repo_url.setPlaceholderText("https://github.com/owner/repo.git")
-        if is_bitbucket and self.repo_url.placeholderText().startswith("https://github.com"):
-            self.repo_url.setPlaceholderText("git@bitbucket.org:workspace/repo.git")
+        if is_bitbucket:
+            if expects_ssh:
+                self.repo_url.setPlaceholderText("git@bitbucket.org:workspace/repo.git")
+            elif self.repo_url.placeholderText().startswith("https://github.com"):
+                self.repo_url.setPlaceholderText(
+                    "https://bitbucket.org/workspace/repo.git"
+                )
 
     def get_token(self) -> str:
-        """Devuelve token GitHub ingresado en la UI (si aplica)."""
+        """Devuelve el secreto HTTPS ingresado en la UI (si aplica)."""
         return self.token.text().strip()
+
+    def get_auth_payload(self) -> dict[str, str] | None:
+        """Construye payload auth explícito omitiendo valores vacíos/default."""
+        payload: dict[str, str] = {
+            "deployment": self.deployment.currentText().strip() or "auto",
+            "transport": self.transport.currentText().strip() or "auto",
+            "method": self.auth_method.currentText().strip() or "auto",
+        }
+        username = self.auth_username.text().strip()
+        secret = self.token.text().strip()
+        if username:
+            payload["username"] = username
+        if secret:
+            payload["secret"] = secret
+
+        has_non_default = any(
+            (
+                payload["deployment"] != "auto",
+                payload["transport"] != "auto",
+                payload["method"] != "auto",
+                bool(username),
+                bool(secret),
+            )
+        )
+        return payload if has_non_default else None
 
     def get_embedding_model(self) -> str:
         """Devuelve el modelo de embeddings actual para payload de ingesta."""

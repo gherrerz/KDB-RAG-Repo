@@ -5,7 +5,12 @@ from collections import defaultdict
 from time import perf_counter
 from typing import Callable
 
-from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.core.models import (
+    RepoAuthConfig,
+    ScannedFile,
+    SemanticRelation,
+    SymbolChunk,
+)
 from coderag.core.settings import get_settings
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.embedding import EmbeddingClient
@@ -162,12 +167,14 @@ def ingest_repository(
     commit: str | None,
     token: str | None,
     logger: LoggerFn,
+    auth=None,
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
     diagnostics_sink: dict[str, object] | None = None,
 ) -> str:
     """Ejecute la ingesta completa del repositorio y devuelva el identificador del repositorio."""
     settings = get_settings()
+    effective_auth = auth if auth is not None else RepoAuthConfig()
     logger("Clonando repositorio...")
     repo_id, repo_path = clone_repository(
         repo_url=repo_url,
@@ -176,6 +183,7 @@ def ingest_repository(
         commit=commit,
         provider=provider,
         token=token,
+        auth=effective_auth,
         ssh_key_content=str(getattr(settings, "git_ssh_key_content", "") or ""),
         ssh_key_content_b64=str(
             getattr(settings, "git_ssh_key_content_b64", "") or ""

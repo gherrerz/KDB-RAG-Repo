@@ -78,9 +78,15 @@ Compatibilidad temporal de naming:
 Notas operativas SSH:
 
 - GitHub privado mantiene autenticación por token HTTPS; estas variables SSH nuevas no alteran ese flujo.
-- Para Bitbucket, la precedencia es `*_CONTENT` > `*_CONTENT_B64`.
+- Para Bitbucket SSH, la precedencia es `*_CONTENT` > `*_CONTENT_B64`.
 - Con `GIT_SSH_STRICT_HOST_KEY_CHECKING=yes`, debes definir `GIT_SSH_KNOWN_HOSTS_CONTENT` o `GIT_SSH_KNOWN_HOSTS_CONTENT_B64` con la huella del host Git remoto.
 - Debes definir `GIT_SSH_KEY_CONTENT` o `GIT_SSH_KEY_CONTENT_B64`; no existe fallback por agent ni por variables del sistema.
+
+Notas operativas HTTPS:
+
+- Bitbucket Cloud y Bitbucket Server/Data Center también pueden autenticarse por request usando el bloque `auth` del endpoint de ingesta.
+- En esta primera implementación, Bitbucket HTTPS usa `auth.method=http_basic` con `auth.username` y `auth.secret` explícitos.
+- No se agregan variables de entorno nuevas para HTTPS porque el secreto viaja por request y se materializa solo en runtime mediante `GIT_ASKPASS` temporal.
 
 Ejemplo recomendado para Compose o `.env` usando base64:
 

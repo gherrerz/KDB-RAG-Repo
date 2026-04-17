@@ -93,6 +93,7 @@ def _execute_ingest_job(
             branch=request.branch,
             commit=request.commit,
             token=request.token,
+            auth=request.resolved_auth(),
             embedding_provider=request.embedding_provider,
             embedding_model=request.embedding_model,
             logger=logger,

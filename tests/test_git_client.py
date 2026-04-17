@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from coderag.core.models import RepoAuthConfig
 from coderag.ingestion.git_client import build_repo_id, clone_repository
 
 
@@ -117,6 +118,46 @@ def test_clone_repository_uses_github_token_for_https_urls(
 
     assert captured_env["GIT_TERMINAL_PROMPT"] == "0"
     assert captured_env["CODERAG_GITHUB_TOKEN"] == "ghp_test_token"
+    assert captured_env["GIT_ASKPASS"].endswith("askpass.sh")
+    assert "GIT_SSH_COMMAND" not in captured_env
+
+
+def test_clone_repository_uses_bitbucket_http_basic_for_https_urls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Configura askpass genérico para Bitbucket HTTPS con usuario y secreto."""
+    captured_env: dict[str, str] = {}
+
+    def fake_run(*args, **kwargs):
+        command = args[0]
+        env = kwargs.get("env") or {}
+        captured_env.update({k: str(v) for k, v in env.items()})
+
+        destination = Path(command[-1])
+        destination.mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(args=command, returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    clone_repository(
+        repo_url="https://bitbucket.org/acme/private-repo.git",
+        destination_root=tmp_path,
+        branch="main",
+        commit=None,
+        provider="bitbucket",
+        auth=RepoAuthConfig(
+            deployment="cloud",
+            transport="https",
+            method="http_basic",
+            username="acme-user",
+            secret="app-password",
+        ),
+    )
+
+    assert captured_env["GIT_TERMINAL_PROMPT"] == "0"
+    assert captured_env["CODERAG_GIT_HTTP_USERNAME"] == "acme-user"
+    assert captured_env["CODERAG_GIT_HTTP_SECRET"] == "app-password"
     assert captured_env["GIT_ASKPASS"].endswith("askpass.sh")
     assert "GIT_SSH_COMMAND" not in captured_env
 
@@ -337,3 +378,25 @@ def test_clone_repository_requires_key_content_when_missing(
         )
 
     assert "GIT_SSH_KEY_CONTENT" in str(exc.value)
+
+
+def test_clone_repository_requires_username_for_bitbucket_https_basic(
+    tmp_path: Path,
+) -> None:
+    """Falla temprano cuando Bitbucket HTTPS no recibe usuario explícito."""
+    with pytest.raises(RuntimeError) as exc:
+        clone_repository(
+            repo_url="https://bitbucket.example/scm/acme/private-repo.git",
+            destination_root=tmp_path,
+            branch="main",
+            commit=None,
+            provider="bitbucket",
+            auth=RepoAuthConfig(
+                deployment="server",
+                transport="https",
+                method="http_basic",
+                secret="server-password",
+            ),
+        )
+
+    assert "auth.username" in str(exc.value)

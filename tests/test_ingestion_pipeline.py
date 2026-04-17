@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from coderag.core.models import RepoAuthConfig
 from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
 from coderag.ingestion import pipeline
 
@@ -271,6 +272,7 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
         commit: str | None,
         provider: str = "github",
         token: str | None = None,
+        auth: RepoAuthConfig | None = None,
         ssh_key_content: str | None = None,
         ssh_key_content_b64: str | None = None,
         ssh_known_hosts_content: str | None = None,
@@ -283,6 +285,7 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
         captured["commit"] = commit
         captured["provider"] = provider
         captured["token"] = token
+        captured["auth"] = auth
         captured["ssh_key_content"] = ssh_key_content
         captured["ssh_key_content_b64"] = ssh_key_content_b64
         captured["ssh_known_hosts_content"] = ssh_known_hosts_content
@@ -346,6 +349,8 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
 
     assert captured["provider"] == "bitbucket"
     assert captured["token"] is None
+    assert isinstance(captured["auth"], RepoAuthConfig)
+    assert captured["auth"].deployment == "auto"
     assert captured["ssh_key_content"] == "PRIVATE KEY FROM ENV"
     assert captured["ssh_key_content_b64"] == ""
     assert captured["ssh_known_hosts_content"] == (
@@ -353,6 +358,127 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
     )
     assert captured["ssh_known_hosts_content_b64"] == ""
     assert captured["ssh_strict_host_key_checking"] == "yes"
+
+
+def test_ingest_repository_forwards_explicit_auth_payload_to_clone(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Pasa el bloque auth explícito al clonador para HTTPS Bitbucket."""
+    scanned = [ScannedFile(path="a.py", language="python", content="print('ok')")]
+    symbols = [
+        SymbolChunk(
+            id="s1",
+            repo_id="r1",
+            path="a.py",
+            language="python",
+            symbol_name="main",
+            symbol_type="function",
+            start_line=1,
+            end_line=1,
+            snippet="print('ok')",
+        )
+    ]
+
+    class _Settings:
+        workspace_path = tmp_path
+        scan_max_file_size_bytes = 12345
+        scan_excluded_dirs = ".git,node_modules"
+        scan_excluded_extensions = ".png,.zip"
+        scan_excluded_files = ".gitignore,.env"
+        git_ssh_key_content = ""
+        git_ssh_key_content_b64 = ""
+        git_ssh_known_hosts_content = ""
+        git_ssh_known_hosts_content_b64 = ""
+        git_ssh_strict_host_key_checking = "yes"
+
+    captured: dict[str, object] = {}
+
+    def _fake_clone(
+        repo_url: str,
+        destination_root: Path,
+        branch: str,
+        commit: str | None,
+        provider: str = "github",
+        token: str | None = None,
+        auth: RepoAuthConfig | None = None,
+        ssh_key_content: str | None = None,
+        ssh_key_content_b64: str | None = None,
+        ssh_known_hosts_content: str | None = None,
+        ssh_known_hosts_content_b64: str | None = None,
+        ssh_strict_host_key_checking: str = "yes",
+    ) -> tuple[str, Path]:
+        captured["provider"] = provider
+        captured["token"] = token
+        captured["auth"] = auth
+        return "r1", tmp_path
+
+    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(pipeline, "clone_repository", _fake_clone)
+    monkeypatch.setattr(
+        pipeline,
+        "_repo_has_existing_index_data",
+        lambda repo_id, logger: False,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "scan_repository_with_stats",
+        lambda *args, **kwargs: (
+            scanned,
+            {
+                "visited": 1,
+                "scanned": 1,
+                "excluded_dir": 0,
+                "excluded_extension": 0,
+                "excluded_file": 0,
+                "excluded_size": 0,
+                "excluded_decode": 0,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_symbol_chunks",
+        lambda repo_id, scanned_files: symbols,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_vectors",
+        lambda repo_id, s, c, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_bm25",
+        lambda repo_id, scanned_files, chunks: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_graph",
+        lambda repo_id, scanned_files, chunks, logger=None, **kwargs: None,
+    )
+
+    logs: list[str] = []
+    pipeline.ingest_repository(
+        provider="bitbucket",
+        repo_url="https://bitbucket.org/acme/private-repo.git",
+        branch="main",
+        commit=None,
+        token=None,
+        auth=RepoAuthConfig(
+            deployment="cloud",
+            transport="https",
+            method="http_basic",
+            username="acme-user",
+            secret="app-password",
+        ),
+        logger=logs.append,
+    )
+
+    assert captured["provider"] == "bitbucket"
+    assert captured["token"] is None
+    assert isinstance(captured["auth"], RepoAuthConfig)
+    assert captured["auth"].method == "http_basic"
+    assert captured["auth"].username == "acme-user"
 
 
 def test_index_graph_adds_semantic_relations_when_enabled(

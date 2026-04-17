@@ -15,6 +15,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from coderag.core.models import RepoAuthConfig
+
 
 def build_repo_id(repo_url: str, branch: str) -> str:
     """Cree un identificador de repositorio desde la cola de la URL con respaldo determinista."""
@@ -75,16 +77,34 @@ def _normalize_provider(provider: str | None) -> str:
     return (provider or "github").strip().lower()
 
 
-def _resolve_github_token_env(token: str) -> tuple[dict[str, str], tempfile.TemporaryDirectory[str]]:
-    """Construye entorno askpass para usar token GitHub sin exponerlo en args."""
+def _extract_repo_host(repo_url: str) -> str:
+    """Extrae host del repositorio tanto para URLs HTTPS como SSH."""
+    normalized = repo_url.strip()
+    if not normalized:
+        return ""
+    if normalized.startswith("git@"):
+        without_prefix = normalized.split("@", maxsplit=1)[-1]
+        return without_prefix.split(":", maxsplit=1)[0].strip().lower()
+    parsed = urlparse(normalized)
+    return (parsed.hostname or "").strip().lower()
+
+
+def _resolve_https_auth_env(
+    *,
+    username: str,
+    secret: str,
+    username_env_var: str,
+    secret_env_var: str,
+) -> tuple[dict[str, str], tempfile.TemporaryDirectory[str]]:
+    """Construye entorno askpass para autenticación HTTPS sin exponer secretos."""
     temp_dir = tempfile.TemporaryDirectory(prefix="coderag_git_askpass_")
     script_path = Path(temp_dir.name) / "askpass.sh"
     script_path.write_text(
         "#!/bin/sh\n"
         "prompt=$(printf '%s' \"$1\" | tr '[:upper:]' '[:lower:]')\n"
         "case \"$prompt\" in\n"
-        "  *username*) printf '%s\\n' 'x-access-token' ;;\n"
-        "  *) printf '%s\\n' \"$CODERAG_GITHUB_TOKEN\" ;;\n"
+        f"  *username*) printf '%s\\n' \"${username_env_var}\" ;;\n"
+        f"  *) printf '%s\\n' \"${secret_env_var}\" ;;\n"
         "esac\n",
         encoding="utf-8",
     )
@@ -92,8 +112,21 @@ def _resolve_github_token_env(token: str) -> tuple[dict[str, str], tempfile.Temp
     return {
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_ASKPASS": str(script_path),
-        "CODERAG_GITHUB_TOKEN": token,
+        username_env_var: username,
+        secret_env_var: secret,
     }, temp_dir
+
+
+def _resolve_github_token_env(
+    token: str,
+) -> tuple[dict[str, str], tempfile.TemporaryDirectory[str]]:
+    """Construye entorno askpass para usar token GitHub sin exponerlo en args."""
+    return _resolve_https_auth_env(
+        username="x-access-token",
+        secret=token,
+        username_env_var="CODERAG_GITHUB_USERNAME",
+        secret_env_var="CODERAG_GITHUB_TOKEN",
+    )
 
 
 def _decode_ssh_secret_content(
@@ -161,11 +194,116 @@ def _materialize_ssh_runtime_files(
     return key_path, known_hosts_path, temp_dir
 
 
+def _infer_transport(repo_url: str, requested_transport: str) -> str:
+    """Resuelve el transporte efectivo a partir de URL y preferencia."""
+    if requested_transport in {"https", "ssh"}:
+        return requested_transport
+    return "ssh" if _is_ssh_repo_url(repo_url) else "https"
+
+
+def _infer_deployment(
+    provider: str,
+    repo_url: str,
+    requested_deployment: str,
+) -> str:
+    """Resuelve el tipo de despliegue efectivo para defaults por provider."""
+    if requested_deployment in {"cloud", "server", "data_center"}:
+        return requested_deployment
+
+    normalized_provider = _normalize_provider(provider)
+    if normalized_provider != "bitbucket":
+        return "auto"
+
+    host = _extract_repo_host(repo_url)
+    if host in {"bitbucket.org", "altssh.bitbucket.org"}:
+        return "cloud"
+    return "server"
+
+
+def _resolve_default_auth_method(
+    provider: str,
+    transport: str,
+    requested_method: str,
+) -> str:
+    """Resuelve el método de autenticación efectivo para el clone."""
+    if requested_method in {"ssh_key", "http_basic", "http_token"}:
+        return requested_method
+
+    normalized_provider = _normalize_provider(provider)
+    if transport == "ssh":
+        return "ssh_key"
+    if normalized_provider == "bitbucket":
+        return "http_basic"
+    return "http_token"
+
+
+def _build_effective_auth(
+    provider: str,
+    auth: RepoAuthConfig | None,
+    token: str | None,
+) -> RepoAuthConfig:
+    """Combina auth explícita con compatibilidad legacy del token."""
+    effective = auth.normalized_copy() if auth is not None else RepoAuthConfig()
+    normalized_provider = _normalize_provider(provider)
+    cleaned_token = (token or "").strip()
+
+    if cleaned_token and not effective.secret and normalized_provider == "github":
+        if effective.transport == "auto":
+            effective.transport = "https"
+        if effective.method == "auto":
+            effective.method = "http_token"
+        effective.secret = cleaned_token
+        if not effective.username:
+            effective.username = "x-access-token"
+
+    return effective
+
+
+def _resolve_bitbucket_https_env(
+    *,
+    deployment: str,
+    method: str,
+    username: str | None,
+    secret: str | None,
+) -> tuple[dict[str, str] | None, tempfile.TemporaryDirectory[str] | None]:
+    """Construye auth HTTPS para Bitbucket Cloud y Server/Data Center."""
+    cleaned_secret = (secret or "").strip()
+    cleaned_username = (username or "").strip()
+    if not cleaned_secret:
+        return None, None
+
+    if method == "http_token":
+        raise RuntimeError(
+            "Bitbucket requiere auth.method='http_basic' en esta primera "
+            "implementación. Define auth.username y auth.secret."
+        )
+
+    if method != "http_basic":
+        raise RuntimeError(
+            "Método HTTPS no soportado para Bitbucket. Usa auth.method="
+            "'http_basic' o transporte SSH."
+        )
+
+    if not cleaned_username:
+        raise RuntimeError(
+            "Bitbucket HTTPS requiere auth.username explícito para "
+            "deployment='cloud' o 'server/data_center'."
+        )
+
+    return _resolve_https_auth_env(
+        username=cleaned_username,
+        secret=cleaned_secret,
+        username_env_var="CODERAG_GIT_HTTP_USERNAME",
+        secret_env_var="CODERAG_GIT_HTTP_SECRET",
+    )
+
+
 def _resolve_runtime_auth_env(
     repo_url: str,
     *,
     provider: str,
     token: str | None,
+    auth: RepoAuthConfig | None,
     ssh_key_content: str | None,
     ssh_key_content_b64: str | None,
     ssh_known_hosts_content: str | None,
@@ -174,9 +312,25 @@ def _resolve_runtime_auth_env(
 ) -> tuple[dict[str, str] | None, tempfile.TemporaryDirectory[str] | None]:
     """Resuelve el entorno de autenticación según provider y tipo de URL."""
     normalized_provider = _normalize_provider(provider)
-    is_ssh = _is_ssh_repo_url(repo_url)
+    effective_auth = _build_effective_auth(provider, auth, token)
+    transport = _infer_transport(repo_url, effective_auth.transport)
+    deployment = _infer_deployment(
+        normalized_provider,
+        repo_url,
+        effective_auth.deployment,
+    )
+    method = _resolve_default_auth_method(
+        normalized_provider,
+        transport,
+        effective_auth.method,
+    )
 
-    if normalized_provider == "bitbucket":
+    if transport == "ssh":
+        if method != "ssh_key":
+            raise RuntimeError(
+                "auth.method incompatible con transporte SSH. Usa "
+                "auth.method='ssh_key' o cambia auth.transport='https'."
+            )
         return _resolve_ssh_env(
             repo_url,
             ssh_key_content=ssh_key_content,
@@ -186,35 +340,63 @@ def _resolve_runtime_auth_env(
             ssh_strict_host_key_checking=ssh_strict_host_key_checking,
         )
 
-    if normalized_provider == "github":
-        cleaned_token = (token or "").strip()
-        if cleaned_token and not is_ssh:
-            return _resolve_github_token_env(cleaned_token)
-        if is_ssh:
-            return _resolve_ssh_env(
-                repo_url,
-                ssh_key_content="",
-                ssh_key_content_b64="",
-                ssh_known_hosts_content="",
-                ssh_known_hosts_content_b64="",
-                ssh_strict_host_key_checking=ssh_strict_host_key_checking,
-            )
-        return None, None
-
-    # Compatibilidad: otros providers mantienen resolución por tipo de URL.
-    if is_ssh:
-        return _resolve_ssh_env(
-            repo_url,
-            ssh_key_content="",
-            ssh_key_content_b64="",
-            ssh_known_hosts_content="",
-            ssh_known_hosts_content_b64="",
-            ssh_strict_host_key_checking=ssh_strict_host_key_checking,
+    if method == "ssh_key":
+        raise RuntimeError(
+            "auth.method='ssh_key' requiere auth.transport='ssh' o una URL SSH."
         )
 
-    cleaned_token = (token or "").strip()
-    if cleaned_token:
-        return _resolve_github_token_env(cleaned_token)
+    if normalized_provider == "github":
+        cleaned_secret = (effective_auth.secret or "").strip()
+        if not cleaned_secret:
+            return None, None
+        if method not in {"http_token", "http_basic"}:
+            raise RuntimeError(
+                "Método HTTPS no soportado para GitHub. Usa auth.method="
+                "'http_token', 'http_basic' o deja 'auto'."
+            )
+        if method == "http_basic":
+            cleaned_username = (effective_auth.username or "").strip()
+            if not cleaned_username:
+                raise RuntimeError(
+                    "GitHub HTTPS con auth.method='http_basic' requiere "
+                    "auth.username explícito."
+                )
+            return _resolve_https_auth_env(
+                username=cleaned_username,
+                secret=cleaned_secret,
+                username_env_var="CODERAG_GIT_HTTP_USERNAME",
+                secret_env_var="CODERAG_GIT_HTTP_SECRET",
+            )
+        return _resolve_github_token_env(cleaned_secret)
+
+    if normalized_provider == "bitbucket":
+        return _resolve_bitbucket_https_env(
+            deployment=deployment,
+            method=method,
+            username=effective_auth.username,
+            secret=effective_auth.secret,
+        )
+
+    cleaned_secret = (effective_auth.secret or "").strip()
+    cleaned_username = (effective_auth.username or "").strip()
+    if method == "http_basic":
+        if not cleaned_secret or not cleaned_username:
+            return None, None
+        return _resolve_https_auth_env(
+            username=cleaned_username,
+            secret=cleaned_secret,
+            username_env_var="CODERAG_GIT_HTTP_USERNAME",
+            secret_env_var="CODERAG_GIT_HTTP_SECRET",
+        )
+    if method == "http_token" and cleaned_secret:
+        if not cleaned_username:
+            cleaned_username = "x-access-token"
+        return _resolve_https_auth_env(
+            username=cleaned_username,
+            secret=cleaned_secret,
+            username_env_var="CODERAG_GIT_HTTP_USERNAME",
+            secret_env_var="CODERAG_GIT_HTTP_SECRET",
+        )
     return None, None
 
 
@@ -310,6 +492,7 @@ def clone_repository(
     commit: str | None = None,
     provider: str = "github",
     token: str | None = None,
+    auth: RepoAuthConfig | None = None,
     ssh_key_content: str | None = None,
     ssh_key_content_b64: str | None = None,
     ssh_known_hosts_content: str | None = None,
@@ -338,6 +521,7 @@ def clone_repository(
         repo_url,
         provider=provider,
         token=token,
+        auth=auth,
         ssh_key_content=ssh_key_content,
         ssh_key_content_b64=ssh_key_content_b64,
         ssh_known_hosts_content=ssh_known_hosts_content,

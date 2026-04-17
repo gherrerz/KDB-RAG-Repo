@@ -165,13 +165,30 @@ Limpia todo el estado indexado.
 | `branch` | `str` | no | `"main"` |
 | `commit` | `str | null` | no | `null` |
 | `token` | `str | null` | no | `null` |
+| `auth` | `object | null` | no | `null` |
 | `embedding_provider` | `str | null` | no | `null` |
 | `embedding_model` | `str | null` | no | `null` |
 
 Notas para repos privados:
 
-- `provider=github`: usa URL HTTPS (`https://github.com/...`) y envía `token`.
-- `provider=bitbucket`: usa URL SSH (`git@...` o `ssh://...`) con configuración SSH del entorno.
+- `provider=github`: mantiene compatibilidad con URL HTTPS (`https://github.com/...`) y `token`, o puede usar `auth` explícito.
+- `provider=bitbucket`: soporta SSH (`git@...` o `ssh://...`) con configuración SSH del entorno, y también HTTPS con `auth.method=http_basic`.
+
+Contrato del bloque `auth`:
+
+| Field | Type | Requerido | Default |
+|---|---|---|---|
+| `deployment` | `"auto" | "cloud" | "server" | "data_center"` | no | `"auto"` |
+| `transport` | `"auto" | "https" | "ssh"` | no | `"auto"` |
+| `method` | `"auto" | "ssh_key" | "http_basic" | "http_token"` | no | `"auto"` |
+| `username` | `str | null` | no | `null` |
+| `secret` | `str | null` | no | `null` |
+
+Reglas iniciales:
+
+- `token` se conserva como compatibilidad legacy y se mapea internamente a GitHub HTTPS.
+- Bitbucket HTTPS en esta primera implementación requiere `auth.method=http_basic`, `auth.transport=https`, `auth.username` y `auth.secret`.
+- Bitbucket SSH mantiene las variables `GIT_SSH_*` existentes.
 
 ### JobInfo
 

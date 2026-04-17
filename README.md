@@ -112,10 +112,30 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/repos/ingest -ContentT
 Para repos privados en GitHub, usa URL HTTPS y envía `token` en el request de
 ingesta.
 
-Para repos privados en Bitbucket, usa URL SSH (por ejemplo
-`git@bitbucket.org:workspace/proyecto.git`). La autenticacion se resuelve en
-runtime via variables de entorno `GIT_SSH_KEY_CONTENT(_B64)` y
-`GIT_SSH_KNOWN_HOSTS_CONTENT(_B64)`.
+Para repos privados en Bitbucket, ahora hay dos caminos soportados:
+
+- SSH: usa URL SSH (por ejemplo `git@bitbucket.org:workspace/proyecto.git`)
+  y resuelve autenticación en runtime vía `GIT_SSH_KEY_CONTENT(_B64)` y
+  `GIT_SSH_KNOWN_HOSTS_CONTENT(_B64)`.
+- HTTPS: usa URL HTTPS y envía un bloque `auth` con `deployment`,
+  `transport=https`, `method=http_basic`, `username` y `secret`.
+
+Ejemplo rápido para Bitbucket Cloud o Server/Data Center vía HTTPS:
+
+```json
+{
+  "provider": "bitbucket",
+  "repo_url": "https://bitbucket.org/workspace/proyecto.git",
+  "branch": "main",
+  "auth": {
+    "deployment": "cloud",
+    "transport": "https",
+    "method": "http_basic",
+    "username": "usuario",
+    "secret": "app-password-o-pat"
+  }
+}
+```
 
 Ejemplo rapido para `.env` o Docker Compose:
 

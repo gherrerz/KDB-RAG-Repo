@@ -307,10 +307,9 @@ class MainWindow(QMainWindow):
             "embedding_provider": self.ingestion_view.embedding_provider.currentText(),
             "embedding_model": self.ingestion_view.get_embedding_model() or None,
         }
-        if payload["provider"] == "github":
-            token = self.ingestion_view.get_token()
-            if token:
-                payload["token"] = token
+        auth_payload = self.ingestion_view.get_auth_payload()
+        if auth_payload is not None:
+            payload["auth"] = auth_payload
         self.ingestion_view.set_running(True)
         self.ingestion_view.set_status("running", "En progreso")
         self.ingestion_view.set_progress(5)
