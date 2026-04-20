@@ -283,17 +283,43 @@ def test_delete_repo_returns_409_when_same_repo_job_running(monkeypatch) -> None
 
 
 def test_list_repos_returns_repo_id_catalog(monkeypatch) -> None:
-    """Devuelve identificadores de repositorio conocidos para el menú desplegable de consultas."""
+    """Devuelve ids y metadata básica de repositorios conocidos para consultas."""
 
-    def fake_list_repo_ids() -> list[str]:
-        return ["mall", "api-service"]
+    def fake_list_repo_catalog() -> list[dict[str, str | None]]:
+        return [
+            {
+                "repo_id": "api-service",
+                "url": None,
+                "branch": None,
+            },
+            {
+                "repo_id": "mall",
+                "url": "https://github.com/macrozheng/mall.git",
+                "branch": "main",
+            },
+        ]
 
-    monkeypatch.setattr(server.jobs, "list_repo_ids", fake_list_repo_ids)
+    monkeypatch.setattr(server.jobs, "list_repo_catalog", fake_list_repo_catalog)
     client = TestClient(app)
 
     response = client.get("/repos")
     assert response.status_code == 200
-    assert response.json()["repo_ids"] == ["mall", "api-service"]
+    payload = response.json()
+    assert payload["repo_ids"] == ["api-service", "mall"]
+    assert payload["repositories"] == [
+        {
+            "repo_id": "api-service",
+            "organization": None,
+            "url": None,
+            "branch": None,
+        },
+        {
+            "repo_id": "mall",
+            "organization": "macrozheng",
+            "url": "https://github.com/macrozheng/mall.git",
+            "branch": "main",
+        },
+    ]
 
 
 def test_ingest_repo_returns_503_when_enqueue_fails(

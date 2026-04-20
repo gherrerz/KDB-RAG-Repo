@@ -13,6 +13,7 @@ from coderag.core.models import (
     ProviderModelCatalogResponse,
     QueryRequest,
     QueryResponse,
+    RepoCatalogEntry,
     RetrievalQueryRequest,
     RetrievalQueryResponse,
     RepoCatalogResponse,
@@ -29,6 +30,7 @@ from coderag.core.storage_health import (
     run_storage_preflight,
 )
 from coderag.core.settings import get_settings
+from coderag.ingestion.git_client import extract_repo_organization
 from coderag.jobs.worker import IngestionConflictError, JobManager
 from coderag.llm.model_discovery import discover_models
 
@@ -423,8 +425,20 @@ def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
     description="Lista los repo_id disponibles para ser usados en consultas.",
 )
 def list_repos() -> RepoCatalogResponse:
-    """Devuelve los identificadores del repositorio actualmente disponibles para consultas."""
-    return RepoCatalogResponse(repo_ids=jobs.list_repo_ids())
+    """Devuelve ids y metadata básica de repositorios disponibles para consultas."""
+    repositories = [
+        RepoCatalogEntry(
+            repo_id=str(item["repo_id"]),
+            url=item.get("url"),
+            branch=item.get("branch"),
+            organization=extract_repo_organization(item.get("url") or ""),
+        )
+        for item in jobs.list_repo_catalog()
+    ]
+    return RepoCatalogResponse(
+        repo_ids=[item.repo_id for item in repositories],
+        repositories=repositories,
+    )
 
 
 @app.get(

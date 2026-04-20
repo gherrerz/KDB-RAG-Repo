@@ -415,9 +415,37 @@ class RepoDeleteResponse(BaseModel):
 
 
 class RepoCatalogResponse(BaseModel):
-    """Modelo de salida para identificadores de repositorio disponibles para consultas."""
+    """Modelo de salida para catálogo de repositorios disponibles para consultas."""
 
-    repo_ids: list[str] = Field(default_factory=list, description="Lista de repo_id disponibles para consulta.")
+    repo_ids: list[str] = Field(
+        default_factory=list,
+        description="Lista de repo_id disponibles para consulta.",
+    )
+    repositories: list["RepoCatalogEntry"] = Field(
+        default_factory=list,
+        description=(
+            "Metadatos de repositorios disponibles para consulta cuando la "
+            "información de ingesta existe en storage."
+        ),
+    )
+
+
+class RepoCatalogEntry(BaseModel):
+    """Representa un repositorio disponible para consulta con metadata opcional."""
+
+    repo_id: str = Field(description="Identificador público del repositorio.")
+    organization: str | None = Field(
+        default=None,
+        description="Organización, owner o grupo derivado desde repo_url.",
+    )
+    url: str | None = Field(
+        default=None,
+        description="URL remota utilizada durante la ingesta más reciente.",
+    )
+    branch: str | None = Field(
+        default=None,
+        description="Rama utilizada durante la ingesta más reciente.",
+    )
 
 
 class ProviderModelCatalogResponse(BaseModel):

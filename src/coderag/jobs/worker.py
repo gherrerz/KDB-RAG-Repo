@@ -193,6 +193,32 @@ class JobManager:
                     repo_ids.add(child.name)
         return sorted(repo_ids)
 
+    def list_repo_catalog(self) -> list[dict[str, str | None]]:
+        """Devuelve catálogo de repos conocidos con metadata de ingesta cuando exista."""
+        catalog_by_id = {
+            str(item["repo_id"]): {
+                "repo_id": str(item["repo_id"]),
+                "url": item.get("url"),
+                "branch": item.get("branch"),
+            }
+            for item in self.store.list_repo_catalog()
+            if item.get("repo_id")
+        }
+
+        if self._workspace_path.exists() and self._workspace_path.is_dir():
+            for child in self._workspace_path.iterdir():
+                if child.is_dir() and not child.name.startswith("."):
+                    catalog_by_id.setdefault(
+                        child.name,
+                        {
+                            "repo_id": child.name,
+                            "url": None,
+                            "branch": None,
+                        },
+                    )
+
+        return [catalog_by_id[repo_id] for repo_id in sorted(catalog_by_id)]
+
     def get_repo_runtime(self, repo_id: str) -> dict[str, str | None] | None:
         """Devuelve metadata runtime de la última ingesta del repositorio."""
         return self.store.get_repo_runtime(repo_id)

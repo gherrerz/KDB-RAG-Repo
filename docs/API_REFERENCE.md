@@ -75,7 +75,8 @@ Ejecuta consulta de inventario paginada.
 
 #### GET /repos
 
-Lista los `repo_id` disponibles para consultar.
+Lista los `repo_id` disponibles para consultar y, cuando existe metadata de
+ingesta persistida, retorna además URL, rama y organización derivada.
 
 - Response schema: `RepoCatalogResponse`
 

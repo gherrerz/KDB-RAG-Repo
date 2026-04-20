@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from coderag.core.models import RepoAuthConfig
-from coderag.ingestion.git_client import build_repo_id, clone_repository
+from coderag.ingestion.git_client import (
+    build_repo_id,
+    clone_repository,
+    extract_repo_organization,
+)
 
 
 def test_build_repo_id_uses_url_tail_for_https_url() -> None:
@@ -20,6 +24,30 @@ def test_build_repo_id_uses_url_tail_for_ssh_url() -> None:
     """Admite URL de repositorio de estilo git@ SSH como fuente repo_id."""
     repo_id = build_repo_id("git@github.com:macrozheng/mall.git", "develop")
     assert repo_id == "mall"
+
+
+def test_extract_repo_organization_returns_owner_for_https_url() -> None:
+    """Deriva owner para URLs HTTPS comunes de GitHub y similares."""
+    organization = extract_repo_organization(
+        "https://github.com/macrozheng/mall.git"
+    )
+    assert organization == "macrozheng"
+
+
+def test_extract_repo_organization_returns_group_path_for_nested_gitlab_url() -> None:
+    """Preserva subgrupos cuando la URL contiene múltiples segmentos de grupo."""
+    organization = extract_repo_organization(
+        "https://gitlab.com/group/subgroup/project.git"
+    )
+    assert organization == "group/subgroup"
+
+
+def test_extract_repo_organization_returns_workspace_for_ssh_url() -> None:
+    """Deriva workspace u owner desde URLs SSH de estilo git@host:path."""
+    organization = extract_repo_organization(
+        "git@bitbucket.org:workspace/proyecto.git"
+    )
+    assert organization == "workspace"
 
 
 def test_clone_repository_fallbacks_when_branch_missing(

@@ -89,6 +89,30 @@ def _extract_repo_host(repo_url: str) -> str:
     return (parsed.hostname or "").strip().lower()
 
 
+def extract_repo_organization(repo_url: str) -> str | None:
+    """Extrae owner, workspace o grupo desde una URL Git HTTPS o SSH."""
+    normalized = repo_url.strip()
+    if not normalized:
+        return None
+
+    if normalized.startswith("git@"):
+        if ":" not in normalized:
+            return None
+        path = normalized.split(":", maxsplit=1)[-1]
+    else:
+        parsed = urlparse(normalized)
+        path = parsed.path
+
+    candidate = path.strip().strip("/")
+    if candidate.endswith(".git"):
+        candidate = candidate[:-4]
+
+    parts = [segment.strip() for segment in candidate.split("/") if segment.strip()]
+    if len(parts) < 2:
+        return None
+    return "/".join(parts[:-1])
+
+
 def _resolve_https_auth_env(
     *,
     username: str,

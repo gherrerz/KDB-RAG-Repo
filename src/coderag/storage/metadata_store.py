@@ -198,6 +198,28 @@ class MetadataStore:
             ).fetchall()
         return [str(row["repo_id"]) for row in rows if row["repo_id"]]
 
+    def list_repo_catalog(self) -> list[dict[str, str | None]]:
+        """Retorna catálogo de repos persistidos con metadata de ingesta."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id AS repo_id, url, branch
+                FROM repos
+                ORDER BY id ASC
+                """
+            ).fetchall()
+        return [
+            {
+                "repo_id": str(row["repo_id"]),
+                "url": str(row["url"]) if row["url"] is not None else None,
+                "branch": (
+                    str(row["branch"]) if row["branch"] is not None else None
+                ),
+            }
+            for row in rows
+            if row["repo_id"]
+        ]
+
     def list_active_job_ids(self, repo_id: str | None = None) -> list[str]:
         """Lista jobs activos (queued/running), opcionalmente filtrados por repo."""
         params: list[str] = [
