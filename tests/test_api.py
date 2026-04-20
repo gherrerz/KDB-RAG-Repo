@@ -348,6 +348,32 @@ def test_ingest_repo_returns_409_when_same_repo_is_active(
     assert "ingesta activa" in payload["error"].lower()
 
 
+def test_ingest_repo_normalizes_swagger_placeholder_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ignora el placeholder `string` de Swagger en commit opcional."""
+
+    def fake_create_ingest_job(request) -> JobInfo:
+        assert request.commit is None
+        return JobInfo(id="job-123", status=JobStatus.queued, repo_id="mall")
+
+    monkeypatch.setattr(server.jobs, "create_ingest_job", fake_create_ingest_job)
+    client = TestClient(app)
+
+    response = client.post(
+        "/repos/ingest",
+        json={
+            "provider": "bitbucket",
+            "repo_url": "https://bitbucket.org/acme/mall.git",
+            "branch": "main",
+            "commit": "string",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "job-123"
+
+
 def test_provider_models_endpoint_returns_catalog(monkeypatch) -> None:
     """Expone catálogo de modelos por provider para poblar combos de UI."""
 

@@ -4,7 +4,20 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _normalize_optional_text(value: Any) -> str | None | Any:
+    """Normaliza placeholders de OpenAPI/Swagger en campos opcionales."""
+    if value is None or not isinstance(value, str):
+        return value
+
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if cleaned.lower() == "string":
+        return None
+    return cleaned
 
 
 def utc_now() -> datetime:
@@ -116,6 +129,18 @@ class RepoIngestRequest(BaseModel):
         default=None,
         description="Modelo de embeddings opcional para esta ingesta.",
     )
+
+    @field_validator(
+        "commit",
+        "token",
+        "embedding_provider",
+        "embedding_model",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_text_fields(cls, value: Any) -> str | None | Any:
+        """Convierte placeholders opcionales vacíos o Swagger a None."""
+        return _normalize_optional_text(value)
 
     def resolved_auth(self) -> RepoAuthConfig:
         """Devuelve la configuración auth efectiva preservando compatibilidad."""

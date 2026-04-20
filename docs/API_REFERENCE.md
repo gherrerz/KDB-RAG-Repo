@@ -189,6 +189,7 @@ Reglas iniciales:
 - `token` se conserva como compatibilidad legacy y se mapea internamente a GitHub HTTPS.
 - Bitbucket HTTPS en esta primera implementación requiere `auth.method=http_basic`, `auth.transport=https`, `auth.username` y `auth.secret`.
 - Bitbucket SSH mantiene las variables `GIT_SSH_*` existentes.
+- Si no necesitas fijar una revisión exacta, omite `commit` o envíalo como `null`; no uses placeholders como `"string"` desde Swagger/OpenAPI.
 
 ### JobInfo
 
