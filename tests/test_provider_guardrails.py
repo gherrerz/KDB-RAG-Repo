@@ -44,7 +44,18 @@ def _build_window(monkeypatch: pytest.MonkeyPatch) -> MainWindow:
     import coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "get", _fake_get)
-    return MainWindow()
+    window = MainWindow()
+    monkeypatch.setattr(
+        window.query_view,
+        "is_embedding_provider_ready",
+        lambda: (True, "ok"),
+    )
+    monkeypatch.setattr(
+        window.query_view,
+        "is_llm_provider_ready",
+        lambda: (True, "ok"),
+    )
+    return window
 
 
 def test_query_blocks_when_provider_not_ready_without_force(

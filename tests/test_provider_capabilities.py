@@ -4,10 +4,12 @@ from coderag.core.settings import Settings
 
 
 def test_embedding_capabilities_vertex_requires_project() -> None:
-    """Vertex embeddings requiere token y project id para quedar configurado."""
+    """Vertex embeddings queda no configurado sin service account Base64 ni fallback legacy."""
     settings = Settings(
-        VERTEX_AI_API_KEY="token",
+        VERTEX_SERVICE_ACCOUNT_JSON_B64="",
+        VERTEX_API_BASE_URL="https://us-central1-aiplatform.googleapis.com",
         VERTEX_AI_PROJECT_ID="",
+        _env_file=None,
     )
     info = settings.embedding_provider_capabilities("vertex_ai")
     assert info["supported"] is True

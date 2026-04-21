@@ -15,7 +15,11 @@ from coderag.core.provider_model_catalog import (
     normalize_provider_name,
 )
 from coderag.core.settings import ProviderName, get_settings
-from coderag.core.vertex_ai import build_vertex_labels, resolve_vertex_auth_context
+from coderag.core.vertex_ai import (
+    build_vertex_api_url,
+    build_vertex_labels,
+    resolve_vertex_auth_context,
+)
 from coderag.llm.prompts import (
     SYSTEM_PROMPT,
     build_answer_prompt,
@@ -485,8 +489,33 @@ class AnswerClient:
     ) -> str:
         """Llama a Vertex AI generateContent usando Service Account."""
         settings = get_settings()
-        project = getattr(settings, "vertex_ai_project_id", "")
-        location = getattr(settings, "vertex_ai_location", "us-central1")
+        project = (
+            settings.resolve_vertex_project_id()
+            if hasattr(settings, "resolve_vertex_project_id")
+            else getattr(settings, "vertex_ai_project_id", "")
+        )
+        location = (
+            settings.resolve_vertex_location()
+            if hasattr(settings, "resolve_vertex_location")
+            else getattr(settings, "vertex_ai_location", "us-central1")
+        )
+        base_url = (
+            settings.resolve_vertex_api_base_url()
+            if hasattr(settings, "resolve_vertex_api_base_url")
+            else f"https://{location}-aiplatform.googleapis.com"
+        )
+        api_version = str(getattr(settings, "vertex_api_version", "v1"))
+        generate_path_template = str(
+            getattr(
+                settings,
+                "vertex_generate_content_path_template",
+                (
+                    "/projects/{project}/locations/{location}/publishers/google/"
+                    "models/{model}:generateContent"
+                ),
+            )
+        )
+        token_url = str(getattr(settings, "vertex_auth_token_url", "")).strip()
         if hasattr(settings, "resolve_vertex_credentials_reference"):
             credentials_source = str(
                 settings.resolve_vertex_credentials_reference()
@@ -502,7 +531,13 @@ class AnswerClient:
         if not credentials_source:
             return ""
 
-        auth_context = resolve_vertex_auth_context(credentials_source)
+        if token_url:
+            auth_context = resolve_vertex_auth_context(
+                credentials_source,
+                token_url=token_url,
+            )
+        else:
+            auth_context = resolve_vertex_auth_context(credentials_source)
 
         timeout_value = _timeout_value(timeout_seconds)
         correlation_id = None
@@ -519,10 +554,16 @@ class AnswerClient:
         last_error: Exception | None = None
         for candidate_model in _vertex_model_candidates(model):
             model_name = _vertex_model_name(candidate_model)
-            url = (
-                f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/"
-                f"locations/{location}/publishers/google/models/{model_name}:generateContent"
+            url = build_vertex_api_url(
+                base_url=base_url,
+                api_version=api_version,
+                path_template=generate_path_template,
+                project_id=project,
+                model_name=model_name,
+                location=location,
             )
+            if not url:
+                return ""
             payload = _build_generate_content_payload(prompt, vertex=True)
             resolved_use_case = (use_case_id or settings.vertex_ai_label_use_case_id).strip()
             request_labels = build_vertex_labels(
@@ -597,7 +638,17 @@ class AnswerClient:
             settings = get_settings()
             if hasattr(settings, "is_vertex_ai_configured"):
                 return bool(settings.is_vertex_ai_configured())
-            return bool(self.api_key and getattr(settings, "vertex_ai_project_id", ""))
+            credentials_source = (
+                settings.resolve_vertex_credentials_reference()
+                if hasattr(settings, "resolve_vertex_credentials_reference")
+                else getattr(settings, "vertex_ai_service_account_json_b64", "")
+            )
+            project_id = (
+                settings.resolve_vertex_project_id()
+                if hasattr(settings, "resolve_vertex_project_id")
+                else getattr(settings, "vertex_ai_project_id", "")
+            )
+            return bool(str(credentials_source).strip() and str(project_id).strip())
         return False
 
     def verify(

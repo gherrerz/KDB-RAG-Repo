@@ -15,6 +15,21 @@ function Test-CommandExists {
     return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Get-RancherDesktopEngineName {
+    $settingsPath = Join-Path $env:LOCALAPPDATA "rancher-desktop\settings.json"
+    if (-not (Test-Path $settingsPath)) {
+        return $null
+    }
+
+    try {
+        $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+        return [string]$settings.containerEngine.name
+    }
+    catch {
+        return $null
+    }
+}
+
 function Invoke-ContainerCommand {
     param(
         [Parameter(Mandatory = $true)][string]$Command,
@@ -39,11 +54,17 @@ if (-not (Test-Path $composeFile)) {
 
 $canUseNerdctl = $false
 $canUseDocker = $false
+$rancherDesktopEngine = Get-RancherDesktopEngineName
 
 if (Test-CommandExists -Name "nerdctl") {
-    $nerdctlVersion = Invoke-ContainerCommand -Command "nerdctl" -Args @("version")
-    if ($nerdctlVersion.ExitCode -eq 0) {
-        $canUseNerdctl = $true
+    if ($rancherDesktopEngine -eq "moby") {
+        Write-Host "Rancher Desktop detectado con engine 'moby'; se omite nerdctl compose."
+    }
+    else {
+        $nerdctlVersion = Invoke-ContainerCommand -Command "nerdctl" -Args @("version")
+        if ($nerdctlVersion.ExitCode -eq 0) {
+            $canUseNerdctl = $true
+        }
     }
 }
 
@@ -125,5 +146,13 @@ if ($canUseNerdctl) {
 }
 
 Write-Host "Using Docker Desktop runtime via docker compose..."
+$dockerOs = (& docker info --format "{{.OperatingSystem}}" 2>$null)
+if ($rancherDesktopEngine -eq "moby" -and $dockerOs -match "Docker Desktop") {
+    Write-Warning (
+        "Rancher Desktop esta configurado con engine 'moby', pero el CLI docker " +
+        "activo esta conectado a Docker Desktop. Si quieres usar Rancher Desktop, " +
+        "cambia el contexto/daemon de docker antes de levantar el stack."
+    )
+}
 $onlyDockerResult = Invoke-ContainerCommand -Command "docker" -Args $composeArgs
 exit $onlyDockerResult.ExitCode

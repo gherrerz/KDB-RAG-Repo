@@ -17,10 +17,16 @@ escenario contenedorizado.
 - `OPENAI_API_KEY`: credencial OpenAI. Default: vacio.
 - `OPENAI_TIMEOUT_SECONDS`: timeout de llamadas OpenAI. Default: `20`.
 - `GEMINI_API_KEY`: credencial Gemini. Default: vacio.
-- `VERTEX_AI_AUTH_MODE`: modo de autenticacion de Vertex AI. Default: `service_account`.
-- `VERTEX_AI_SERVICE_ACCOUNT_JSON_B64`: JSON de Service Account codificado en Base64 (prioritario). Default: vacio.
-- `VERTEX_AI_PROJECT_ID`: proyecto de Vertex AI. Default: vacio.
-- `VERTEX_AI_LOCATION`: region de Vertex AI. Default: `us-central1`.
+- `VERTEX_AI_AUTH_MODE`: metadato legacy del modo de autenticacion Vertex. Default: `service_account`.
+- `VERTEX_SERVICE_ACCOUNT_JSON_B64`: JSON de Service Account codificado en Base64. Es la credencial canónica de Vertex. Default: vacio.
+- `VERTEX_API_BASE_URL`: base URL regional efectiva de Vertex. De esta URL se deriva `location`. Default: `https://us-central1-aiplatform.googleapis.com`.
+- `VERTEX_API_VERSION`: version REST para endpoints Vertex. Default: `v1`.
+- `VERTEX_GENERATE_CONTENT_PATH_TEMPLATE`: template del path `generateContent`. Default: `/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent`.
+- `VERTEX_PREDICT_PATH_TEMPLATE`: template del path `predict`. Default: `/projects/{project}/locations/{location}/publishers/google/models/{model}:predict`.
+- `VERTEX_MODELS_PATH_TEMPLATE`: template del path de `publisher models`. Default: `/projects/{project}/locations/{location}/publishers/google/models`.
+- `VERTEX_AUTH_TOKEN_URL`: URL de token OAuth para Vertex auth. Default: `https://oauth2.googleapis.com/token`.
+- `VERTEX_AI_PROJECT_ID`: fallback legacy si no puede derivarse `project_id` desde el service account. Default: vacio.
+- `VERTEX_AI_LOCATION`: fallback legacy si no puede derivarse `location` desde `VERTEX_API_BASE_URL`. Default: vacio.
 - `VERTEX_AI_LABELS_ENABLED`: habilita labels de request en llamadas Vertex AI. Default: `true`.
 - `VERTEX_AI_LABEL_SERVICE`: nombre de servicio para labels Vertex. Default: `kdb-rag`.
 - `VERTEX_AI_LABEL_SERVICE_ACCOUNT`: override opcional del label `service_account` (si está vacío usa el email del Service Account autenticado). Default: vacio.
@@ -162,9 +168,8 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 LLM_PROVIDER=vertex
 EMBEDDING_PROVIDER=vertex
 VERTEX_AI_AUTH_MODE=service_account
-VERTEX_AI_SERVICE_ACCOUNT_JSON_B64=<base64_json_sa>
-VERTEX_AI_PROJECT_ID=your_project
-VERTEX_AI_LOCATION=us-central1
+VERTEX_SERVICE_ACCOUNT_JSON_B64=<base64_json_sa>
+VERTEX_API_BASE_URL=https://us-central1-aiplatform.googleapis.com
 VERTEX_AI_LABELS_ENABLED=true
 VERTEX_AI_LABEL_SERVICE=kdb-rag
 VERTEX_AI_LABEL_SERVICE_ACCOUNT=
@@ -199,6 +204,7 @@ GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
   - Local sin contenedores: `bolt://localhost:7687`.
   - Local con puerto mapeado: `bolt://127.0.0.1:17687`.
   - API dentro de Compose: `bolt://neo4j:7687`.
+- En Vertex, `project_id` se deriva del service account en Base64 y `location` del host de `VERTEX_API_BASE_URL`; `VERTEX_AI_PROJECT_ID` y `VERTEX_AI_LOCATION` quedan como fallback legacy.
 
 ## Despliegue con Docker Compose completo
 

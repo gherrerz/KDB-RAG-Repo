@@ -11,6 +11,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from coderag.core.provider_model_catalog import normalize_provider_name
+from coderag.core.vertex_ai import derive_vertex_location_from_base_url
 
 
 ProviderName = Literal["openai", "gemini", "vertex", "vertex_ai"]
@@ -45,8 +46,41 @@ class Settings(BaseSettings):
         default="",
         alias="VERTEX_AI_SERVICE_ACCOUNT_JSON_B64",
     )
+    vertex_service_account_json_b64: str = Field(
+        default="",
+        alias="VERTEX_SERVICE_ACCOUNT_JSON_B64",
+    )
     vertex_ai_project_id: str = Field(default="", alias="VERTEX_AI_PROJECT_ID")
     vertex_ai_location: str = Field(default="us-central1", alias="VERTEX_AI_LOCATION")
+    vertex_api_base_url: str = Field(
+        default="https://us-central1-aiplatform.googleapis.com",
+        alias="VERTEX_API_BASE_URL",
+    )
+    vertex_api_version: str = Field(default="v1", alias="VERTEX_API_VERSION")
+    vertex_generate_content_path_template: str = Field(
+        default=(
+            "/projects/{project}/locations/{location}/publishers/google/"
+            "models/{model}:generateContent"
+        ),
+        alias="VERTEX_GENERATE_CONTENT_PATH_TEMPLATE",
+    )
+    vertex_predict_path_template: str = Field(
+        default=(
+            "/projects/{project}/locations/{location}/publishers/google/"
+            "models/{model}:predict"
+        ),
+        alias="VERTEX_PREDICT_PATH_TEMPLATE",
+    )
+    vertex_models_path_template: str = Field(
+        default=(
+            "/projects/{project}/locations/{location}/publishers/google/models"
+        ),
+        alias="VERTEX_MODELS_PATH_TEMPLATE",
+    )
+    vertex_auth_token_url: str = Field(
+        default="https://oauth2.googleapis.com/token",
+        alias="VERTEX_AUTH_TOKEN_URL",
+    )
     vertex_ai_labels_enabled: bool = Field(
         default=True,
         alias="VERTEX_AI_LABELS_ENABLED",
@@ -405,9 +439,16 @@ class Settings(BaseSettings):
             return ""
         return self.openai_api_key
 
+    def resolve_vertex_credentials_reference(self) -> str:
+        """Resuelve credencial Base64 canónica de Service Account para Vertex."""
+        canonical_b64 = (self.vertex_service_account_json_b64 or "").strip()
+        if canonical_b64:
+            return canonical_b64
+        return (self.vertex_ai_service_account_json_b64 or "").strip()
+
     def decode_vertex_service_account_b64(self) -> dict[str, object] | None:
         """Decodifica el JSON de Service Account desde Base64 cuando existe."""
-        raw_b64 = (self.vertex_ai_service_account_json_b64 or "").strip()
+        raw_b64 = self.resolve_vertex_credentials_reference()
         if not raw_b64:
             return None
 
@@ -415,7 +456,7 @@ class Settings(BaseSettings):
             decoded_bytes = base64.b64decode(raw_b64, validate=True)
         except binascii.Error as exc:
             raise ValueError(
-                "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 no contiene Base64 válido."
+                "VERTEX service account JSON B64 no contiene Base64 válido."
             ) from exc
 
         try:
@@ -423,25 +464,42 @@ class Settings(BaseSettings):
             payload = json.loads(decoded_text)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError(
-                "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 no contiene JSON válido."
+                "VERTEX service account JSON B64 no contiene JSON válido."
             ) from exc
 
         if not isinstance(payload, dict):
             raise ValueError(
-                "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 debe decodificar a un objeto JSON."
+                "VERTEX service account JSON B64 debe decodificar a un objeto JSON."
             )
         return payload
 
-    def resolve_vertex_credentials_reference(self) -> str:
-        """Resuelve credencial Base64 de Service Account para Vertex."""
-        raw_b64 = (self.vertex_ai_service_account_json_b64 or "").strip()
-        return raw_b64
+    def resolve_vertex_project_id(self) -> str:
+        """Resuelve el project_id efectivo de Vertex priorizando el service account."""
+        decoded_payload = self.decode_vertex_service_account_b64()
+        if decoded_payload:
+            project_id = str(decoded_payload.get("project_id") or "").strip()
+            if project_id:
+                return project_id
+        return (self.vertex_ai_project_id or "").strip()
+
+    def resolve_vertex_location(self) -> str:
+        """Resuelve la location de Vertex desde base URL con fallback legacy."""
+        derived_location = derive_vertex_location_from_base_url(
+            self.vertex_api_base_url
+        )
+        if derived_location:
+            return derived_location
+        return (self.vertex_ai_location or "us-central1").strip() or "us-central1"
+
+    def resolve_vertex_api_base_url(self) -> str:
+        """Resuelve la base URL efectiva de Vertex AI."""
+        return (self.vertex_api_base_url or "").strip()
 
     def vertex_ai_missing_reason(self) -> str:
         """Explica por qué Vertex AI no está completamente configurado."""
-        if not self.vertex_ai_project_id:
+        if not self.resolve_vertex_project_id():
             return "missing_vertex_ai_api_key_or_project"
-        raw_b64 = (self.vertex_ai_service_account_json_b64 or "").strip()
+        raw_b64 = self.resolve_vertex_credentials_reference()
         if not raw_b64:
             return "missing_vertex_ai_api_key_or_project"
         try:
@@ -449,6 +507,10 @@ class Settings(BaseSettings):
         except ValueError:
             return "missing_vertex_ai_api_key_or_project"
         if not decoded_payload:
+            return "missing_vertex_ai_api_key_or_project"
+        if not self.resolve_vertex_api_base_url():
+            return "missing_vertex_ai_api_key_or_project"
+        if not self.resolve_vertex_location():
             return "missing_vertex_ai_api_key_or_project"
         return "ok"
 

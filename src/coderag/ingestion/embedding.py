@@ -11,7 +11,11 @@ import requests
 
 from coderag.core.provider_model_catalog import normalize_provider_name
 from coderag.core.settings import ProviderName, get_settings
-from coderag.core.vertex_ai import build_vertex_labels, resolve_vertex_auth_context
+from coderag.core.vertex_ai import (
+    build_vertex_api_url,
+    build_vertex_labels,
+    resolve_vertex_auth_context,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -199,7 +203,15 @@ class EmbeddingClient:
             if hasattr(settings, "is_vertex_ai_configured"):
                 has_provider_runtime = bool(settings.is_vertex_ai_configured())
             else:
-                has_provider_runtime = bool(getattr(settings, "vertex_ai_project_id", ""))
+                credentials_source = getattr(
+                    settings,
+                    "vertex_ai_service_account_json_b64",
+                    "",
+                )
+                project_id = getattr(settings, "vertex_ai_project_id", "")
+                has_provider_runtime = bool(
+                    str(credentials_source).strip() and str(project_id).strip()
+                )
         else:
             has_provider_runtime = False
 
@@ -308,8 +320,33 @@ class EmbeddingClient:
     ) -> list[list[float]]:
         """Solicita embeddings a Vertex AI usando Service Account."""
         settings = get_settings()
-        project = getattr(settings, "vertex_ai_project_id", "")
-        location = getattr(settings, "vertex_ai_location", "us-central1")
+        project = (
+            settings.resolve_vertex_project_id()
+            if hasattr(settings, "resolve_vertex_project_id")
+            else getattr(settings, "vertex_ai_project_id", "")
+        )
+        location = (
+            settings.resolve_vertex_location()
+            if hasattr(settings, "resolve_vertex_location")
+            else getattr(settings, "vertex_ai_location", "us-central1")
+        )
+        base_url = (
+            settings.resolve_vertex_api_base_url()
+            if hasattr(settings, "resolve_vertex_api_base_url")
+            else f"https://{location}-aiplatform.googleapis.com"
+        )
+        api_version = str(getattr(settings, "vertex_api_version", "v1"))
+        predict_path_template = str(
+            getattr(
+                settings,
+                "vertex_predict_path_template",
+                (
+                    "/projects/{project}/locations/{location}/publishers/google/"
+                    "models/{model}:predict"
+                ),
+            )
+        )
+        token_url = str(getattr(settings, "vertex_auth_token_url", "")).strip()
         if hasattr(settings, "resolve_vertex_credentials_reference"):
             credentials_source = str(
                 settings.resolve_vertex_credentials_reference()
@@ -325,14 +362,26 @@ class EmbeddingClient:
         if not credentials_source:
             return []
 
-        auth_context = resolve_vertex_auth_context(credentials_source)
+        if token_url:
+            auth_context = resolve_vertex_auth_context(
+                credentials_source,
+                token_url=token_url,
+            )
+        else:
+            auth_context = resolve_vertex_auth_context(credentials_source)
 
         model_name = _vertex_model_name(self.model)
 
-        url = (
-            f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/"
-            f"locations/{location}/publishers/google/models/{model_name}:predict"
+        url = build_vertex_api_url(
+            base_url=base_url,
+            api_version=api_version,
+            path_template=predict_path_template,
+            project_id=project,
+            model_name=model_name,
+            location=location,
         )
+        if not url:
+            return []
         resolved_use_case = (
             use_case_id or getattr(settings, "vertex_ai_label_use_case_id", "rag_embedding")
         ).strip()

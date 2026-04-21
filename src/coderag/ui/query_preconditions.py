@@ -25,6 +25,12 @@ def evaluate_local_query_preconditions(
     retrieval_only_mode: bool = False,
 ) -> QueryPreconditionResult:
     """Valida precondiciones locales para consulta antes de llamar a la API."""
+    if job_poll_enabled:
+        return QueryPreconditionResult(
+            allowed=False,
+            message="La ingesta está en progreso. Espera a que finalice antes de consultar.",
+        )
+
     llm_required = not retrieval_only_mode
     providers_ready = embedding_ready and (llm_ready or not llm_required)
     if not providers_ready and not force_fallback:
@@ -45,12 +51,6 @@ def evaluate_local_query_preconditions(
         return QueryPreconditionResult(
             allowed=False,
             message="Debes seleccionar un ID de repositorio del listado.",
-        )
-
-    if job_poll_enabled:
-        return QueryPreconditionResult(
-            allowed=False,
-            message="La ingesta está en progreso. Espera a que finalice antes de consultar.",
         )
 
     if not has_repo_in_catalog:

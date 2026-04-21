@@ -48,22 +48,19 @@ Perfiles de dependencias:
 - `requirements-desktop.txt`: runtime + UI de escritorio.
 - `requirements-full.txt`: entorno completo local con UI y tests.
 
-Configura credenciales de Vertex AI con Service Account en `.env`:
-
-```powershell
-$env:VERTEX_AI_SERVICE_ACCOUNT_FILE = 'C:/ruta/segura/service-account.json'
-```
-
 Variables mínimas en `.env` para Vertex:
 
 ```dotenv
 LLM_PROVIDER=vertex
 EMBEDDING_PROVIDER=vertex
 VERTEX_AI_AUTH_MODE=service_account
-VERTEX_AI_SERVICE_ACCOUNT_JSON_B64=<base64_json_sa>
-VERTEX_AI_PROJECT_ID=your_project
-VERTEX_AI_LOCATION=us-central1
+VERTEX_SERVICE_ACCOUNT_JSON_B64=<base64_json_sa>
+VERTEX_API_BASE_URL=https://us-central1-aiplatform.googleapis.com
 ```
+
+`project_id` se deriva del JSON Base64 del service account y `location` se deriva
+del host configurado en `VERTEX_API_BASE_URL`. `VERTEX_AI_PROJECT_ID` y
+`VERTEX_AI_LOCATION` quedan solo como fallback legacy.
 
 2. Levanta stack local con Docker Compose (API + Neo4j).
 

@@ -69,8 +69,8 @@ Recomendacion:
 Campos sensibles tipicos:
 
 - `OPENAI_API_KEY`
-- `GEMINI_API_KEY`, `service-account.json` (Vertex AI)
-- `VERTEX_AI_PROJECT_ID`
+- `GEMINI_API_KEY`, `VERTEX_SERVICE_ACCOUNT_JSON_B64` (Vertex AI)
+- `VERTEX_AI_PROJECT_ID` como fallback legacy opcional
 - `GIT_SSH_KEY_CONTENT`, `GIT_SSH_KNOWN_HOSTS_CONTENT` en el Secret Kubernetes generado; el ExternalSecret puede mapear desde propiedades remotas existentes como `id_rsa` y `known_hosts`
 - `NEO4J_PASSWORD`
 - `NEO4J_AUTH` (en secreto Neo4j)

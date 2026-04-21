@@ -30,10 +30,6 @@ spec:
           volumeMounts:
             - name: api-storage
               mountPath: /app/storage
-            - name: vertex-service-account
-              mountPath: /var/run/secrets/google/service-account.json
-              subPath: service-account.json
-              readOnly: true
           resources:
             requests:
               cpu: 250m
@@ -45,9 +41,3 @@ spec:
         - name: api-storage
           persistentVolumeClaim:
             claimName: coderag-api-storage
-        - name: vertex-service-account
-          secret:
-            secretName: coderag-api-secret
-            items:
-              - key: service-account.json
-                path: service-account.json

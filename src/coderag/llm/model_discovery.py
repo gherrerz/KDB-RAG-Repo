@@ -15,7 +15,7 @@ from coderag.core.provider_model_catalog import (
     normalize_provider_name,
 )
 from coderag.core.settings import ProviderName, get_settings
-from coderag.core.vertex_ai import resolve_vertex_auth_context
+from coderag.core.vertex_ai import build_vertex_api_url, resolve_vertex_auth_context
 
 
 ModelKind = str
@@ -124,8 +124,30 @@ def _discover_openai(kind: ModelKind) -> ModelDiscoveryResult:
 def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
     """Lista modelos Vertex con estrategias remotas y fallback resiliente."""
     settings = get_settings()
-    project_id = settings.vertex_ai_project_id.strip()
-    location = settings.vertex_ai_location.strip() or "us-central1"
+    project_id = (
+        settings.resolve_vertex_project_id()
+        if hasattr(settings, "resolve_vertex_project_id")
+        else settings.vertex_ai_project_id.strip()
+    )
+    location = (
+        settings.resolve_vertex_location()
+        if hasattr(settings, "resolve_vertex_location")
+        else settings.vertex_ai_location.strip() or "us-central1"
+    )
+    base_url = (
+        settings.resolve_vertex_api_base_url()
+        if hasattr(settings, "resolve_vertex_api_base_url")
+        else f"https://{location}-aiplatform.googleapis.com"
+    )
+    api_version = str(getattr(settings, "vertex_api_version", "v1"))
+    models_path_template = str(
+        getattr(
+            settings,
+            "vertex_models_path_template",
+            "/projects/{project}/locations/{location}/publishers/google/models",
+        )
+    )
+    token_url = str(getattr(settings, "vertex_auth_token_url", "")).strip()
     if hasattr(settings, "resolve_vertex_credentials_reference"):
         credentials_source = str(
             settings.resolve_vertex_credentials_reference()
@@ -149,10 +171,19 @@ def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
 
     timeout = max(1.0, float(settings.discovery_timeout_seconds))
     publisher_warning: str | None = None
-    auth_context = resolve_vertex_auth_context(credentials_source)
+    if token_url:
+        auth_context = resolve_vertex_auth_context(
+            credentials_source,
+            token_url=token_url,
+        )
+    else:
+        auth_context = resolve_vertex_auth_context(credentials_source)
 
     try:
         names = _discover_vertex_publisher_names(
+            base_url=base_url,
+            api_version=api_version,
+            path_template=models_path_template,
             project_id=project_id,
             location=location,
             timeout=timeout,
@@ -198,6 +229,9 @@ def _discover_vertex(kind: ModelKind) -> ModelDiscoveryResult:
 
 def _discover_vertex_publisher_names(
     *,
+    base_url: str = "",
+    api_version: str = "v1",
+    path_template: str = "/projects/{project}/locations/{location}/publishers/google/models",
     project_id: str,
     location: str,
     timeout: float,
@@ -210,6 +244,9 @@ def _discover_vertex_publisher_names(
 
     for _ in range(12):
         payload = _vertex_models_page(
+            base_url=base_url,
+            api_version=api_version,
+            path_template=path_template,
             project_id=project_id,
             location=location,
             timeout=timeout,
@@ -235,6 +272,9 @@ def _discover_vertex_publisher_names(
 
 def _vertex_models_page(
     *,
+    base_url: str = "",
+    api_version: str = "v1",
+    path_template: str = "/projects/{project}/locations/{location}/publishers/google/models",
     project_id: str,
     location: str,
     timeout: float,
@@ -243,10 +283,15 @@ def _vertex_models_page(
     api_key: str | None,
 ) -> dict:
     """Obtiene una página del catálogo de publisher models en Vertex."""
-    url = (
-        f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}/"
-        f"locations/{location}/publishers/google/models"
+    url = build_vertex_api_url(
+        base_url=base_url or f"https://{location}-aiplatform.googleapis.com",
+        api_version=api_version,
+        path_template=path_template,
+        project_id=project_id,
+        location=location,
     )
+    if not url:
+        return {}
     params: dict[str, str | int] = {"pageSize": 100}
     if page_token:
         params["pageToken"] = page_token

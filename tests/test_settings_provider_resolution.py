@@ -123,7 +123,7 @@ def test_vertex_credentials_reference_prefers_base64() -> None:
     payload = {"type": "service_account", "project_id": "demo"}
     encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
     settings = Settings(
-        VERTEX_AI_SERVICE_ACCOUNT_JSON_B64=encoded,
+        VERTEX_SERVICE_ACCOUNT_JSON_B64=encoded,
         _env_file=None,
     )
 
@@ -131,24 +131,48 @@ def test_vertex_credentials_reference_prefers_base64() -> None:
 
 
 def test_decode_vertex_service_account_b64_returns_dict() -> None:
-    """Decodifica VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 a objeto JSON en runtime."""
+    """Decodifica VERTEX_SERVICE_ACCOUNT_JSON_B64 a objeto JSON en runtime."""
     payload = {
         "type": "service_account",
         "project_id": "demo-project",
         "private_key_id": "key-id",
     }
     encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
-    settings = Settings(VERTEX_AI_SERVICE_ACCOUNT_JSON_B64=encoded, _env_file=None)
+    settings = Settings(VERTEX_SERVICE_ACCOUNT_JSON_B64=encoded, _env_file=None)
 
     assert settings.decode_vertex_service_account_b64() == payload
 
 
 def test_decode_vertex_service_account_b64_raises_on_invalid_value() -> None:
-    """Informa error cuando VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 no es válido."""
-    settings = Settings(VERTEX_AI_SERVICE_ACCOUNT_JSON_B64="not-valid-b64", _env_file=None)
+    """Informa error cuando VERTEX_SERVICE_ACCOUNT_JSON_B64 no es válido."""
+    settings = Settings(VERTEX_SERVICE_ACCOUNT_JSON_B64="not-valid-b64", _env_file=None)
 
     with pytest.raises(ValueError):
         settings.decode_vertex_service_account_b64()
+
+
+def test_resolve_vertex_project_id_prefers_service_account_payload() -> None:
+    """Resuelve project_id desde el JSON Base64 antes que el fallback legacy."""
+    payload = {"type": "service_account", "project_id": "demo-project"}
+    encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
+    settings = Settings(
+        VERTEX_SERVICE_ACCOUNT_JSON_B64=encoded,
+        VERTEX_AI_PROJECT_ID="legacy-project",
+        _env_file=None,
+    )
+
+    assert settings.resolve_vertex_project_id() == "demo-project"
+
+
+def test_resolve_vertex_location_prefers_base_url() -> None:
+    """Deriva location desde VERTEX_API_BASE_URL antes que el fallback legacy."""
+    settings = Settings(
+        VERTEX_API_BASE_URL="https://europe-west1-aiplatform.googleapis.com",
+        VERTEX_AI_LOCATION="legacy-location",
+        _env_file=None,
+    )
+
+    assert settings.resolve_vertex_location() == "europe-west1"
 
 
 def test_resolve_semantic_relation_types_filters_invalid_and_duplicates() -> None:

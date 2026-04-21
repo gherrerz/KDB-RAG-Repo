@@ -367,11 +367,12 @@ class MainWindow(QMainWindow):
             response.raise_for_status()
             data = response.json()
             message = str(data.get("message") or "Limpieza total completada")
+            warnings = [str(item) for item in (data.get("warnings") or [])]
             self.ingestion_view.append_log(message)
 
             for item in data.get("cleared") or []:
                 self.ingestion_view.append_log(f"- {item}")
-            for warning in data.get("warnings") or []:
+            for warning in warnings:
                 self.ingestion_view.append_log(f"Advertencia: {warning}")
 
             self.ingestion_view.set_job_id("")
@@ -381,7 +382,10 @@ class MainWindow(QMainWindow):
             self._refresh_repo_ids(log_on_error=True)
 
             self.ingestion_view.set_progress(100)
-            self.ingestion_view.set_status("success", "Limpio")
+            if warnings:
+                self.ingestion_view.set_status("error", "Parcial")
+            else:
+                self.ingestion_view.set_status("success", "Limpio")
         except requests.HTTPError:
             detail = "Error HTTP al limpiar."  # pragma: no cover - network detail
             try:

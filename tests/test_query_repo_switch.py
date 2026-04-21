@@ -107,6 +107,33 @@ def test_on_query_is_blocked_while_ingest_is_running(window: MainWindow) -> None
     assert "ingesta está en progreso" in history
 
 
+def test_reset_all_with_warnings_marks_partial(
+    window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Muestra estado parcial cuando la limpieza devuelve advertencias."""
+
+    def _fake_post(url: str, timeout: int) -> _FakeResponse:  # noqa: ARG001
+        assert url == "http://127.0.0.1:8000/admin/reset"
+        return _FakeResponse(
+            {
+                "message": "Limpieza total completada",
+                "cleared": ["BM25 en memoria"],
+                "warnings": ["No se pudo vaciar carpeta Chroma por lock"],
+            }
+        )
+
+    import coderag.ui.main_window as module
+
+    monkeypatch.setattr(module.requests, "post", _fake_post)
+
+    window._on_reset_all()
+
+    assert window.ingestion_view.status_chip.text() == "Parcial"
+    logs = window.ingestion_view.logs.toPlainText()
+    assert "Advertencia: No se pudo vaciar carpeta Chroma por lock" in logs
+
+
 def test_sync_job_ui_partial_unlocks_query_controls(window: MainWindow) -> None:
     """Un job en estado partial desbloquea consulta y deja estado visible en ingesta."""
     window._set_query_controls_enabled(False)

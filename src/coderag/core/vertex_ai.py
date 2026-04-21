@@ -7,6 +7,7 @@ import binascii
 from dataclasses import dataclass
 from functools import lru_cache
 import json
+from urllib.parse import urlparse
 import re
 from threading import Lock
 from typing import Mapping
@@ -27,6 +28,7 @@ class VertexAuthContext:
 
     access_token: str
     service_account_email: str
+    project_id: str
 
 
 @lru_cache(maxsize=4)
@@ -45,7 +47,7 @@ def _decode_service_account_info_b64(payload_b64: str) -> dict[str, object]:
         decoded_bytes = base64.b64decode(payload_b64, validate=True)
     except binascii.Error as exc:
         raise ValueError(
-            "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 no contiene Base64 válido."
+            "VERTEX service account JSON B64 no contiene Base64 válido."
         ) from exc
 
     try:
@@ -53,23 +55,82 @@ def _decode_service_account_info_b64(payload_b64: str) -> dict[str, object]:
         payload = json.loads(decoded_text)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(
-            "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 no contiene JSON válido."
+            "VERTEX service account JSON B64 no contiene JSON válido."
         ) from exc
 
     if not isinstance(payload, dict):
         raise ValueError(
-            "VERTEX_AI_SERVICE_ACCOUNT_JSON_B64 debe decodificar a un objeto JSON."
+            "VERTEX service account JSON B64 debe decodificar a un objeto JSON."
         )
     return payload
 
 
-def resolve_vertex_auth_context(credentials_source: str) -> VertexAuthContext:
+def derive_vertex_location_from_base_url(base_url: str) -> str:
+    """Deriva location de una base URL regional de Vertex AI."""
+    sanitized_base_url = base_url.strip()
+    if not sanitized_base_url:
+        return ""
+
+    parsed_url = urlparse(sanitized_base_url)
+    hostname = (parsed_url.hostname or "").strip().lower()
+    if not hostname:
+        return ""
+
+    suffix = "-aiplatform.googleapis.com"
+    if not hostname.endswith(suffix):
+        return ""
+
+    location = hostname[: -len(suffix)].strip()
+    return location.rstrip("-.")
+
+
+def build_vertex_api_url(
+    *,
+    base_url: str,
+    api_version: str,
+    path_template: str,
+    project_id: str,
+    model_name: str | None = None,
+    location: str | None = None,
+) -> str:
+    """Construye una URL Vertex a partir de base URL y path template."""
+    sanitized_base_url = base_url.strip().rstrip("/")
+    sanitized_api_version = api_version.strip().strip("/")
+    resolved_location = (location or "").strip() or derive_vertex_location_from_base_url(
+        sanitized_base_url
+    )
+    if not sanitized_base_url or not sanitized_api_version or not project_id.strip():
+        return ""
+    if not resolved_location:
+        return ""
+
+    path = path_template.format(
+        project=project_id.strip(),
+        location=resolved_location,
+        model=(model_name or "").strip(),
+    ).strip()
+    if not path:
+        return ""
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return f"{sanitized_base_url}/{sanitized_api_version}{path}"
+
+
+def resolve_vertex_auth_context(
+    credentials_source: str,
+    *,
+    token_url: str | None = None,
+) -> VertexAuthContext:
     """Resuelve token OAuth de Service Account desde JSON Base64."""
     sanitized_source = credentials_source.strip()
     if not sanitized_source:
-        raise ValueError("Faltan credenciales Vertex en VERTEX_AI_SERVICE_ACCOUNT_JSON_B64.")
+        raise ValueError("Faltan credenciales Vertex en VERTEX_SERVICE_ACCOUNT_JSON_B64.")
 
     service_account_info = _decode_service_account_info_b64(sanitized_source)
+    project_id = str(service_account_info.get("project_id") or "").strip()
+    sanitized_token_url = (token_url or "").strip()
+    if sanitized_token_url:
+        service_account_info["token_uri"] = sanitized_token_url
     serialized_info = json.dumps(service_account_info, sort_keys=True)
     credentials = _load_service_account_credentials_from_info(serialized_info)
 
@@ -86,6 +147,7 @@ def resolve_vertex_auth_context(credentials_source: str) -> VertexAuthContext:
         service_account_email=str(
             getattr(credentials, "service_account_email", "") or ""
         ),
+        project_id=project_id,
     )
 
 
