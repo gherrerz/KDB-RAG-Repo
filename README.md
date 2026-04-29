@@ -225,7 +225,7 @@ Consulta con LLM:
 
 ```powershell
 $q = @{
-  repo_id = 'mall'
+  repo_id = 'macrozheng-mall-main'
   query = 'cuales son los controller del modulo mall-admin'
   top_n = 60
   top_k = 15
@@ -238,7 +238,7 @@ Consulta retrieval-only:
 
 ```powershell
 $r = @{
-  repo_id = 'mall'
+  repo_id = 'macrozheng-mall-main'
   query = 'donde esta la configuracion de neo4j'
   top_n = 60
   top_k = 15
@@ -251,7 +251,7 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/query/retrieval -Conte
 Eliminar repositorio indexado:
 
 ```powershell
-Invoke-RestMethod -Method Delete -Uri http://127.0.0.1:8000/repos/mall
+Invoke-RestMethod -Method Delete -Uri http://127.0.0.1:8000/repos/macrozheng-mall-main
 ```
 
 ## Documentacion

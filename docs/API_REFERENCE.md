@@ -76,7 +76,11 @@ Ejecuta consulta de inventario paginada.
 #### GET /repos
 
 Lista los `repo_id` disponibles para consultar y, cuando existe metadata de
-ingesta persistida, retorna además URL, rama y organización derivada.
+ingesta persistida, retorna además URL, rama y organización persistida.
+
+- Formato actual de `repo_id`: `organizacion-repo-rama`
+- `organization` se almacena en SQLite durante la ingesta y deja de derivarse
+  al vuelo en el endpoint.
 
 - Response schema: `RepoCatalogResponse`
 
@@ -454,7 +458,7 @@ Response:
   "status": "queued",
   "progress": 0.0,
   "logs": [],
-  "repo_id": "mall",
+  "repo_id": "macrozheng-mall-main",
   "error": null,
   "diagnostics": {},
   "created_at": "2026-03-23T12:00:00Z",
@@ -468,7 +472,7 @@ Request:
 
 ```json
 {
-  "repo_id": "mall",
+  "repo_id": "macrozheng-mall-main",
   "query": "where is neo4j configuration",
   "top_n": 60,
   "top_k": 15,

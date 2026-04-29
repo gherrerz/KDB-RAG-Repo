@@ -30,7 +30,6 @@ from coderag.core.storage_health import (
     run_storage_preflight,
 )
 from coderag.core.settings import get_settings
-from coderag.ingestion.git_client import extract_repo_organization
 from coderag.jobs.worker import IngestionConflictError, JobManager
 from coderag.llm.model_discovery import discover_models
 
@@ -429,9 +428,9 @@ def list_repos() -> RepoCatalogResponse:
     repositories = [
         RepoCatalogEntry(
             repo_id=str(item["repo_id"]),
+            organization=item.get("organization"),
             url=item.get("url"),
             branch=item.get("branch"),
-            organization=extract_repo_organization(item.get("url") or ""),
         )
         for item in jobs.list_repo_catalog()
     ]

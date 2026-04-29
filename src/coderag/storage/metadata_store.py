@@ -44,6 +44,7 @@ class MetadataStore:
                 """
                 CREATE TABLE IF NOT EXISTS repos (
                     id TEXT PRIMARY KEY,
+                    organization TEXT,
                     url TEXT NOT NULL,
                     branch TEXT NOT NULL,
                     local_path TEXT NOT NULL,
@@ -82,6 +83,7 @@ class MetadataStore:
             for row in connection.execute("PRAGMA table_info(repos)").fetchall()
         }
         required_columns = {
+            "organization": "TEXT",
             "updated_at": "TEXT",
             "embedding_provider": "TEXT",
             "embedding_model": "TEXT",
@@ -203,7 +205,7 @@ class MetadataStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id AS repo_id, url, branch
+                SELECT id AS repo_id, organization, url, branch
                 FROM repos
                 ORDER BY id ASC
                 """
@@ -211,6 +213,11 @@ class MetadataStore:
         return [
             {
                 "repo_id": str(row["repo_id"]),
+                "organization": (
+                    str(row["organization"])
+                    if row["organization"] is not None
+                    else None
+                ),
                 "url": str(row["url"]) if row["url"] is not None else None,
                 "branch": (
                     str(row["branch"]) if row["branch"] is not None else None
@@ -247,6 +254,7 @@ class MetadataStore:
         self,
         *,
         repo_id: str,
+        organization: str | None,
         repo_url: str,
         branch: str,
         local_path: str,
@@ -259,10 +267,11 @@ class MetadataStore:
             connection.execute(
                 """
                 INSERT INTO repos (
-                    id, url, branch, local_path, created_at,
+                    id, organization, url, branch, local_path, created_at,
                     updated_at, embedding_provider, embedding_model
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    organization=excluded.organization,
                     url=excluded.url,
                     branch=excluded.branch,
                     local_path=excluded.local_path,
@@ -272,6 +281,7 @@ class MetadataStore:
                 """,
                 (
                     repo_id,
+                    organization,
                     repo_url,
                     branch,
                     local_path,

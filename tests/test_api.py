@@ -289,11 +289,13 @@ def test_list_repos_returns_repo_id_catalog(monkeypatch) -> None:
         return [
             {
                 "repo_id": "api-service",
+                "organization": None,
                 "url": None,
                 "branch": None,
             },
             {
-                "repo_id": "mall",
+                "repo_id": "macrozheng-mall-main",
+                "organization": "macrozheng",
                 "url": "https://github.com/macrozheng/mall.git",
                 "branch": "main",
             },
@@ -305,7 +307,7 @@ def test_list_repos_returns_repo_id_catalog(monkeypatch) -> None:
     response = client.get("/repos")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["repo_ids"] == ["api-service", "mall"]
+    assert payload["repo_ids"] == ["api-service", "macrozheng-mall-main"]
     assert payload["repositories"] == [
         {
             "repo_id": "api-service",
@@ -314,7 +316,7 @@ def test_list_repos_returns_repo_id_catalog(monkeypatch) -> None:
             "branch": None,
         },
         {
-            "repo_id": "mall",
+            "repo_id": "macrozheng-mall-main",
             "organization": "macrozheng",
             "url": "https://github.com/macrozheng/mall.git",
             "branch": "main",

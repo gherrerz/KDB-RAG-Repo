@@ -214,6 +214,14 @@ sequenceDiagram
     UI-->>User: Estado final y repo_id
 ```
 
+Notas operativas de identidad de repositorio:
+
+- `repo_id` se construye como `organizacion-repo-rama` y actúa como clave
+    transversal en workspace, SQLite, Chroma, BM25 y Neo4j.
+- `organization` se persiste en SQLite al finalizar la ingesta; para URLs con
+    jerarquías anidadas, se conserva solo el último segmento padre antes del
+    nombre del repositorio.
+
 ## Journey 2: Query con LLM
 
 ### Flujo

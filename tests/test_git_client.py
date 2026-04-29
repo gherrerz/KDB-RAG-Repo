@@ -15,15 +15,15 @@ from coderag.ingestion.git_client import (
 
 
 def test_build_repo_id_uses_url_tail_for_https_url() -> None:
-    """Deriva el identificador de repositorio público del segmento de ruta URL final."""
+    """Deriva repo_id compuesto con organización, repositorio y rama."""
     repo_id = build_repo_id("https://github.com/macrozheng/mall.git", "main")
-    assert repo_id == "mall"
+    assert repo_id == "macrozheng-mall-main"
 
 
 def test_build_repo_id_uses_url_tail_for_ssh_url() -> None:
-    """Admite URL de repositorio de estilo git@ SSH como fuente repo_id."""
+    """Admite URL SSH y compone el repo_id con organización, repo y rama."""
     repo_id = build_repo_id("git@github.com:macrozheng/mall.git", "develop")
-    assert repo_id == "mall"
+    assert repo_id == "macrozheng-mall-develop"
 
 
 def test_extract_repo_organization_returns_owner_for_https_url() -> None:
@@ -34,12 +34,12 @@ def test_extract_repo_organization_returns_owner_for_https_url() -> None:
     assert organization == "macrozheng"
 
 
-def test_extract_repo_organization_returns_group_path_for_nested_gitlab_url() -> None:
-    """Preserva subgrupos cuando la URL contiene múltiples segmentos de grupo."""
+def test_extract_repo_organization_returns_last_parent_for_nested_gitlab_url() -> None:
+    """Devuelve solo el último segmento padre para URLs GitLab anidadas."""
     organization = extract_repo_organization(
         "https://gitlab.com/group/subgroup/project.git"
     )
-    assert organization == "group/subgroup"
+    assert organization == "subgroup"
 
 
 def test_extract_repo_organization_returns_workspace_for_ssh_url() -> None:

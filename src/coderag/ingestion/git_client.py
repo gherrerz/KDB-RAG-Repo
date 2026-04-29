@@ -18,9 +18,43 @@ from uuid import uuid4
 from coderag.core.models import RepoAuthConfig
 
 
+def _extract_repo_path_parts(repo_url: str) -> list[str]:
+    """Extrae segmentos de path del repositorio para URLs HTTPS o SSH."""
+    normalized = repo_url.strip()
+    if not normalized:
+        return []
+
+    if normalized.startswith("git@"):
+        if ":" not in normalized:
+            return []
+        path = normalized.split(":", maxsplit=1)[-1]
+    else:
+        parsed = urlparse(normalized)
+        path = parsed.path
+
+    candidate = path.strip().strip("/")
+    if candidate.endswith(".git"):
+        candidate = candidate[:-4]
+
+    return [segment.strip() for segment in candidate.split("/") if segment.strip()]
+
+
+def _sanitize_repo_id_component(value: str) -> str:
+    """Normaliza un componente para formar parte estable del repo_id."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-._").lower()
+
+
 def build_repo_id(repo_url: str, branch: str) -> str:
-    """Cree un identificador de repositorio desde la cola de la URL con respaldo determinista."""
-    del branch  # Branch no longer contributes to public repo identifier.
+    """Cree un identificador estable como organizacion-repo-rama."""
+    normalized_branch = _sanitize_repo_id_component(branch)
+    path_parts = _extract_repo_path_parts(repo_url)
+
+    if len(path_parts) >= 2:
+        organization = _sanitize_repo_id_component(path_parts[-2])
+        repo_name = _sanitize_repo_id_component(path_parts[-1])
+        components = [organization, repo_name, normalized_branch]
+        if all(components):
+            return "-".join(components)
 
     normalized = repo_url.strip()
     if not normalized:
@@ -41,9 +75,11 @@ def build_repo_id(repo_url: str, branch: str) -> str:
     if candidate.endswith(".git"):
         candidate = candidate[:-4]
 
-    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "-", candidate).strip("-._")
+    sanitized = _sanitize_repo_id_component(candidate)
+    if sanitized and normalized_branch:
+        return f"{sanitized}-{normalized_branch}"
     if sanitized:
-        return sanitized.lower()
+        return sanitized
 
     digest = hashlib.sha1(repo_url.encode("utf-8")).hexdigest()
     return digest[:16]
@@ -90,27 +126,11 @@ def _extract_repo_host(repo_url: str) -> str:
 
 
 def extract_repo_organization(repo_url: str) -> str | None:
-    """Extrae owner, workspace o grupo desde una URL Git HTTPS o SSH."""
-    normalized = repo_url.strip()
-    if not normalized:
-        return None
-
-    if normalized.startswith("git@"):
-        if ":" not in normalized:
-            return None
-        path = normalized.split(":", maxsplit=1)[-1]
-    else:
-        parsed = urlparse(normalized)
-        path = parsed.path
-
-    candidate = path.strip().strip("/")
-    if candidate.endswith(".git"):
-        candidate = candidate[:-4]
-
-    parts = [segment.strip() for segment in candidate.split("/") if segment.strip()]
+    """Extrae el último segmento padre antes del nombre del repositorio."""
+    parts = _extract_repo_path_parts(repo_url)
     if len(parts) < 2:
         return None
-    return "/".join(parts[:-1])
+    return parts[-2]
 
 
 def _resolve_https_auth_env(

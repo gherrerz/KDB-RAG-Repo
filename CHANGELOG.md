@@ -25,6 +25,10 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Nueva guia `KUBERNETES.md` con despliegue, secretos, probes, persistencia, rollback y validacion funcional.
 
 ### Changed
+- La organización persistida del repositorio ahora usa solo el último segmento
+    padre del path Git y deja de derivarse al vuelo en `GET /repos`.
+- `repo_id` pasa a formarse como `organizacion-repo-rama`; las ingestas
+    existentes requieren reingesta para alinearse con el nuevo formato.
 - Canonical provider naming now uses `vertex` for `LLM_PROVIDER` y
     `EMBEDDING_PROVIDER`; `vertex_ai` se mantiene temporalmente como alias
     compatible en runtime.

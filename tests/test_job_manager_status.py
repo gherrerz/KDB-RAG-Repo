@@ -175,6 +175,16 @@ def test_job_manager_marks_completed_when_repo_query_ready(
     assert runtime["last_embedding_provider"] is None
     assert runtime["last_embedding_model"] is None
 
+    catalog = manager.list_repo_catalog()
+    assert catalog == [
+        {
+            "repo_id": "repo-ready",
+            "organization": "acme",
+            "url": "https://github.com/acme/ready.git",
+            "branch": "main",
+        }
+    ]
+
 
 def test_job_manager_forwards_provider_and_token_to_pipeline(
     monkeypatch,
@@ -371,7 +381,7 @@ def test_job_manager_rejects_duplicate_active_repo_ingest(
     first = JobInfo(
         id=str(uuid4()),
         status=JobStatus.running,
-        repo_id="dup-repo",
+        repo_id="acme-dup-repo-main",
     )
     manager.store.upsert_job(first)
 
@@ -424,8 +434,8 @@ def test_job_manager_uses_repo_lock_in_rq_mode(
     )
     created = manager.create_ingest_job(request)
 
-    assert created.repo_id == "locked-repo"
-    assert captured["repo_id"] == "locked-repo"
+    assert created.repo_id == "acme-locked-repo-main"
+    assert captured["repo_id"] == "acme-locked-repo-main"
 
 
 def test_run_ingest_job_task_raises_when_final_status_is_failed(

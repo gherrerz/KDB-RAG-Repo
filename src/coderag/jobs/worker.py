@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
 from coderag.core.settings import get_settings
-from coderag.ingestion.git_client import build_repo_id
+from coderag.ingestion.git_client import build_repo_id, extract_repo_organization
 from coderag.storage.metadata_store import MetadataStore
 
 
@@ -101,8 +101,10 @@ def _execute_ingest_job(
         )
         job.repo_id = repo_id
         job.diagnostics = ingest_diagnostics
+        organization = extract_repo_organization(request.repo_url)
         store.upsert_repo_runtime(
             repo_id=repo_id,
+            organization=organization,
             repo_url=request.repo_url,
             branch=request.branch,
             local_path=str(workspace_path / repo_id),
@@ -198,6 +200,7 @@ class JobManager:
         catalog_by_id = {
             str(item["repo_id"]): {
                 "repo_id": str(item["repo_id"]),
+                "organization": item.get("organization"),
                 "url": item.get("url"),
                 "branch": item.get("branch"),
             }
@@ -212,6 +215,7 @@ class JobManager:
                         child.name,
                         {
                             "repo_id": child.name,
+                            "organization": None,
                             "url": None,
                             "branch": None,
                         },
