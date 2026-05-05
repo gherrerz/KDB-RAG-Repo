@@ -4,6 +4,7 @@ from coderag.core.models import RetrievalChunk, ScannedFile
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.index_bm25 import BM25Index, tokenize
 from coderag.retrieval.context_assembler import assemble_context
+import coderag.retrieval.hybrid_search as hybrid_search_module
 
 
 def test_extract_symbol_chunks_java_class_method_constructor() -> None:
@@ -140,6 +141,67 @@ def test_extract_symbol_chunks_config_keys_yaml_json_toml() -> None:
     assert "config_key" in types
 
 
+def test_extract_symbol_chunks_config_keys_use_localized_spans() -> None:
+    """Usa spans compactos alrededor de cada config key en YAML y JSON."""
+    scanned = [
+        ScannedFile(
+            path="cfg/runtime.yaml",
+            language="yaml",
+            content=(
+                "server:\n"
+                "  port: 8000\n"
+                "  host: localhost\n"
+                "logging:\n"
+                "  level: info\n"
+            ),
+        ),
+        ScannedFile(
+            path="cfg/runtime.json",
+            language="json",
+            content=(
+                "{\n"
+                '  "featureFlags": {\n'
+                '    "retainWorkspaceAfterIngest": false\n'
+                "  },\n"
+                '  "maxContextTokens": 8000\n'
+                "}\n"
+            ),
+        ),
+    ]
+
+    chunks = extract_symbol_chunks(repo_id="repo1", scanned_files=scanned)
+
+    yaml_server = next(
+        item
+        for item in chunks
+        if item.path == "cfg/runtime.yaml" and item.symbol_name == "server"
+    )
+    yaml_logging = next(
+        item
+        for item in chunks
+        if item.path == "cfg/runtime.yaml" and item.symbol_name == "logging"
+    )
+    json_feature_flags = next(
+        item
+        for item in chunks
+        if item.path == "cfg/runtime.json" and item.symbol_name == "featureFlags"
+    )
+    json_max_context = next(
+        item
+        for item in chunks
+        if item.path == "cfg/runtime.json" and item.symbol_name == "maxContextTokens"
+    )
+
+    assert yaml_server.start_line == 1
+    assert yaml_server.end_line == 3
+    assert yaml_logging.start_line == 4
+    assert yaml_logging.end_line == 5
+    assert json_feature_flags.start_line == 2
+    assert json_feature_flags.end_line == 4
+    assert json_max_context.start_line == 5
+    assert json_max_context.end_line == 5
+
+
 def test_bm25_returns_ranked_documents() -> None:
     """Devuelve el documento principal que coincide exactamente con los términos de la consulta."""
     index = BM25Index()
@@ -213,6 +275,236 @@ def test_bm25_query_expands_spanish_technical_terms() -> None:
     result = index.query(repo_id="r2", text="dependencias del proyecto", top_n=1)
     assert result
     assert result[0]["id"] == "dep"
+
+
+def test_hybrid_search_boosts_exact_config_key_over_test_chunks(
+    monkeypatch,
+) -> None:
+    """Prioriza chunks de configuración reales ante tests para env vars exactas."""
+
+    class _FakeEmbedder:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            del texts
+            return []
+
+    bm25_results = [
+        {
+            "id": "worker-code",
+            "text": (
+                "def _run_ingest_job(self, job_id, request):\n"
+                "    _execute_ingest_job(job=job, request=request, workspace_path=self._workspace_path)"
+            ),
+            "score": 10.0,
+            "metadata": {
+                "path": "src/coderag/jobs/worker.py",
+                "start_line": 418,
+                "end_line": 426,
+                "symbol_name": "_run_ingest_job",
+                "symbol_type": "function",
+            },
+        },
+        {
+            "id": "test-settings",
+            "text": (
+                "class _Settings:\n"
+                "    workspace_path = tmp_path / 'workspace'\n"
+                "    ingestion_retry_transient_only = True"
+            ),
+            "score": 9.5,
+            "metadata": {
+                "path": "tests/test_job_manager_status.py",
+                "start_line": 447,
+                "end_line": 449,
+                "symbol_name": "_Settings",
+                "symbol_type": "class",
+            },
+        },
+        {
+            "id": "runtime-config",
+            "text": (
+                "WORKSPACE_PATH: /app/storage/workspace\n"
+                "RETAIN_WORKSPACE_AFTER_INGEST: \"false\"\n"
+                "MAX_CONTEXT_TOKENS: \"8000\""
+            ),
+            "score": 6.0,
+            "metadata": {
+                "path": "k8s/base/api-configmap.yaml",
+                "start_line": 38,
+                "end_line": 40,
+                "symbol_name": "RETAIN_WORKSPACE_AFTER_INGEST",
+                "symbol_type": "config_key",
+            },
+        },
+    ]
+
+    monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
+    monkeypatch.setattr(
+        hybrid_search_module.GLOBAL_BM25,
+        "ensure_repo_loaded",
+        lambda repo_id: True,
+    )
+    monkeypatch.setattr(
+        hybrid_search_module.GLOBAL_BM25,
+        "query",
+        lambda repo_id, text, top_n: bm25_results[:top_n],
+    )
+
+    ranked = hybrid_search_module.hybrid_search(
+        repo_id="repo1",
+        query="RETAIN_WORKSPACE_AFTER_INGEST",
+        top_n=5,
+    )
+
+    assert ranked
+    assert ranked[0].metadata["path"] == "k8s/base/api-configmap.yaml"
+    assert ranked[0].metadata["symbol_name"] == "RETAIN_WORKSPACE_AFTER_INGEST"
+
+
+def test_hybrid_search_boosts_exact_code_symbol_over_generic_chunks(
+    monkeypatch,
+) -> None:
+    """Prioriza un símbolo de código exacto frente a ruido de tests o config."""
+
+    class _FakeEmbedder:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            del texts
+            return []
+
+    bm25_results = [
+        {
+            "id": "test-helper",
+            "text": (
+                "def build_context_fixture():\n"
+                "    return {'parse': 'requirements'}"
+            ),
+            "score": 10.0,
+            "metadata": {
+                "path": "tests/test_dependency_index.py",
+                "start_line": 12,
+                "end_line": 13,
+                "symbol_name": "build_context_fixture",
+                "symbol_type": "function",
+            },
+        },
+        {
+            "id": "config-noise",
+            "text": "PIP_INDEX_URL: https://mirror.example/internal",
+            "score": 9.0,
+            "metadata": {
+                "path": "docker-compose.yml",
+                "start_line": 20,
+                "end_line": 20,
+                "symbol_name": "PIP_INDEX_URL",
+                "symbol_type": "config_key",
+            },
+        },
+        {
+            "id": "code-target",
+            "text": (
+                "def parse_requirements(path: str) -> list[str]:\n"
+                "    return [line.strip() for line in path.read_text().splitlines()]"
+            ),
+            "score": 5.0,
+            "metadata": {
+                "path": "src/coderag/utils/dependencies.py",
+                "start_line": 10,
+                "end_line": 11,
+                "symbol_name": "parse_requirements",
+                "symbol_type": "function",
+            },
+        },
+    ]
+
+    monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
+    monkeypatch.setattr(
+        hybrid_search_module.GLOBAL_BM25,
+        "ensure_repo_loaded",
+        lambda repo_id: True,
+    )
+    monkeypatch.setattr(
+        hybrid_search_module.GLOBAL_BM25,
+        "query",
+        lambda repo_id, text, top_n: bm25_results[:top_n],
+    )
+
+    ranked = hybrid_search_module.hybrid_search(
+        repo_id="repo1",
+        query="parse_requirements",
+        top_n=5,
+    )
+
+    assert ranked
+    assert ranked[0].metadata["path"] == "src/coderag/utils/dependencies.py"
+    assert ranked[0].metadata["symbol_name"] == "parse_requirements"
+
+
+def test_hybrid_search_boosts_identifier_inside_natural_query(
+    monkeypatch,
+) -> None:
+    """Prioriza una config key cuando la consulta natural contiene su identificador."""
+
+    class _FakeEmbedder:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            del texts
+            return []
+
+    bm25_results = [
+        {
+            "id": "workspace",
+            "text": "WORKSPACE_PATH: /app/storage/workspace",
+            "score": 10.0,
+            "metadata": {
+                "path": "docker-compose.yml",
+                "start_line": 173,
+                "end_line": 173,
+                "symbol_name": "WORKSPACE_PATH",
+                "symbol_type": "config_key",
+            },
+        },
+        {
+            "id": "retain",
+            "text": "RETAIN_WORKSPACE_AFTER_INGEST: \"false\"",
+            "score": 6.0,
+            "metadata": {
+                "path": "k8s/base/api-configmap.yaml",
+                "start_line": 38,
+                "end_line": 38,
+                "symbol_name": "RETAIN_WORKSPACE_AFTER_INGEST",
+                "symbol_type": "config_key",
+            },
+        },
+    ]
+
+    monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
+    monkeypatch.setattr(
+        hybrid_search_module.GLOBAL_BM25,
+        "ensure_repo_loaded",
+        lambda repo_id: True,
+    )
+    monkeypatch.setattr(
+        hybrid_search_module.GLOBAL_BM25,
+        "query",
+        lambda repo_id, text, top_n: bm25_results[:top_n],
+    )
+
+    ranked = hybrid_search_module.hybrid_search(
+        repo_id="repo1",
+        query="where is RETAIN_WORKSPACE_AFTER_INGEST configured",
+        top_n=5,
+    )
+
+    assert ranked
+    assert ranked[0].metadata["path"] == "k8s/base/api-configmap.yaml"
+    assert ranked[0].metadata["symbol_name"] == "RETAIN_WORKSPACE_AFTER_INGEST"
 
 
 def test_assemble_context_applies_token_limit() -> None:

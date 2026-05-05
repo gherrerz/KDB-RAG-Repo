@@ -256,12 +256,7 @@ def _is_module_query(query: str) -> bool:
 
 
 def _discover_repo_modules(repo_id: str) -> list[str]:
-    """Descubra las carpetas de módulos de nivel superior del repositorio clonado localmente."""
-    settings = get_settings()
-    repo_path = settings.workspace_path / repo_id
-    if not repo_path.exists() or not repo_path.is_dir():
-        return []
-
+    """Descubra módulos persistidos en Neo4j sin depender del workspace local."""
     excluded_names = {
         ".git",
         ".github",
@@ -280,17 +275,18 @@ def _discover_repo_modules(repo_id: str) -> list[str]:
         "scripts",
     }
 
-    modules: list[str] = []
-    for child in sorted(repo_path.iterdir()):
-        if not child.is_dir():
-            continue
-        name = child.name
-        if name.startswith("."):
-            continue
-        if name.lower() in excluded_names:
-            continue
-        modules.append(name)
-    return modules
+    graph = GraphBuilder()
+    try:
+        modules = graph.query_repo_modules(repo_id)
+    finally:
+        graph.close()
+
+    return [
+        module_name
+        for module_name in modules
+        if module_name and not module_name.startswith(".")
+        and module_name.lower() not in excluded_names
+    ]
 
 
 def _is_inventory_query(query: str) -> bool:
@@ -556,6 +552,25 @@ def _slice_lines(content: str, start_line: int, end_line: int) -> str:
 
 def _build_literal_code_response(repo_id: str, query: str) -> QueryResponse:
     """Construye respuesta determinística en modo código literal sin síntesis LLM."""
+    if not _has_local_repo_workspace(repo_id):
+        return QueryResponse(
+            answer=(
+                "No puedo devolver código literal porque este repositorio no "
+                "tiene workspace local disponible. Reingesta el repositorio o "
+                "usa consulta semántica/retrieval en lugar de modo literal."
+            ),
+            citations=[],
+            diagnostics={
+                "literal_mode": True,
+                "literal_exact_match": False,
+                "literal_match_type": None,
+                "literal_failure_reason": "workspace_unavailable",
+                "fallback_reason": "literal_workspace_required",
+                "inventory_intent": False,
+                "inventory_route": None,
+            },
+        )
+
     file_path, relative_path, match_type = _resolve_literal_file_match(
         repo_id=repo_id,
         query=query,
@@ -673,6 +688,40 @@ def _build_literal_retrieval_response(
     include_context: bool,
 ) -> RetrievalQueryResponse:
     """Construye respuesta retrieval-only determinística para solicitudes de código literal."""
+    if not _has_local_repo_workspace(repo_id):
+        return RetrievalQueryResponse(
+            mode="retrieval_only",
+            answer=(
+                "Modo retrieval-only (sin LLM): no puedo devolver código "
+                "literal porque este repositorio no tiene workspace local "
+                "disponible. Reingesta el repositorio o usa retrieval "
+                "semántico."
+            ),
+            chunks=[],
+            citations=[],
+            statistics=RetrievalStatistics(
+                total_before_rerank=0,
+                total_after_rerank=0,
+                graph_nodes_count=0,
+            ),
+            diagnostics={
+                "mode": "retrieval_only",
+                "literal_mode": True,
+                "literal_exact_match": False,
+                "literal_match_type": None,
+                "literal_failure_reason": "workspace_unavailable",
+                "fallback_reason": "literal_workspace_required",
+                "retrieved": 0,
+                "reranked": 0,
+                "graph_nodes": 0,
+                "context_chars": 0,
+                "raw_citations": 0,
+                "filtered_citations": 0,
+                "returned_citations": 0,
+            },
+            context=None,
+        )
+
     file_path, relative_path, match_type = _resolve_literal_file_match(
         repo_id=repo_id,
         query=query,
@@ -1092,6 +1141,12 @@ def _resolve_repo_file_path(repo_id: str, relative_path: str) -> Path | None:
     return candidate
 
 
+def _has_local_repo_workspace(repo_id: str) -> bool:
+    """Indica si el repositorio conserva workspace local para modo literal."""
+    repo_root = get_settings().workspace_path / repo_id
+    return repo_root.exists() and repo_root.is_dir()
+
+
 def _first_sentence(text: str) -> str:
     """Devuelve el primer fragmento similar a una oración sin puntuación final."""
     first = re.split(r"[\.\n\r]", text, maxsplit=1)[0].strip()
@@ -1283,20 +1338,42 @@ def _describe_inventory_components(
     budget_seconds: float,
     query: str | None = None,
 ) -> list[tuple[str, str]]:
-    """Cree sugerencias de propósito por componente a partir de archivos fuente locales dentro del presupuesto."""
-    descriptions: list[tuple[str, str]] = []
-    seen_names: set[str] = set()
+    """Cree sugerencias de propósito por componente usando metadata persistida."""
+    if not citations:
+        return []
+
+    candidate_paths: list[str] = []
+    seen_paths: set[str] = set()
     for citation in citations:
         if _remaining_budget_seconds(pipeline_started_at, budget_seconds) <= 0:
             break
         path = citation.path.strip()
+        if not path or path in seen_paths:
+            continue
+        seen_paths.add(path)
+        candidate_paths.append(path)
+
+    graph = GraphBuilder()
+    try:
+        purpose_payloads = graph.query_file_purpose_summaries(
+            repo_id=repo_id,
+            paths=candidate_paths,
+        )
+    except Exception:
+        purpose_payloads = {}
+    finally:
+        graph.close()
+
+    descriptions: list[tuple[str, str]] = []
+    seen_names: set[str] = set()
+    for path in candidate_paths:
         component_name = PurePosixPath(path).name
         if not component_name or component_name in seen_names:
             continue
-        file_path = _resolve_repo_file_path(repo_id=repo_id, relative_path=path)
-        if file_path is None:
+        payload = purpose_payloads.get(path)
+        if not payload:
             continue
-        purpose = _build_purpose_from_source(file_path)
+        purpose = str(payload.get("purpose_summary", "") or "").strip()
         if purpose is None:
             continue
         seen_names.add(component_name)
@@ -1406,7 +1483,7 @@ def _query_inventory_entities(
 
 
 def _resolve_module_scope(repo_id: str, module_name: str | None) -> str | None:
-    """Resuelva el token del módulo de usuario en el alcance del directorio relativo al repositorio canónico."""
+    """Resuelva el token del módulo de usuario usando metadata persistida del grafo."""
     if not module_name:
         return None
 
@@ -1414,32 +1491,35 @@ def _resolve_module_scope(repo_id: str, module_name: str | None) -> str | None:
     if not cleaned:
         return None
 
-    settings = get_settings()
-    repo_path = settings.workspace_path / repo_id
-    if not repo_path.exists() or not repo_path.is_dir():
-        return cleaned
-
-    cache_key = (str(repo_path.resolve()), cleaned.lower())
+    cache_key = (repo_id, cleaned.lower())
     with _MODULE_SCOPE_CACHE_LOCK:
         cached = _MODULE_SCOPE_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
-    direct = (repo_path / cleaned)
-    if direct.exists() and direct.is_dir():
+    graph = GraphBuilder()
+    try:
+        known_modules = graph.query_repo_modules(repo_id)
+    except Exception:
+        known_modules = []
+    finally:
+        graph.close()
+
+    if cleaned in known_modules:
         with _MODULE_SCOPE_CACHE_LOCK:
             _MODULE_SCOPE_CACHE[cache_key] = cleaned
         return cleaned
 
     lowered = cleaned.lower()
     matches: list[str] = []
-    for directory in repo_path.rglob("*"):
-        if not directory.is_dir():
+    for module_path in known_modules:
+        normalized = module_path.strip().strip("/")
+        if not normalized:
             continue
-        relative = directory.relative_to(repo_path).as_posix()
-        rel_lower = relative.lower()
-        if directory.name.lower() == lowered or rel_lower.endswith(f"/{lowered}"):
-            matches.append(relative)
+        rel_lower = normalized.lower()
+        tail = normalized.rsplit("/", 1)[-1].lower()
+        if tail == lowered or rel_lower.endswith(f"/{lowered}"):
+            matches.append(normalized)
 
     if not matches:
         with _MODULE_SCOPE_CACHE_LOCK:
@@ -1827,7 +1907,7 @@ def run_retrieval_query(
     stage_timings["hybrid_search_ms"] = _elapsed_milliseconds(retrieval_started_at)
 
     rerank_started_at = monotonic()
-    reranked = rerank(chunks=initial, top_k=top_k)
+    reranked = rerank(query=query, chunks=initial, top_k=top_k)
     stage_timings["rerank_ms"] = _elapsed_milliseconds(rerank_started_at)
 
     graph_started_at = monotonic()
@@ -1993,7 +2073,7 @@ def run_query(
     stage_timings["hybrid_search_ms"] = _elapsed_milliseconds(retrieval_started_at)
 
     rerank_started_at = monotonic()
-    reranked = rerank(chunks=initial, top_k=top_k)
+    reranked = rerank(query=query, chunks=initial, top_k=top_k)
     stage_timings["rerank_ms"] = _elapsed_milliseconds(rerank_started_at)
 
     parallel_started_at = monotonic()

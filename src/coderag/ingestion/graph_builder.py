@@ -9,6 +9,7 @@ from neo4j import GraphDatabase
 
 from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
 from coderag.core.settings import get_settings
+from coderag.ingestion.component_metadata import infer_component_purpose
 
 
 class GraphBuilder:
@@ -55,9 +56,18 @@ class GraphBuilder:
         file_query = """
         MERGE (r:Repo {id: $repo_id})
         MERGE (m:Module {repo_id: $repo_id, path: $module_path})
+        SET m.name = $module_name,
+            m.path_depth = $module_depth
         MERGE (r)-[:HAS_MODULE]->(m)
         MERGE (f:File {repo_id: $repo_id, path: $path})
-        SET f.language = $language
+        SET f.language = $language,
+            f.file_name = $file_name,
+            f.module_path = $module_path,
+            f.path_depth = $path_depth,
+            f.purpose_summary = $purpose_summary,
+            f.purpose_source = $purpose_source,
+            f.top_level_symbol_names = $top_level_symbol_names,
+            f.top_level_symbol_types = $top_level_symbol_types
         MERGE (m)-[:CONTAINS]->(f)
         """
         symbol_query = """
@@ -73,14 +83,37 @@ class GraphBuilder:
         MERGE (f)-[:DECLARES]->(s)
         """
         with self.driver.session() as session:
+            symbols_by_path: dict[str, list[SymbolChunk]] = defaultdict(list)
+            for symbol in symbols:
+                symbols_by_path[symbol.path].append(symbol)
+
             for file_obj in scanned_files:
                 module_path = file_obj.path.split("/", 1)[0] if "/" in file_obj.path else "."
+                module_name = module_path.rsplit("/", 1)[-1] if module_path != "." else "."
+                module_depth = 0 if module_path == "." else module_path.count("/") + 1
+                purpose_summary, purpose_source = infer_component_purpose(
+                    file_obj.path,
+                    file_obj.content,
+                )
+                file_symbols = symbols_by_path.get(file_obj.path, [])
+                top_level_symbol_names = [item.symbol_name for item in file_symbols[:20]]
+                top_level_symbol_types = sorted(
+                    {item.symbol_type for item in file_symbols if item.symbol_type}
+                )[:20]
                 session.run(
                     file_query,
                     repo_id=repo_id,
                     module_path=module_path,
+                    module_name=module_name,
+                    module_depth=module_depth,
                     path=file_obj.path,
                     language=file_obj.language,
+                    file_name=file_obj.path.rsplit("/", 1)[-1],
+                    path_depth=file_obj.path.count("/") + 1,
+                    purpose_summary=purpose_summary,
+                    purpose_source=purpose_source,
+                    top_level_symbol_names=top_level_symbol_names,
+                    top_level_symbol_types=top_level_symbol_types,
                 )
             for symbol in symbols:
                 session.run(
@@ -346,6 +379,58 @@ class GraphBuilder:
                 offset=offset,
             )
             return [record.data() for record in records]
+
+    def query_repo_modules(self, repo_id: str) -> list[str]:
+        """Lista módulos persistidos del repositorio sin depender del workspace."""
+        query = """
+        MATCH (:Repo {id: $repo_id})-[:HAS_MODULE]->(m:Module {repo_id: $repo_id})
+        WHERE m.path <> '.'
+        RETURN DISTINCT m.path AS module_path
+        ORDER BY module_path ASC
+        """
+        with self.driver.session() as session:
+            records = session.run(query, repo_id=repo_id)
+            modules: list[str] = []
+            for record in records:
+                module_path = str(record.get("module_path", "") or "").strip()
+                if module_path:
+                    modules.append(module_path)
+            return modules
+
+    def query_file_purpose_summaries(
+        self,
+        repo_id: str,
+        paths: list[str],
+    ) -> dict[str, dict[str, str]]:
+        """Devuelve propósitos persistidos por archivo para inventory explain."""
+        normalized_paths = [path.strip() for path in paths if path and path.strip()]
+        if not normalized_paths:
+            return {}
+
+        query = """
+        UNWIND $paths AS requested_path
+        MATCH (f:File {repo_id: $repo_id, path: requested_path})
+        RETURN f.path AS path,
+               f.purpose_summary AS purpose_summary,
+               f.purpose_source AS purpose_source
+        """
+        with self.driver.session() as session:
+            records = session.run(
+                query,
+                repo_id=repo_id,
+                paths=normalized_paths,
+            )
+            summaries: dict[str, dict[str, str]] = {}
+            for record in records:
+                path = str(record.get("path", "") or "").strip()
+                summary = str(record.get("purpose_summary", "") or "").strip()
+                source = str(record.get("purpose_source", "") or "").strip()
+                if path and summary:
+                    summaries[path] = {
+                        "purpose_summary": summary,
+                        "purpose_source": source,
+                    }
+            return summaries
 
     def expand_symbols(
         self,

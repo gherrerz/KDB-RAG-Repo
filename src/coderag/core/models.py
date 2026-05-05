@@ -463,6 +463,10 @@ class RepoQueryStatusResponse(BaseModel):
 
     repo_id: str = Field(description="Repositorio evaluado.")
     listed_in_catalog: bool = Field(description="Indica si el repo aparece en el catálogo /repos.")
+    workspace_available: bool = Field(
+        default=False,
+        description="Indica si el repo conserva workspace local para operaciones live-file.",
+    )
     query_ready: bool = Field(description="Indica si el repo está listo para /query.")
     chroma_counts: dict[str, int | None] = Field(default_factory=dict, description="Conteos por colección Chroma (code_symbols, code_files, code_modules).")
     chroma_hnsw_space_configured: str | None = Field(

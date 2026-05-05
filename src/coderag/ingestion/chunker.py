@@ -24,6 +24,79 @@ def _slice_snippet(lines: list[str], start_line: int, end_line: int) -> str:
     return "\n".join(lines[safe_start - 1 : safe_end])
 
 
+def _line_indent(line: str) -> int:
+    """Return indentation width for a single line."""
+    return len(line) - len(line.lstrip())
+
+
+def _localized_block_end(
+    lines: list[str],
+    start_line: int,
+    *,
+    max_lines: int = 6,
+) -> int:
+    """Return a compact block span around a config key based on indentation."""
+    if not lines:
+        return start_line
+    safe_start = max(1, min(start_line, len(lines)))
+    base_indent = _line_indent(lines[safe_start - 1])
+    end_line = safe_start
+    scanned_lines = 1
+    for index in range(safe_start, len(lines)):
+        if scanned_lines >= max_lines:
+            break
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped:
+            break
+        current_indent = _line_indent(line)
+        if current_indent <= base_indent:
+            break
+        end_line = index + 1
+        scanned_lines += 1
+    return end_line
+
+
+def _json_value_span(lines: list[str], start_line: int) -> int:
+    """Return a localized JSON span for the value attached to a key line."""
+    if not lines:
+        return start_line
+    safe_start = max(1, min(start_line, len(lines)))
+    current_line = lines[safe_start - 1]
+    balance = 0
+    in_string = False
+    escaped = False
+    seen_value_opener = False
+
+    for index in range(safe_start - 1, len(lines)):
+        line = lines[index]
+        for char in line:
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\":
+                escaped = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char in "[{":
+                balance += 1
+                seen_value_opener = True
+            elif char in "]}":
+                balance -= 1
+
+        if index == safe_start - 1 and ":" not in current_line:
+            return safe_start
+        if not seen_value_opener:
+            return safe_start
+        if balance <= 0:
+            return index + 1
+    return min(len(lines), safe_start + 5)
+
+
 def _extract_code_language_symbols(
     repo_id: str,
     file_obj: ScannedFile,
@@ -184,7 +257,7 @@ def extract_symbol_chunks(repo_id: str, scanned_files: list[ScannedFile]) -> lis
                     continue
                 key_name = key_match.group(1)
                 start_line = index + 1
-                end_line = min(start_line + 8, len(lines))
+                end_line = _localized_block_end(lines, start_line)
                 snippet = _slice_snippet(lines, start_line, end_line)
                 chunks.append(
                     SymbolChunk(
@@ -215,7 +288,7 @@ def extract_symbol_chunks(repo_id: str, scanned_files: list[ScannedFile]) -> lis
                         if re.search(key_pattern, line):
                             start_line = index + 1
                             break
-                    end_line = min(start_line + 8, len(lines))
+                    end_line = _json_value_span(lines, start_line)
                     snippet = _slice_snippet(lines, start_line, end_line)
                     chunks.append(
                         SymbolChunk(

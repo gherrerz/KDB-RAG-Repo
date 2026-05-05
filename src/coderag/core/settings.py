@@ -174,6 +174,10 @@ class Settings(BaseSettings):
         default=Path("./storage/workspace"),
         alias="WORKSPACE_PATH",
     )
+    retain_workspace_after_ingest: bool = Field(
+        default=False,
+        alias="RETAIN_WORKSPACE_AFTER_INGEST",
+    )
     max_context_tokens: int = Field(default=8000, alias="MAX_CONTEXT_TOKENS")
     graph_hops: int = Field(default=2, alias="GRAPH_HOPS")
     query_max_seconds: float = Field(default=55.0, alias="QUERY_MAX_SECONDS")

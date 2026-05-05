@@ -7,7 +7,7 @@ import main
 from coderag.api import server
 from coderag.core.models import JobInfo, JobStatus
 from coderag.core.storage_health import StoragePreflightError
-from coderag.jobs.worker import IngestionConflictError
+from coderag.jobs.worker import IngestionConflictError, JobManager
 from coderag.llm.model_discovery import ModelDiscoveryResult
 
 app = main.app
@@ -402,6 +402,139 @@ def test_ingest_repo_normalizes_swagger_placeholder_commit(
     assert response.json()["id"] == "job-123"
 
 
+def test_api_end_to_end_ingest_cleanup_then_status_and_query(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Recorre ingesta, cleanup post-ingesta y posterior status/query sin workspace."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+        retain_workspace_after_ingest = False
+        ingestion_execution_mode = "thread"
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import coderag.jobs.worker as worker_module
+    import coderag.ingestion.pipeline as pipeline_module
+    import coderag.core.storage_health as health_module
+    from coderag.api import query_service
+
+    monkeypatch.setattr(worker_module, "get_settings", lambda: _Settings())
+    manager = JobManager()
+    monkeypatch.setattr(server, "jobs", manager)
+
+    class _SyncThread:
+        def __init__(self, target, args, daemon):
+            self._target = target
+            self._args = args
+
+        def start(self) -> None:
+            self._target(*self._args)
+
+    monkeypatch.setattr(worker_module, "Thread", _SyncThread)
+
+    def _fake_ingest_repository(repo_url, branch, commit, logger, **kwargs) -> str:
+        del repo_url, branch, commit, logger, kwargs
+        repo_path = _Settings.workspace_path / "acme-demo-main"
+        repo_path.mkdir(parents=True, exist_ok=True)
+        (repo_path / "README.md").write_text("demo\n", encoding="utf-8")
+        return "acme-demo-main"
+
+    def _fake_repo_query_status(
+        *,
+        repo_id: str,
+        listed_in_catalog: bool,
+        runtime_payload: dict | None = None,
+        requested_embedding_provider: str | None = None,
+        requested_embedding_model: str | None = None,
+    ) -> dict:
+        assert repo_id == "acme-demo-main"
+        assert listed_in_catalog is True
+        assert not (_Settings.workspace_path / repo_id).exists()
+        _ = requested_embedding_provider, requested_embedding_model
+        return {
+            "repo_id": repo_id,
+            "listed_in_catalog": listed_in_catalog,
+            "workspace_available": False,
+            "query_ready": True,
+            "chroma_counts": {
+                "code_symbols": 3,
+                "code_files": 1,
+                "code_modules": 1,
+            },
+            "bm25_loaded": True,
+            "graph_available": True,
+            "embedding_compatible": True,
+            "compatibility_reason": "compatible",
+            "warnings": [],
+        }
+
+    def _fake_run_query(**kwargs):
+        assert kwargs["repo_id"] == "acme-demo-main"
+        return {
+            "answer": "respuesta semántica sin workspace local",
+            "citations": [
+                {
+                    "path": "README.md",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "score": 1.0,
+                    "reason": "hybrid_rag_match",
+                }
+            ],
+            "diagnostics": {
+                "inventory_intent": False,
+                "inventory_route": None,
+            },
+        }
+
+    monkeypatch.setattr(pipeline_module, "ingest_repository", _fake_ingest_repository)
+    monkeypatch.setattr(health_module, "get_repo_query_status", _fake_repo_query_status)
+    monkeypatch.setattr(server, "get_repo_query_status", _fake_repo_query_status)
+    monkeypatch.setattr(query_service, "run_query", _fake_run_query)
+
+    client = TestClient(app)
+    ingest_response = client.post(
+        "/repos/ingest",
+        json={
+            "provider": "github",
+            "repo_url": "https://github.com/acme/demo.git",
+            "branch": "main",
+        },
+    )
+
+    assert ingest_response.status_code == 200
+    ingest_payload = ingest_response.json()
+    assert ingest_payload["repo_id"] == "acme-demo-main"
+    assert ingest_payload["status"] == "completed"
+
+    job_response = client.get(f"/jobs/{ingest_payload['id']}")
+    assert job_response.status_code == 200
+    job_payload = job_response.json()
+    assert job_payload["diagnostics"]["workspace_retained"] is False
+    assert job_payload["diagnostics"]["workspace_cleanup_succeeded"] is True
+
+    status_response = client.get("/repos/acme-demo-main/status")
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["workspace_available"] is False
+    assert status_payload["query_ready"] is True
+    assert status_payload["last_embedding_provider"] is None
+
+    query_response = client.post(
+        "/query",
+        json={
+            "repo_id": "acme-demo-main",
+            "query": "resume el repositorio",
+            "top_n": 5,
+            "top_k": 3,
+        },
+    )
+    assert query_response.status_code == 200
+    assert query_response.json()["answer"] == "respuesta semántica sin workspace local"
+
+
 def test_provider_models_endpoint_returns_catalog(monkeypatch) -> None:
     """Expone catálogo de modelos por provider para poblar combos de UI."""
 
@@ -463,6 +596,7 @@ def test_repo_status_endpoint_returns_structured_repo_readiness(monkeypatch) -> 
         return {
             "repo_id": "mall",
             "listed_in_catalog": True,
+            "workspace_available": False,
             "query_ready": True,
             "chroma_counts": {
                 "code_symbols": 10,
@@ -492,6 +626,7 @@ def test_repo_status_endpoint_returns_structured_repo_readiness(monkeypatch) -> 
     payload = response.json()
     assert payload["repo_id"] == "mall"
     assert payload["listed_in_catalog"] is True
+    assert payload["workspace_available"] is False
     assert payload["query_ready"] is True
     assert payload["bm25_loaded"] is True
     assert payload["chroma_counts"]["code_symbols"] == 10

@@ -245,6 +245,59 @@ def test_get_repo_query_status_blocks_ready_on_hnsw_space_mismatch(
     ]
 
 
+def test_get_repo_query_status_reports_workspace_availability(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Expone si el repo conserva workspace local sin mezclarlo con query_ready."""
+
+    workspace_path = tmp_path / "workspace"
+    (workspace_path / "repo-a").mkdir(parents=True, exist_ok=True)
+
+    settings = _fake_settings()
+    settings.workspace_path = workspace_path
+    settings.resolve_embedding_provider = lambda provider: provider or "vertex"
+    settings.resolve_embedding_model = (
+        lambda provider, model: model or "text-embedding-005"
+    )
+
+    monkeypatch.setattr(storage_health, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        storage_health,
+        "_count_chroma_documents_for_repo",
+        lambda **kwargs: 5,
+    )
+    monkeypatch.setattr(
+        storage_health.GLOBAL_BM25,
+        "ensure_repo_loaded",
+        lambda repo_id: True,
+    )
+    monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
+    monkeypatch.setattr(
+        storage_health.ChromaIndex,
+        "collection_hnsw_spaces",
+        lambda self: {
+            "code_symbols": "cosine",
+            "code_files": "cosine",
+            "code_modules": "cosine",
+        },
+    )
+
+    available_status = storage_health.get_repo_query_status(
+        repo_id="repo-a",
+        listed_in_catalog=True,
+    )
+    missing_status = storage_health.get_repo_query_status(
+        repo_id="repo-missing",
+        listed_in_catalog=True,
+    )
+
+    assert available_status["workspace_available"] is True
+    assert available_status["query_ready"] is True
+    assert missing_status["workspace_available"] is False
+    assert missing_status["query_ready"] is True
+
+
 def test_check_chroma_raises_on_hnsw_space_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -394,3 +447,46 @@ def test_run_storage_preflight_keeps_neo4j_critical_in_query(
     assert report["failed_components"] == ["neo4j"]
     assert neo4j_item["ok"] is False
     assert neo4j_item["critical"] is True
+
+
+def test_run_storage_preflight_treats_workspace_as_non_critical_in_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No bloquea query cuando falla el chequeo del workspace local."""
+    storage_health._CACHE.clear()
+    monkeypatch.setattr(storage_health, "get_settings", _fake_settings)
+    monkeypatch.setattr(
+        storage_health,
+        "_check_workspace",
+        lambda path: (_ for _ in ()).throw(RuntimeError("workspace missing")),
+    )
+    monkeypatch.setattr(
+        storage_health,
+        "_check_metadata_sqlite",
+        lambda db_path: {"db_path": str(db_path)},
+    )
+    monkeypatch.setattr(storage_health, "_check_chroma", lambda: {"collection_count": 0})
+    monkeypatch.setattr(storage_health, "_check_neo4j", lambda timeout_seconds: {"uri": "bolt://localhost:7687"})
+    monkeypatch.setattr(
+        storage_health,
+        "_check_openai",
+        lambda timeout_seconds: {"model_probe": "dummy"},
+    )
+    monkeypatch.setattr(
+        storage_health.GLOBAL_BM25,
+        "ensure_repo_loaded",
+        lambda repo_id: True,
+    )
+
+    report = storage_health.run_storage_preflight(
+        context="query",
+        repo_id="mall",
+        force=True,
+    )
+
+    workspace_item = next(item for item in report["items"] if item["name"] == "workspace")
+    assert report["ok"] is True
+    assert report["failed_components"] == []
+    assert workspace_item["ok"] is False
+    assert workspace_item["critical"] is False
+    assert workspace_item["code"] == "workspace_not_writable"

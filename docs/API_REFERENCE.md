@@ -88,6 +88,19 @@ ingesta persistida, retorna además URL, rama y organización persistida.
 
 Retorna estado de readiness de consulta para un repositorio.
 
+Notas de comportamiento:
+
+- `query_ready=true` ya no exige workspace local si Chroma, BM25, Neo4j y
+  SQLite están disponibles.
+- `workspace_available=false` no bloquea query semántico, retrieval-only ni
+  inventory query, pero sí implica que modo literal quedará rechazado.
+
+Notas de catálogo:
+
+- `GET /repos` y `GET /repos/{repo_id}/status` se apoyan en metadata SQLite
+  persistida, por lo que el repo puede seguir visible aunque el clone local
+  haya sido eliminado post-ingesta.
+
 - Path params:
   - `repo_id: str`
 - Query params:
@@ -365,10 +378,18 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 
 ### RepoQueryStatusResponse
 
+Notas de interpretación:
+
+- `query_ready` refleja readiness para query semántico y retrieval; no garantiza
+  disponibilidad de modo literal.
+- Si el cliente necesita devolver código exacto desde archivos vivos, debe
+  verificar además que exista workspace local para el repositorio.
+
 | Field | Type | Requerido |
 |---|---|---|
 | `repo_id` | `str` | sí |
 | `listed_in_catalog` | `bool` | sí |
+| `workspace_available` | `bool` | sí |
 | `query_ready` | `bool` | sí |
 | `chroma_counts` | `dict[str, int | null]` | no |
 | `chroma_hnsw_space_configured` | `str | null` | no |

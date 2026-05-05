@@ -2,8 +2,13 @@
 
 import datetime
 from contextlib import contextmanager
+import inspect
+import os
 from pathlib import Path
+import shutil
+import stat
 from threading import Lock, Thread
+import time
 from uuid import uuid4
 
 from coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
@@ -62,12 +67,57 @@ def _is_retryable_ingest_error(message: str) -> bool:
     return _is_transient_ingest_error(message)
 
 
+def _on_remove_error(func, path: str, exc_info) -> None:
+    """Permite borrar archivos readonly durante cleanup del workspace en Windows."""
+    del exc_info
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def _remove_workspace_clone(path: Path, retries: int = 3) -> bool:
+    """Elimina el clone local con reintentos, sin volver la ingesta fallida."""
+    if not path.exists():
+        return True
+
+    for _ in range(retries):
+        try:
+            shutil.rmtree(path, onerror=_on_remove_error)
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError:
+            time.sleep(0.4)
+    return False
+
+
+def _invoke_execute_ingest_job(
+    *,
+    job: JobInfo,
+    request: RepoIngestRequest,
+    store: MetadataStore,
+    workspace_path: Path,
+    retain_workspace_after_ingest: bool,
+) -> JobInfo:
+    """Invoca `_execute_ingest_job` manteniendo compatibilidad con tests legacy."""
+    execute_params = inspect.signature(_execute_ingest_job).parameters
+    kwargs = {
+        "job": job,
+        "request": request,
+        "store": store,
+        "workspace_path": workspace_path,
+    }
+    if "retain_workspace_after_ingest" in execute_params:
+        kwargs["retain_workspace_after_ingest"] = retain_workspace_after_ingest
+    return _execute_ingest_job(**kwargs)
+
+
 def _execute_ingest_job(
     *,
     job: JobInfo,
     request: RepoIngestRequest,
     store: MetadataStore,
     workspace_path: Path,
+    retain_workspace_after_ingest: bool,
 ) -> JobInfo:
     """Ejecuta una ingesta y sincroniza estado/logs en storage persistente."""
     job.status = JobStatus.running
@@ -111,6 +161,20 @@ def _execute_ingest_job(
             embedding_provider=request.embedding_provider,
             embedding_model=request.embedding_model,
         )
+        workspace_clone_path = workspace_path / repo_id
+        job.diagnostics["workspace_retained"] = retain_workspace_after_ingest
+        if not retain_workspace_after_ingest:
+            cleaned = _remove_workspace_clone(workspace_clone_path)
+            job.diagnostics["workspace_cleanup_attempted"] = True
+            job.diagnostics["workspace_cleanup_succeeded"] = cleaned
+            if cleaned:
+                job.logs.append(
+                    "Workspace local eliminado tras la ingesta por configuración."
+                )
+            else:
+                job.logs.append(
+                    "Advertencia: no se pudo eliminar el workspace local tras la ingesta."
+                )
         job.progress = 1.0
         readiness = get_repo_query_status(
             repo_id=repo_id,
@@ -151,11 +215,16 @@ def run_ingest_job_task(job_id: str, request_payload: dict[str, object]) -> str:
         job = JobInfo(id=job_id, status=JobStatus.queued)
         store.upsert_job(job)
 
-    final_job = _execute_ingest_job(
+    final_job = _invoke_execute_ingest_job(
         job=job,
         request=request,
         store=store,
         workspace_path=settings.workspace_path,
+        retain_workspace_after_ingest=getattr(
+            settings,
+            "retain_workspace_after_ingest",
+            True,
+        ),
     )
 
     # In RQ mode, failures must raise to trigger retry policy.
@@ -180,6 +249,11 @@ class JobManager:
         settings = get_settings()
         self._metadata_path = settings.workspace_path.parent / "metadata.db"
         self._workspace_path = settings.workspace_path
+        self._retain_workspace_after_ingest = getattr(
+            settings,
+            "retain_workspace_after_ingest",
+            True,
+        )
         self._ingestion_mode = getattr(settings, "ingestion_execution_mode", "thread")
         self.store = MetadataStore(self._metadata_path)
         self.store.recover_interrupted_jobs()
@@ -187,41 +261,12 @@ class JobManager:
         self._create_job_lock = Lock()
 
     def list_repo_ids(self) -> list[str]:
-        """Devuelve identificadores de repositorio conocidos de metadatos y espacio de trabajo local."""
-        repo_ids = set(self.store.list_repo_ids())
-        if self._workspace_path.exists() and self._workspace_path.is_dir():
-            for child in self._workspace_path.iterdir():
-                if child.is_dir() and not child.name.startswith("."):
-                    repo_ids.add(child.name)
-        return sorted(repo_ids)
+        """Devuelve identificadores de repositorio conocidos desde metadatos persistidos."""
+        return self.store.list_repo_ids()
 
     def list_repo_catalog(self) -> list[dict[str, str | None]]:
-        """Devuelve catálogo de repos conocidos con metadata de ingesta cuando exista."""
-        catalog_by_id = {
-            str(item["repo_id"]): {
-                "repo_id": str(item["repo_id"]),
-                "organization": item.get("organization"),
-                "url": item.get("url"),
-                "branch": item.get("branch"),
-            }
-            for item in self.store.list_repo_catalog()
-            if item.get("repo_id")
-        }
-
-        if self._workspace_path.exists() and self._workspace_path.is_dir():
-            for child in self._workspace_path.iterdir():
-                if child.is_dir() and not child.name.startswith("."):
-                    catalog_by_id.setdefault(
-                        child.name,
-                        {
-                            "repo_id": child.name,
-                            "organization": None,
-                            "url": None,
-                            "branch": None,
-                        },
-                    )
-
-        return [catalog_by_id[repo_id] for repo_id in sorted(catalog_by_id)]
+        """Devuelve catálogo de repos conocidos con metadata de ingesta persistida."""
+        return self.store.list_repo_catalog()
 
     def get_repo_runtime(self, repo_id: str) -> dict[str, str | None] | None:
         """Devuelve metadata runtime de la última ingesta del repositorio."""
@@ -418,11 +463,12 @@ class JobManager:
     def _run_ingest_job(self, job_id: str, request: RepoIngestRequest) -> None:
         """Ejecute el flujo de trabajo de ingesta y actualice las transiciones de estado."""
         job = self._jobs[job_id]
-        _execute_ingest_job(
+        _invoke_execute_ingest_job(
             job=job,
             request=request,
             store=self.store,
             workspace_path=self._workspace_path,
+            retain_workspace_after_ingest=self._retain_workspace_after_ingest,
         )
 
 

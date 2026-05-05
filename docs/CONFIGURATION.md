@@ -55,6 +55,7 @@ Compatibilidad temporal de naming:
 ### Storage, metadata y workspace
 
 - `WORKSPACE_PATH`: ruta de clones temporales y archivos operativos. Default: `./storage/workspace`.
+- `RETAIN_WORKSPACE_AFTER_INGEST`: conserva el clone local tras la ingesta. Si se configura en `false`, el worker elimina el workspace del repo al finalizar y `literal` queda no disponible para ese repo. Default del código: `true`. Default activado en Compose/Kubernetes de este repo: `false`.
 - `NEO4J_URI`: URI de conexion de grafo. Default: `bolt://localhost:7687`.
 - `NEO4J_USER`: usuario de Neo4j. Default: `neo4j`.
 - `NEO4J_PASSWORD`: password de Neo4j. Default: `password`.

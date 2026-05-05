@@ -186,6 +186,85 @@ def test_job_manager_marks_completed_when_repo_query_ready(
     ]
 
 
+def test_job_manager_cleans_workspace_after_ingest_when_configured(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Elimina el clone local al terminar la ingesta cuando la configuración lo pide."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+        retain_workspace_after_ingest = False
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    manager = JobManager()
+
+    class _SyncThread:
+        def __init__(self, target, args, daemon):
+            self._target = target
+            self._args = args
+
+        def start(self) -> None:
+            self._target(*self._args)
+
+    monkeypatch.setattr(module, "Thread", _SyncThread)
+
+    import coderag.ingestion.pipeline as pipeline_module
+    import coderag.core.storage_health as health_module
+
+    def _fake_ingest_repository(repo_url, branch, commit, logger, **kwargs) -> str:
+        del repo_url, branch, commit, logger, kwargs
+        repo_path = _Settings.workspace_path / "repo-ready"
+        repo_path.mkdir(parents=True, exist_ok=True)
+        (repo_path / "README.md").write_text("demo\n", encoding="utf-8")
+        return "repo-ready"
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "ingest_repository",
+        _fake_ingest_repository,
+    )
+
+    def _fake_get_repo_query_status(repo_id, listed_in_catalog):
+        assert repo_id == "repo-ready"
+        assert listed_in_catalog is True
+        assert not (_Settings.workspace_path / repo_id).exists()
+        return {
+            "repo_id": repo_id,
+            "listed_in_catalog": listed_in_catalog,
+            "workspace_available": False,
+            "query_ready": True,
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(
+        health_module,
+        "get_repo_query_status",
+        _fake_get_repo_query_status,
+    )
+
+    request = RepoIngestRequest(
+        provider="github",
+        repo_url="https://github.com/acme/ready.git",
+        branch="main",
+        commit=None,
+    )
+    created = manager.create_ingest_job(request)
+    job = manager.get_job(created.id)
+
+    assert job is not None
+    assert job.status == JobStatus.completed
+    assert not (_Settings.workspace_path / "repo-ready").exists()
+    assert job.diagnostics["workspace_retained"] is False
+    assert job.diagnostics["workspace_cleanup_attempted"] is True
+    assert job.diagnostics["workspace_cleanup_succeeded"] is True
+    assert any("workspace local eliminado" in line.lower() for line in job.logs)
+
+
 def test_job_manager_forwards_provider_and_token_to_pipeline(
     monkeypatch,
     tmp_path,
@@ -289,6 +368,43 @@ def test_job_manager_recovers_interrupted_running_jobs(
     assert recovered.status == JobStatus.failed
     assert recovered.error is not None
     assert "interrumpido" in recovered.error.lower()
+
+
+def test_job_manager_lists_repos_from_metadata_without_workspace_clone(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Mantiene el repo visible en catálogo aunque el workspace ya no exista."""
+
+    class _Settings:
+        workspace_path = tmp_path / "workspace"
+
+    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+
+    import coderag.jobs.worker as module
+
+    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    manager = JobManager()
+
+    manager.store.upsert_repo_runtime(
+        repo_id="repo-ready",
+        organization="acme",
+        repo_url="https://github.com/acme/ready.git",
+        branch="main",
+        local_path=str(_Settings.workspace_path / "repo-ready"),
+        embedding_provider="vertex",
+        embedding_model="text-embedding-005",
+    )
+
+    assert manager.list_repo_ids() == ["repo-ready"]
+    assert manager.list_repo_catalog() == [
+        {
+            "repo_id": "repo-ready",
+            "organization": "acme",
+            "url": "https://github.com/acme/ready.git",
+            "branch": "main",
+        }
+    ]
 
 
 def test_job_manager_enqueues_job_when_rq_mode_enabled(

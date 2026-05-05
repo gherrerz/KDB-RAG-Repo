@@ -7,6 +7,7 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+
 - Archivos de dependencias separados para runtime, desktop, desarrollo y
     entorno completo local:
     `requirements-runtime.txt`, `requirements-desktop.txt`,
@@ -25,6 +26,7 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Nueva guia `KUBERNETES.md` con despliegue, secretos, probes, persistencia, rollback y validacion funcional.
 
 ### Changed
+
 - La organización persistida del repositorio ahora usa solo el último segmento
     padre del path Git y deja de derivarse al vuelo en `GET /repos`.
 - `repo_id` pasa a formarse como `organizacion-repo-rama`; las ingestas
@@ -55,8 +57,24 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Política de reintentos configurable para relanzar solo errores transitorios.
 
 ### Fixed
+
 - `datetime.utcnow` se reemplaza por timestamps UTC aware y se agregan filtros temporales de warnings de terceros en `pytest.ini`.
 - Cobertura explicita de DELETE /repos/{repo_id} en documentacion de API.
 - Cobertura de parametro logs_tail en GET /jobs/{job_id}.
+- Query ya no trata el workspace local como prerequisito para query semántico,
+    retrieval-only e inventario; `literal` queda bloqueado explícitamente cuando
+    el workspace no existe.
+- `inventory explain` y el discovery de módulos dejan de leer el workspace y
+    pasan a resolverse con metadata persistida en Neo4j.
+- `GET /repos` y `GET /repos/{repo_id}/status` dejan de depender del clone
+    local para listar repos indexados; el status ahora expone
+    `workspace_available` para distinguir readiness de query frente a
+    disponibilidad de modo literal.
+- Nueva opción `RETAIN_WORKSPACE_AFTER_INGEST` para eliminar automáticamente
+    el clone local al terminar la ingesta y ahorrar espacio cuando no se
+    necesita modo literal.
+- Los manifests de despliegue locales/cloud de este repo activan
+    `RETAIN_WORKSPACE_AFTER_INGEST=false` para que el cleanup post-ingesta quede
+    habilitado por defecto en runtime.
 - Imagen runtime ahora incluye `git` para permitir clonación durante ingestas en API/worker.
 - `start_compose.ps1` aplica `HEALTH_CHECK_OPENAI=false` por defecto si no está definido.

@@ -1,6 +1,7 @@
 """Pruebas de soporte de descubrimiento de módulos en el servicio de consultas."""
 
 from pathlib import Path
+from time import monotonic
 
 import pytest
 
@@ -15,24 +16,22 @@ def test_is_module_query_detects_spanish_and_english_terms() -> None:
     assert not query_service._is_module_query("donde se define auth")
 
 
-def test_discover_repo_modules_reads_top_level_dirs(
+def test_discover_repo_modules_uses_persisted_graph_modules(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """Devuelve carpetas genéricas de módulos de nivel superior del repositorio local."""
-    repo_id = "repo1"
-    repo_dir = tmp_path / repo_id
-    (repo_dir / "api-service").mkdir(parents=True)
-    (repo_dir / "web-client").mkdir(parents=True)
-    (repo_dir / "docs").mkdir(parents=True)
-    (repo_dir / "node_modules").mkdir(parents=True)
+    """Devuelve módulos persistidos en grafo y mantiene filtros de nombres excluidos."""
 
-    class _Settings:
-        workspace_path = tmp_path
+    class _FakeGraphBuilder:
+        def query_repo_modules(self, repo_id: str) -> list[str]:
+            assert repo_id == "repo1"
+            return ["api-service", "web-client", "docs", "node_modules"]
 
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+        def close(self) -> None:
+            return None
 
-    modules = query_service._discover_repo_modules(repo_id)
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+
+    modules = query_service._discover_repo_modules("repo1")
     assert "api-service" in modules
     assert "web-client" in modules
     assert "docs" not in modules
@@ -335,20 +334,22 @@ def test_build_purpose_from_source_uses_filename_heuristic(tmp_path: Path) -> No
     assert "logging" in purpose.lower()
 
 
-def test_resolve_module_scope_prefers_nested_repo_directory(
+def test_resolve_module_scope_prefers_nested_graph_module(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """Resuelve el token del módulo en una ruta canónica anidada cuando se encuentra de forma única."""
-    repo_id = "repo1"
-    (tmp_path / repo_id / "src" / "coderag" / "core").mkdir(parents=True)
+    """Resuelve el token del módulo en una ruta canónica anidada usando Neo4j."""
 
-    class _Settings:
-        workspace_path = tmp_path
+    class _FakeGraphBuilder:
+        def query_repo_modules(self, repo_id: str) -> list[str]:
+            assert repo_id == "repo1"
+            return ["src/coderag/core", "src/coderag/api"]
 
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+        def close(self) -> None:
+            return None
 
-    scope = query_service._resolve_module_scope(repo_id=repo_id, module_name="core")
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+
+    scope = query_service._resolve_module_scope(repo_id="repo1", module_name="core")
     assert scope == "src/coderag/core"
 
 
@@ -490,7 +491,11 @@ def test_run_query_inventory_without_target_falls_back_to_general(
         ]
 
     monkeypatch.setattr(query_service, "hybrid_search", _fake_hybrid)
-    monkeypatch.setattr(query_service, "rerank", lambda chunks, top_k: chunks)
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
     monkeypatch.setattr(query_service, "expand_with_graph", lambda chunks: [])
     monkeypatch.setattr(query_service, "assemble_context", lambda chunks, graph_records, max_tokens: "ctx")
 
@@ -640,6 +645,67 @@ def test_run_inventory_query_auto_enriches_dependency_inventory_context(
     assert result.diagnostics["inventory_purpose_count"] == 1
 
 
+def test_describe_inventory_components_uses_persisted_purpose_summaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lee propósitos persistidos desde grafo sin depender del workspace."""
+
+    class _FakeGraphBuilder:
+        def query_file_purpose_summaries(
+            self,
+            repo_id: str,
+            paths: list[str],
+        ) -> dict[str, dict[str, str]]:
+            assert repo_id == "repo1"
+            assert paths == [
+                "src/coderag/core/settings.py",
+                "src/coderag/core/models.py",
+            ]
+            return {
+                "src/coderag/core/settings.py": {
+                    "purpose_summary": "Centraliza configuración del componente.",
+                    "purpose_source": "filename_heuristic",
+                },
+                "src/coderag/core/models.py": {
+                    "purpose_summary": "Define estructuras de datos del dominio.",
+                    "purpose_source": "filename_heuristic",
+                },
+            }
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+
+    descriptions = query_service._describe_inventory_components(
+        repo_id="repo1",
+        citations=[
+            Citation(
+                path="src/coderag/core/settings.py",
+                start_line=1,
+                end_line=20,
+                score=1.0,
+                reason="inventory_graph_match",
+            ),
+            Citation(
+                path="src/coderag/core/models.py",
+                start_line=1,
+                end_line=20,
+                score=0.9,
+                reason="inventory_graph_match",
+            ),
+        ],
+        pipeline_started_at=monotonic(),
+        budget_seconds=5.0,
+        query="cuales son los componentes del modulo core y que funcion cumple cada uno",
+    )
+
+    assert descriptions == [
+        ("settings.py", "Centraliza configuración del componente."),
+        ("models.py", "Define estructuras de datos del dominio."),
+    ]
+
+
 def test_run_query_retries_with_raw_citations_if_filtered_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -662,7 +728,11 @@ def test_run_query_retries_with_raw_citations_if_filtered_empty(
         ]
 
     monkeypatch.setattr(query_service, "hybrid_search", _fake_hybrid)
-    monkeypatch.setattr(query_service, "rerank", lambda chunks, top_k: chunks)
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
     monkeypatch.setattr(query_service, "expand_with_graph", lambda chunks: [])
     monkeypatch.setattr(
         query_service,
@@ -716,7 +786,11 @@ def test_run_query_uses_insufficient_context_fallback_reason(
         ]
 
     monkeypatch.setattr(query_service, "hybrid_search", _fake_hybrid)
-    monkeypatch.setattr(query_service, "rerank", lambda chunks, top_k: chunks)
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
     monkeypatch.setattr(query_service, "expand_with_graph", lambda chunks: [])
     monkeypatch.setattr(query_service, "assemble_context", lambda *args, **kwargs: "x")
 
@@ -816,7 +890,11 @@ def test_run_retrieval_query_returns_chunks_and_citations(
             )
         ],
     )
-    monkeypatch.setattr(query_service, "rerank", lambda chunks, top_k: chunks)
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
     monkeypatch.setattr(query_service, "expand_with_graph", lambda chunks: [])
 
     result = query_service.run_retrieval_query(
@@ -868,7 +946,11 @@ def test_run_retrieval_query_includes_context_when_enabled(
             )
         ],
     )
-    monkeypatch.setattr(query_service, "rerank", lambda chunks, top_k: chunks)
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
     monkeypatch.setattr(query_service, "expand_with_graph", lambda chunks: [{"n": 1}])
     monkeypatch.setattr(
         query_service,
@@ -1210,6 +1292,73 @@ def test_run_retrieval_query_literal_code_respects_include_context_flag(
 
     assert with_context.context == content
     assert without_context.context is None
+
+
+def test_run_query_literal_code_blocks_when_workspace_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Bloquea modo literal sin intentar fallback cuando el workspace ya no existe."""
+
+    class _Settings:
+        workspace_path = tmp_path
+        inventory_page_size = 25
+        query_max_seconds = 30.0
+
+    def _fail_hybrid_search(*args: object, **kwargs: object) -> None:
+        raise AssertionError("hybrid_search no debe correr cuando literal se bloquea")
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "hybrid_search", _fail_hybrid_search)
+
+    result = query_service.run_query(
+        repo_id="repo-sin-workspace",
+        query="dame el codigo completo de settings.py",
+        top_n=5,
+        top_k=3,
+    )
+
+    assert "workspace local disponible" in result.answer
+    assert result.citations == []
+    assert result.diagnostics["literal_mode"] is True
+    assert result.diagnostics["literal_exact_match"] is False
+    assert result.diagnostics["literal_failure_reason"] == "workspace_unavailable"
+    assert result.diagnostics["fallback_reason"] == "literal_workspace_required"
+
+
+def test_run_retrieval_query_literal_code_blocks_when_workspace_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Bloquea modo literal retrieval-only sin leer archivos locales inexistentes."""
+
+    class _Settings:
+        workspace_path = tmp_path
+        inventory_page_size = 25
+        query_max_seconds = 30.0
+
+    def _fail_hybrid_search(*args: object, **kwargs: object) -> None:
+        raise AssertionError("hybrid_search no debe correr cuando literal se bloquea")
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "hybrid_search", _fail_hybrid_search)
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo-sin-workspace",
+        query="show me the full code of settings.py",
+        top_n=5,
+        top_k=3,
+        include_context=True,
+    )
+
+    assert "workspace local disponible" in result.answer
+    assert result.chunks == []
+    assert result.citations == []
+    assert result.context is None
+    assert result.diagnostics["literal_mode"] is True
+    assert result.diagnostics["literal_exact_match"] is False
+    assert result.diagnostics["literal_failure_reason"] == "workspace_unavailable"
+    assert result.diagnostics["fallback_reason"] == "literal_workspace_required"
 
 
 def test_run_query_literal_code_exact_symbol_returns_symbol_span(

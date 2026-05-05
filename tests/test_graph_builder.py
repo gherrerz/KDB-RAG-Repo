@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from coderag.core.models import SemanticRelation
+from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
 from coderag.ingestion.graph_builder import GraphBuilder
 
 
@@ -35,6 +35,10 @@ class _FakeResult:
     def single(self) -> dict[str, int]:
         """Devuelve una fila con conteo total de nodos."""
         return {"total": self._total_nodes}
+
+    def __iter__(self):
+        """Permite iterar resultados vacíos en consultas de listado."""
+        return iter(())
 
 
 class _FakeSession:
@@ -200,3 +204,167 @@ def test_expand_symbols_uses_literal_hops_in_query() -> None:
     assert "[*1..3]" in driver.last_session.query
     assert "$hops" not in driver.last_session.query
     assert "hops" not in driver.last_session.kwargs
+
+
+def test_query_repo_modules_returns_sorted_module_paths() -> None:
+    """Devuelve módulos distintos persistidos en Neo4j ordenados por path."""
+
+    class _ModuleRecord:
+        def __init__(self, module_path: str) -> None:
+            self._module_path = module_path
+
+        def get(self, key: str, default: object = None) -> object:
+            if key == "module_path":
+                return self._module_path
+            return default
+
+    class _ModuleSession:
+        def __init__(self) -> None:
+            self.query = ""
+            self.kwargs: dict[str, Any] = {}
+
+        def run(self, query: str, **kwargs: Any) -> list[_ModuleRecord]:
+            self.query = query
+            self.kwargs = kwargs
+            return [
+                _ModuleRecord("api"),
+                _ModuleRecord("core"),
+                _ModuleRecord("services/payments"),
+            ]
+
+        def __enter__(self) -> "_ModuleSession":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class _ModuleDriver:
+        def __init__(self) -> None:
+            self.last_session: _ModuleSession | None = None
+
+        def session(self) -> _ModuleSession:
+            self.last_session = _ModuleSession()
+            return self.last_session
+
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _ModuleDriver()
+    builder.driver = driver
+
+    modules = builder.query_repo_modules("repo-x")
+
+    assert modules == ["api", "core", "services/payments"]
+    assert driver.last_session is not None
+    assert "HAS_MODULE" in driver.last_session.query
+    assert driver.last_session.kwargs == {"repo_id": "repo-x"}
+
+
+def test_upsert_repo_graph_persists_file_metadata() -> None:
+    """Persiste metadata derivada de archivo para queries sin workspace."""
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _FakeDriver(nodes_deleted=0, total_nodes=0)
+    builder.driver = driver
+
+    scanned_files = [
+        ScannedFile(
+            path="src/coderag/core/settings.py",
+            language="python",
+            content='"""Orquesta validaciones de consultas."""\n',
+        )
+    ]
+    symbols = [
+        SymbolChunk(
+            id="sym-1",
+            repo_id="repo-x",
+            path="src/coderag/core/settings.py",
+            language="python",
+            symbol_name="Settings",
+            symbol_type="class",
+            start_line=1,
+            end_line=10,
+            snippet="class Settings:\n    pass",
+        )
+    ]
+
+    builder.upsert_repo_graph(
+        repo_id="repo-x",
+        scanned_files=scanned_files,
+        symbols=symbols,
+        semantic_relations=[],
+    )
+
+    session = driver.last_session
+    assert session is not None
+    file_call = next(kwargs for query, kwargs in session.calls if "MERGE (f:File" in query)
+    assert file_call["file_name"] == "settings.py"
+    assert file_call["module_path"] == "src"
+    assert file_call["purpose_source"] == "module_docstring"
+    assert "Orquesta validaciones" in file_call["purpose_summary"]
+    assert file_call["top_level_symbol_names"] == ["Settings"]
+    assert file_call["top_level_symbol_types"] == ["class"]
+
+
+def test_query_file_purpose_summaries_returns_path_map() -> None:
+    """Recupera propósito persistido por path desde Neo4j."""
+
+    class _PurposeRecord:
+        def __init__(self, path: str, purpose_summary: str, purpose_source: str) -> None:
+            self._payload = {
+                "path": path,
+                "purpose_summary": purpose_summary,
+                "purpose_source": purpose_source,
+            }
+
+        def get(self, key: str, default: object = None) -> object:
+            return self._payload.get(key, default)
+
+    class _PurposeSession:
+        def __init__(self) -> None:
+            self.query = ""
+            self.kwargs: dict[str, Any] = {}
+
+        def run(self, query: str, **kwargs: Any) -> list[_PurposeRecord]:
+            self.query = query
+            self.kwargs = kwargs
+            return [
+                _PurposeRecord(
+                    "src/coderag/core/settings.py",
+                    "Centraliza configuración y parámetros del módulo.",
+                    "filename_heuristic",
+                )
+            ]
+
+        def __enter__(self) -> "_PurposeSession":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class _PurposeDriver:
+        def __init__(self) -> None:
+            self.last_session: _PurposeSession | None = None
+
+        def session(self) -> _PurposeSession:
+            self.last_session = _PurposeSession()
+            return self.last_session
+
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _PurposeDriver()
+    builder.driver = driver
+
+    payload = builder.query_file_purpose_summaries(
+        "repo-x",
+        ["src/coderag/core/settings.py"],
+    )
+
+    assert payload == {
+        "src/coderag/core/settings.py": {
+            "purpose_summary": "Centraliza configuración y parámetros del módulo.",
+            "purpose_source": "filename_heuristic",
+        }
+    }
+    assert driver.last_session is not None
+    assert "purpose_summary" in driver.last_session.query
+    assert driver.last_session.kwargs == {
+        "repo_id": "repo-x",
+        "paths": ["src/coderag/core/settings.py"],
+    }

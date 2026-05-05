@@ -26,7 +26,18 @@ LLM o salida retrieval-only segun endpoint y condiciones operativas.
 - Retrieval: busqueda hibrida, reranking, expansion de grafo y ensamblado de
   contexto.
 - Capa LLM: clientes multi-provider para answer/verify.
-- Persistencia: Chroma, BM25, Neo4j, SQLite y workspace local.
+- Persistencia: Chroma, BM25, Neo4j, SQLite y workspace local opcional
+    post-ingesta.
+
+Notas operativas:
+
+- Query semántico, retrieval-only e inventario pueden operar sin workspace si
+    los índices persistidos y SQLite están listos.
+- Modo literal sigue dependiendo de workspace local porque devuelve contenido
+    vivo del archivo y no usa snapshots persistidos.
+- Neo4j persiste metadata adicional por archivo, incluyendo módulo y
+    `purpose_summary`, para soportar discovery e inventory explain sin leer
+    archivos locales.
 
 ## Topología de despliegue
 
@@ -141,7 +152,7 @@ flowchart TB
 | Layer 2 - API and Application | FastAPI, Pydantic models, endpoints HTTP | Exponer contratos API, validar entradas y enrutar casos de uso. |
 | Layer 3 - Domain and Orchestration | JobManager, pipeline de ingesta, pipeline de retrieval, chequeos de storage | Ejecutar logica de negocio y coordinar flujos asincronos/sincronos. |
 | Layer 4 - AI and Model Integration | Clientes LLM multi-provider, clientes de embeddings | Generar respuestas/verificacion y convertir consultas/chunks a embeddings. |
-| Layer 5 - Data and Infrastructure | ChromaDB, BM25, Neo4j, SQLite, workspace local | Persistir indices, metadata operativa y datos necesarios para retrieval. |
+| Layer 5 - Data and Infrastructure | ChromaDB, BM25, Neo4j, SQLite, workspace local opcional | Persistir indices, metadata operativa y los datos requeridos por query/retrieval; el workspace queda reservado para modo literal y operaciones live-file. |
 
 ## Vista ejecutiva de journeys
 

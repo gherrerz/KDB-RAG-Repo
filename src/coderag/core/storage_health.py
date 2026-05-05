@@ -303,11 +303,17 @@ def run_storage_preflight(
     workspace_path = settings.workspace_path
     metadata_path = settings.workspace_path.parent / "metadata.db"
 
+    workspace_critical = context not in {
+        "query",
+        "retrieval_query",
+        "inventory_query",
+    }
+
     checks_plan: list[dict[str, Any]] = [
         {
             "type": "check",
             "name": "workspace",
-            "critical": True,
+            "critical": workspace_critical,
             "check_fn": lambda: _check_workspace(workspace_path),
         },
         {
@@ -508,6 +514,7 @@ def get_repo_query_status(
 ) -> dict[str, Any]:
     """Evalúa si un repositorio está listo para consultas RAG."""
     settings = get_settings()
+    workspace_available = (settings.workspace_path / repo_id).is_dir()
     warnings: list[str] = []
     chroma_counts: dict[str, int | None] = {}
     configured_hnsw_space = settings.resolve_chroma_hnsw_space()
@@ -580,6 +587,7 @@ def get_repo_query_status(
     return {
         "repo_id": repo_id,
         "listed_in_catalog": listed_in_catalog,
+        "workspace_available": workspace_available,
         "query_ready": query_ready,
         "chroma_counts": chroma_counts,
         "chroma_hnsw_space_configured": configured_hnsw_space,
