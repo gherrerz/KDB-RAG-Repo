@@ -218,6 +218,10 @@ class Settings(BaseSettings):
         default=False,
         alias="SEMANTIC_GRAPH_JAVA_ENABLED",
     )
+    semantic_graph_javascript_enabled: bool = Field(
+        default=False,
+        alias="SEMANTIC_GRAPH_JAVASCRIPT_ENABLED",
+    )
     semantic_graph_typescript_enabled: bool = Field(
         default=False,
         alias="SEMANTIC_GRAPH_TYPESCRIPT_ENABLED",

@@ -202,6 +202,60 @@ def test_extract_symbol_chunks_config_keys_use_localized_spans() -> None:
     assert json_max_context.end_line == 5
 
 
+def test_extract_symbol_chunks_detects_frontend_symbols_in_jsx_and_tsx() -> None:
+    """Extrae componentes frontend y exports anónimos con nombres sintéticos útiles."""
+    scanned = [
+        ScannedFile(
+            path="components/Button.jsx",
+            language="javascript",
+            content=(
+                "export const Button = () => {\n"
+                "  return <button>Click</button>;\n"
+                "};\n"
+            ),
+        ),
+        ScannedFile(
+            path="app/page.tsx",
+            language="typescript",
+            content=(
+                "export default () => {\n"
+                "  return <main>Home</main>;\n"
+                "};\n"
+            ),
+        ),
+    ]
+
+    chunks = extract_symbol_chunks(repo_id="repo1", scanned_files=scanned)
+    pairs = {(item.path, item.symbol_name, item.symbol_type) for item in chunks}
+
+    assert ("components/Button.jsx", "Button", "function") in pairs
+    assert ("app/page.tsx", "Page", "function") in pairs
+
+
+def test_extract_symbol_chunks_detects_next_route_handlers_by_http_verb() -> None:
+    """Extrae handlers HTTP de Next route files como símbolos separados."""
+    scanned = [
+        ScannedFile(
+            path="app/api/users/route.ts",
+            language="typescript",
+            content=(
+                "export async function GET() {\n"
+                "  return Response.json({ ok: true });\n"
+                "}\n\n"
+                "export async function POST() {\n"
+                "  return Response.json({ created: true });\n"
+                "}\n"
+            ),
+        )
+    ]
+
+    chunks = extract_symbol_chunks(repo_id="repo1", scanned_files=scanned)
+    names = {item.symbol_name for item in chunks}
+
+    assert "GET" in names
+    assert "POST" in names
+
+
 def test_bm25_returns_ranked_documents() -> None:
     """Devuelve el documento principal que coincide exactamente con los términos de la consulta."""
     index = BM25Index()
@@ -505,6 +559,78 @@ def test_hybrid_search_boosts_identifier_inside_natural_query(
     assert ranked
     assert ranked[0].metadata["path"] == "k8s/base/api-configmap.yaml"
     assert ranked[0].metadata["symbol_name"] == "RETAIN_WORKSPACE_AFTER_INGEST"
+
+
+def test_hybrid_search_refreshes_stale_chroma_results_once(
+    monkeypatch,
+) -> None:
+    """Reintenta Chroma tras reset cuando la primera ronda vectorial regresa vacía."""
+
+    class _FakeEmbedder:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            del texts
+            return [[0.1, 0.2]]
+
+    class _FakeChroma:
+        reset_calls = 0
+        query_calls = 0
+
+        def __init__(self) -> None:
+            return None
+
+        @classmethod
+        def reset_shared_state(cls) -> None:
+            cls.reset_calls += 1
+
+        def query(
+            self,
+            collection_name: str,
+            query_embedding: list[float],
+            top_n: int,
+            where: dict[str, str] | None = None,
+        ) -> dict:
+            del query_embedding, top_n, where
+            self.__class__.query_calls += 1
+            if self.__class__.query_calls <= len(hybrid_search_module.VECTOR_COLLECTIONS):
+                return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+            return {
+                "ids": [[f"{collection_name}-1"]],
+                "documents": [["export function AuthProvider() {}"]],
+                "metadatas": [[{
+                    "path": "src/providers/AuthProvider.tsx",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "symbol_name": "AuthProvider",
+                    "symbol_type": "function",
+                }]],
+                "distances": [[0.1]],
+            }
+
+    monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
+    monkeypatch.setattr(hybrid_search_module, "ChromaIndex", _FakeChroma)
+    monkeypatch.setattr(
+        hybrid_search_module.GLOBAL_BM25,
+        "ensure_repo_loaded",
+        lambda repo_id: True,
+    )
+    monkeypatch.setattr(
+        hybrid_search_module.GLOBAL_BM25,
+        "query",
+        lambda repo_id, text, top_n: [],
+    )
+
+    ranked = hybrid_search_module.hybrid_search(
+        repo_id="repo-refresh",
+        query="where is auth provider",
+        top_n=5,
+    )
+
+    assert _FakeChroma.reset_calls == 1
+    assert ranked
+    assert ranked[0].metadata["path"] == "src/providers/AuthProvider.tsx"
 
 
 def test_assemble_context_applies_token_limit() -> None:

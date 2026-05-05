@@ -12,8 +12,13 @@ class GenericFallbackExtractor:
         """Create fallback extractor with configurable window size."""
         self._window_lines = max(1, int(window_lines))
 
-    def detect_symbols(self, content: str) -> list[SymbolDetection]:
+    def detect_symbols(
+        self,
+        content: str,
+        path: str | None = None,
+    ) -> list[SymbolDetection]:
         """Detect common symbol signatures using basic regex heuristics."""
+        del path
         detections: list[SymbolDetection] = []
         for line_number, line in enumerate(content.splitlines(), start=1):
             py_match = re.match(r"\s*(def|class)\s+([A-Za-z_][A-Za-z0-9_]*)", line)

@@ -2,7 +2,19 @@
 
 from pathlib import Path
 
-from coderag.ingestion.repo_scanner import scan_repository, scan_repository_with_stats
+from coderag.ingestion.repo_scanner import (
+    detect_language,
+    scan_repository,
+    scan_repository_with_stats,
+)
+
+
+def test_detect_language_maps_frontend_extensions() -> None:
+    """Clasifica JSX y TSX como código ECMAScript en lugar de text."""
+    assert detect_language(Path("component.jsx")) == "javascript"
+    assert detect_language(Path("component.tsx")) == "typescript"
+    assert detect_language(Path("component.js")) == "javascript"
+    assert detect_language(Path("component.ts")) == "typescript"
 
 
 def test_scan_repository_excludes_dirs_extensions_and_large_files(tmp_path: Path) -> None:
@@ -108,3 +120,30 @@ def test_scan_repository_with_stats_reports_exclusion_reasons(tmp_path: Path) ->
     assert stats["excluded_dir"] >= 1
     assert stats["excluded_extension"] >= 1
     assert stats["excluded_size"] >= 1
+
+
+def test_scan_repository_preserves_jsx_and_tsx_languages(tmp_path: Path) -> None:
+    """Escanea archivos frontend con etiquetas de lenguaje correctas."""
+    (tmp_path / "app").mkdir(parents=True)
+    (tmp_path / "app" / "page.tsx").write_text(
+        "export default function Page() { return <div />; }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "components").mkdir(parents=True)
+    (tmp_path / "components" / "button.jsx").write_text(
+        "export const Button = () => <button />;\n",
+        encoding="utf-8",
+    )
+
+    scanned = scan_repository(
+        tmp_path,
+        max_file_size=100_000,
+        excluded_dirs=set(),
+        excluded_extensions=set(),
+        excluded_files=set(),
+    )
+
+    language_by_path = {item.path: item.language for item in scanned}
+
+    assert language_by_path["app/page.tsx"] == "typescript"
+    assert language_by_path["components/button.jsx"] == "javascript"

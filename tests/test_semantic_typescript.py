@@ -67,3 +67,42 @@ def test_extract_typescript_semantic_relations_reports_resolution_stats() -> Non
     )
 
     assert stats.get("local", 0) >= 1
+
+
+def test_extract_typescript_semantic_relations_detects_tsx_component_usage() -> None:
+    """Extracts CALLS relations from JSX component usage in TSX files."""
+    button_content = (
+        "export function Button(): JSX.Element {\n"
+        "  return <button>ok</button>;\n"
+        "}\n"
+    )
+    page_content = (
+        "import { Button } from './button';\n\n"
+        "export default function Page(): JSX.Element {\n"
+        "  return <main><Button /></main>;\n"
+        "}\n"
+    )
+    scanned_files = [
+        ScannedFile(path="app/button.tsx", language="typescript", content=button_content),
+        ScannedFile(path="app/page.tsx", language="typescript", content=page_content),
+    ]
+    symbols = extract_symbol_chunks(repo_id="repo-tsx", scanned_files=scanned_files)
+
+    relations = extract_typescript_semantic_relations(
+        repo_id="repo-tsx",
+        scanned_files=scanned_files,
+        symbols=symbols,
+    )
+
+    component_calls = [
+        item
+        for item in relations
+        if item.relation_type == "CALLS" and item.target_ref == "Button"
+    ]
+
+    assert len(component_calls) == 1
+    assert component_calls[0].target_symbol_id is not None
+    assert not any(
+        item.relation_type == "CALLS" and item.target_ref == "Page"
+        for item in relations
+    )

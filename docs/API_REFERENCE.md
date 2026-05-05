@@ -360,6 +360,14 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 | `citations` | `list[Citation]` | no | `[]` |
 | `diagnostics` | `dict[str, Any]` | no | `{}` |
 
+Notas operativas de inventory/discovery:
+
+- La explicación textual usa `purpose_summary` persistido en Neo4j cuando está disponible.
+- Para frontend React/Next, la ingesta ahora reconoce heurísticas de archivo como
+  `page.tsx`, `layout.tsx`, `loading.tsx`, `route.ts` y `middleware.ts`, además de
+  hooks `use*` y providers `*Provider`, para describir mejor el propósito del archivo
+  sin depender del workspace local.
+
 ### RepoCatalogResponse
 
 | Field | Type | Requerido | Default |

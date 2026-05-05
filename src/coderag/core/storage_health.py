@@ -483,6 +483,17 @@ def _count_chroma_documents_for_repo(
     return total
 
 
+def _count_query_collections_for_repo(repo_id: str) -> dict[str, int | None]:
+    """Cuenta documentos Chroma por colección para un repositorio."""
+    return {
+        collection_name: _count_chroma_documents_for_repo(
+            repo_id=repo_id,
+            collection_name=collection_name,
+        )
+        for collection_name in QUERY_COLLECTIONS
+    }
+
+
 def _check_repo_graph_available(repo_id: str, timeout_seconds: float) -> bool:
     """Determina si existen nodos asociados al repo en Neo4j."""
     settings = get_settings()
@@ -521,21 +532,19 @@ def get_repo_query_status(
     chroma_spaces: dict[str, str | None] = {}
     chroma_space_mismatched_collections: list[str] = []
 
-    for collection_name in QUERY_COLLECTIONS:
-        try:
-            chroma_counts[collection_name] = _count_chroma_documents_for_repo(
-                repo_id=repo_id,
-                collection_name=collection_name,
-            )
-        except Exception as exc:  # pragma: no cover - depende de infraestructura
-            chroma_counts[collection_name] = None
-            warnings.append(
-                f"No se pudo contar {collection_name} en Chroma: {exc}"
-            )
-
     bm25_loaded = GLOBAL_BM25.ensure_repo_loaded(repo_id)
     if not bm25_loaded:
         warnings.append(f"No hay indice BM25 en memoria para repo '{repo_id}'.")
+
+    try:
+        chroma_counts = _count_query_collections_for_repo(repo_id)
+        if not any((count or 0) > 0 for count in chroma_counts.values()):
+            if listed_in_catalog or bm25_loaded:
+                ChromaIndex.reset_shared_state()
+                chroma_counts = _count_query_collections_for_repo(repo_id)
+    except Exception as exc:  # pragma: no cover - depende de infraestructura
+        chroma_counts = {collection_name: None for collection_name in QUERY_COLLECTIONS}
+        warnings.append(f"No se pudo contar documentos del repo en Chroma: {exc}")
 
     try:
         chroma_spaces = ChromaIndex().collection_hnsw_spaces()

@@ -107,6 +107,13 @@ def test_semantic_graph_typescript_flag_defaults_to_false() -> None:
     assert settings.semantic_graph_typescript_enabled is False
 
 
+def test_semantic_graph_javascript_flag_defaults_to_false() -> None:
+    """Mantiene deshabilitada la extracción semántica JavaScript por defecto."""
+    settings = Settings(_env_file=None)
+
+    assert settings.semantic_graph_javascript_enabled is False
+
+
 def test_semantic_graph_query_flags_defaults() -> None:
     """Configura por defecto la expansión semántica de query desactivada."""
     settings = Settings(_env_file=None)

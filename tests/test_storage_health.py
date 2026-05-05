@@ -298,6 +298,51 @@ def test_get_repo_query_status_reports_workspace_availability(
     assert missing_status["query_ready"] is True
 
 
+def test_get_repo_query_status_refreshes_chroma_when_counts_start_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reintenta conteos Chroma tras reset cuando el repo ya parece persistido."""
+    calls = {"count": 0, "reset": 0}
+
+    def fake_count(*, repo_id: str, collection_name: str, page_size: int = 500) -> int:
+        del repo_id, collection_name, page_size
+        calls["count"] += 1
+        if calls["count"] <= 3:
+            return 0
+        return 4
+
+    monkeypatch.setattr(storage_health, "_count_chroma_documents_for_repo", fake_count)
+    monkeypatch.setattr(
+        storage_health.GLOBAL_BM25,
+        "ensure_repo_loaded",
+        lambda repo_id: True,
+    )
+    monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
+    monkeypatch.setattr(
+        storage_health.ChromaIndex,
+        "reset_shared_state",
+        classmethod(lambda cls: calls.__setitem__("reset", calls["reset"] + 1)),
+    )
+    monkeypatch.setattr(
+        storage_health.ChromaIndex,
+        "collection_hnsw_spaces",
+        lambda self: {
+            "code_symbols": "cosine",
+            "code_files": "cosine",
+            "code_modules": "cosine",
+        },
+    )
+
+    status = storage_health.get_repo_query_status(
+        repo_id="repo-a",
+        listed_in_catalog=True,
+    )
+
+    assert calls["reset"] == 1
+    assert status["chroma_counts"]["code_symbols"] == 4
+    assert status["query_ready"] is True
+
+
 def test_check_chroma_raises_on_hnsw_space_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

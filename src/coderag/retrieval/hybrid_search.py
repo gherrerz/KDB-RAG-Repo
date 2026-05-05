@@ -180,6 +180,75 @@ def _query_collection(
     return collection_name, result
 
 
+def _vector_results_empty(results: list[dict]) -> bool:
+    """Devuelve True cuando ninguna colección retornó ids vectoriales."""
+    for result in results:
+        ids = result.get("ids", [[]])
+        if ids and ids[0]:
+            return False
+    return True
+
+
+def _run_vector_search(
+    *,
+    chroma: ChromaIndex,
+    query_embedding: list[float],
+    repo_id: str,
+    candidate_top_n: int,
+) -> list[dict]:
+    """Ejecuta la recuperación vectorial sobre las colecciones configuradas."""
+    vector_results: list[dict] = []
+    try:
+        with ThreadPoolExecutor(max_workers=len(VECTOR_COLLECTIONS)) as executor:
+            futures = [
+                executor.submit(
+                    _query_collection,
+                    chroma,
+                    collection_name,
+                    query_embedding,
+                    repo_id,
+                    candidate_top_n,
+                )
+                for collection_name in VECTOR_COLLECTIONS
+            ]
+            results_by_collection = {
+                collection_name: result
+                for collection_name, result in [future.result() for future in futures]
+            }
+        vector_results = [
+            results_by_collection.get(
+                collection_name,
+                _empty_result(),
+            )
+            for collection_name in VECTOR_COLLECTIONS
+        ]
+    except Exception as exc:
+        LOGGER.warning(
+            "Fallo recuperación vectorial concurrente para repo=%s; "
+            "usando fallback secuencial. error=%s",
+            repo_id,
+            exc,
+        )
+        for collection_name in VECTOR_COLLECTIONS:
+            try:
+                result = chroma.query(
+                    collection_name=collection_name,
+                    query_embedding=query_embedding,
+                    top_n=candidate_top_n,
+                    where={"repo_id": repo_id},
+                )
+                vector_results.append(result)
+            except Exception as inner_exc:
+                LOGGER.warning(
+                    "Fallo recuperación vectorial en colección=%s repo=%s: %s",
+                    collection_name,
+                    repo_id,
+                    inner_exc,
+                )
+                vector_results.append(_empty_result())
+    return vector_results
+
+
 def _candidate_top_n(query: str, top_n: int) -> int:
     """Amplía candidatos para consultas exactas de identificadores."""
     if not (_is_exact_identifier_query(query) or _focus_identifiers(query)):
@@ -216,59 +285,21 @@ def hybrid_search(
 
     if query_embedding is not None:
         chroma = ChromaIndex()
-
-        try:
-            with ThreadPoolExecutor(max_workers=len(VECTOR_COLLECTIONS)) as executor:
-                futures = [
-                    executor.submit(
-                        _query_collection,
-                        chroma,
-                        collection_name,
-                        query_embedding,
-                        repo_id,
-                        candidate_top_n,
-                    )
-                    for collection_name in VECTOR_COLLECTIONS
-                ]
-                results_by_collection = {
-                    collection_name: result
-                    for collection_name, result in [
-                        future.result() for future in futures
-                    ]
-                }
-            vector_results = [
-                results_by_collection.get(
-                    collection_name,
-                    _empty_result(),
-                )
-                for collection_name in VECTOR_COLLECTIONS
-            ]
-        except Exception as exc:
-            LOGGER.warning(
-                "Fallo recuperación vectorial concurrente para repo=%s; "
-                "usando fallback secuencial. error=%s",
-                repo_id,
-                exc,
+        vector_results = _run_vector_search(
+            chroma=chroma,
+            query_embedding=query_embedding,
+            repo_id=repo_id,
+            candidate_top_n=candidate_top_n,
+        )
+        if _vector_results_empty(vector_results) and GLOBAL_BM25.ensure_repo_loaded(repo_id):
+            ChromaIndex.reset_shared_state()
+            chroma = ChromaIndex()
+            vector_results = _run_vector_search(
+                chroma=chroma,
+                query_embedding=query_embedding,
+                repo_id=repo_id,
+                candidate_top_n=candidate_top_n,
             )
-            # Fallback secuencial para preservar funcionalidad si el runtime
-            # no permite concurrencia segura del cliente Chroma.
-            for collection_name in VECTOR_COLLECTIONS:
-                try:
-                    result = chroma.query(
-                        collection_name=collection_name,
-                        query_embedding=query_embedding,
-                        top_n=candidate_top_n,
-                        where={"repo_id": repo_id},
-                    )
-                    vector_results.append(result)
-                except Exception as inner_exc:
-                    LOGGER.warning(
-                        "Fallo recuperación vectorial en colección=%s repo=%s: %s",
-                        collection_name,
-                        repo_id,
-                        inner_exc,
-                    )
-                    vector_results.append(_empty_result())
     else:
         LOGGER.warning(
             "Consulta sin embedding utilizable para repo=%s; "

@@ -20,6 +20,7 @@ from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import ChromaIndex
 from coderag.ingestion.repo_scanner import scan_repository_with_stats
 from coderag.ingestion.semantic_java import extract_java_semantic_relations
+from coderag.ingestion.semantic_javascript import extract_javascript_semantic_relations
 from coderag.ingestion.semantic_python import extract_python_semantic_relations
 from coderag.ingestion.semantic_typescript import extract_typescript_semantic_relations
 from coderag.ingestion.summarizer import summarize_file, summarize_modules
@@ -461,6 +462,9 @@ def _index_graph(
     java_semantic_enabled = bool(
         getattr(settings, "semantic_graph_java_enabled", False)
     )
+    javascript_semantic_enabled = bool(
+        getattr(settings, "semantic_graph_javascript_enabled", False)
+    )
     typescript_semantic_enabled = bool(
         getattr(settings, "semantic_graph_typescript_enabled", False)
     )
@@ -471,6 +475,7 @@ def _index_graph(
         extraction_failed = False
         extraction_error: str | None = None
         java_resolution_source_counts: dict[str, int] = {}
+        javascript_resolution_source_counts: dict[str, int] = {}
         typescript_resolution_source_counts: dict[str, int] = {}
         try:
             python_relations = extract_python_semantic_relations(
@@ -488,6 +493,14 @@ def _index_graph(
                     resolution_stats_sink=java_resolution_source_counts,
                 )
                 semantic_relations.extend(java_relations)
+            if javascript_semantic_enabled:
+                javascript_relations = extract_javascript_semantic_relations(
+                    repo_id=repo_id,
+                    scanned_files=scanned_files,
+                    symbols=symbols,
+                    resolution_stats_sink=javascript_resolution_source_counts,
+                )
+                semantic_relations.extend(javascript_relations)
             if typescript_semantic_enabled:
                 typescript_relations = extract_typescript_semantic_relations(
                     repo_id=repo_id,
@@ -545,6 +558,7 @@ def _index_graph(
                 f"java_cross_file_resolved_count={java_cross_file_resolved_count}, "
                 f"java_cross_file_resolved_by_type={java_cross_file_resolved_by_type}, "
                 f"java_resolution_source_counts={java_resolution_source_counts}, "
+                f"javascript_resolution_source_counts={javascript_resolution_source_counts}, "
                 f"typescript_resolution_source_counts={typescript_resolution_source_counts}, "
                 f"unresolved_count={unresolved_count}, "
                 f"unresolved_by_type={unresolved_by_type}, "
@@ -562,6 +576,9 @@ def _index_graph(
                     java_cross_file_resolved_by_type
                 ),
                 "java_resolution_source_counts": java_resolution_source_counts,
+                "javascript_resolution_source_counts": (
+                    javascript_resolution_source_counts
+                ),
                 "typescript_resolution_source_counts": (
                     typescript_resolution_source_counts
                 ),
@@ -582,6 +599,7 @@ def _index_graph(
             "java_cross_file_resolved_count": 0,
             "java_cross_file_resolved_by_type": {},
             "java_resolution_source_counts": {},
+            "javascript_resolution_source_counts": {},
             "typescript_resolution_source_counts": {},
             "unresolved_count": 0,
             "unresolved_by_type": {},

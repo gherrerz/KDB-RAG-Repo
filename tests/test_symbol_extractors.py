@@ -101,3 +101,79 @@ def test_javascript_brace_extractor_detects_typed_class_method() -> None:
     assert target.symbol_type == "method"
     assert span.start_line == 2
     assert span.end_line == 4
+
+
+def test_javascript_brace_extractor_maps_anonymous_default_export_by_filename() -> None:
+    """Default exports anónimos usan un nombre sintético estable por archivo."""
+    content = (
+        "export default () => {\n"
+        "  return <div />;\n"
+        "};\n"
+    )
+    extractor = JavaScriptBraceExtractor()
+
+    detections = extractor.detect_symbols(content, path="app/page.tsx")
+    target = next(item for item in detections if item.symbol_name == "Page")
+    span = extractor.resolve_span(content, target)
+
+    assert target.symbol_type == "function"
+    assert span.start_line == 1
+    assert span.end_line == 3
+
+
+def test_javascript_brace_extractor_detects_next_route_handlers_by_http_verb() -> None:
+    """Indexa handlers de route.ts por verbo HTTP exportado."""
+    content = (
+        "export async function GET() {\n"
+        "  return Response.json({ ok: true });\n"
+        "}\n\n"
+        "export async function POST() {\n"
+        "  return Response.json({ created: true });\n"
+        "}\n"
+    )
+    extractor = JavaScriptBraceExtractor()
+
+    detections = extractor.detect_symbols(content, path="app/api/users/route.ts")
+    names = {item.symbol_name for item in detections}
+
+    assert "GET" in names
+    assert "POST" in names
+
+
+def test_javascript_brace_extractor_detects_styled_component_assignment() -> None:
+    """Reconoce styled-components simples como símbolos frontend recuperables."""
+    content = "const Button = styled.button`color: red;`;\n"
+    extractor = JavaScriptBraceExtractor()
+
+    detections = extractor.detect_symbols(content, path="components/button.tsx")
+
+    assert any(item.symbol_name == "Button" for item in detections)
+
+
+def test_javascript_brace_extractor_detects_simple_default_hoc_wrapper() -> None:
+    """Reconoce HOCs simples exportados por default usando el símbolo envuelto."""
+    content = "export default memo(Dashboard);\n"
+    extractor = JavaScriptBraceExtractor()
+
+    detections = extractor.detect_symbols(content, path="pages/index.tsx")
+
+    assert any(item.symbol_name == "Dashboard" for item in detections)
+
+
+def test_javascript_brace_extractor_maps_next_special_files_to_framework_names() -> None:
+    """Normaliza nombres sintéticos para archivos especiales de Next.js."""
+    content = (
+        "export default function() {\n"
+        "  return <html />;\n"
+        "}\n"
+    )
+    extractor = JavaScriptBraceExtractor()
+
+    app_detections = extractor.detect_symbols(content, path="pages/_app.tsx")
+    middleware_detections = extractor.detect_symbols(
+        "export default () => { return NextResponse.next(); };\n",
+        path="middleware.ts",
+    )
+
+    assert any(item.symbol_name == "_App" for item in app_detections)
+    assert any(item.symbol_name == "Middleware" for item in middleware_detections)

@@ -7,7 +7,9 @@ from coderag.core.models import ScannedFile
 LANG_MAP = {
     ".py": "python",
     ".js": "javascript",
+    ".jsx": "javascript",
     ".ts": "typescript",
+    ".tsx": "typescript",
     ".java": "java",
     ".go": "go",
     ".md": "markdown",

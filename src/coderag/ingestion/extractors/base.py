@@ -24,7 +24,11 @@ class SymbolSpan:
 class SymbolExtractor(Protocol):
     """Contract implemented by all language extractors."""
 
-    def detect_symbols(self, content: str) -> list[SymbolDetection]:
+    def detect_symbols(
+        self,
+        content: str,
+        path: str | None = None,
+    ) -> list[SymbolDetection]:
         """Return symbols declared in the provided source content."""
 
     def resolve_span(

@@ -54,8 +54,13 @@ class JavaBraceExtractor:
             )
         )
 
-    def detect_symbols(self, content: str) -> list[SymbolDetection]:
+    def detect_symbols(
+        self,
+        content: str,
+        path: str | None = None,
+    ) -> list[SymbolDetection]:
         """Detect Java classes, interfaces, methods and constructors."""
+        del path
         detections: list[SymbolDetection] = []
         for line_number, line in enumerate(content.splitlines(), start=1):
             class_match = _CLASS_PATTERN.match(line)

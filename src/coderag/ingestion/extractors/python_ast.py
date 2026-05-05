@@ -8,8 +8,13 @@ from coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
 class PythonAstExtractor:
     """Extracts Python classes/functions and their exact spans using AST."""
 
-    def detect_symbols(self, content: str) -> list[SymbolDetection]:
+    def detect_symbols(
+        self,
+        content: str,
+        path: str | None = None,
+    ) -> list[SymbolDetection]:
         """Return Python symbols discovered in the module AST."""
+        del path
         try:
             tree = ast.parse(content)
         except (SyntaxError, ValueError):

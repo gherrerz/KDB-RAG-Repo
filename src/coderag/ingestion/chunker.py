@@ -104,7 +104,7 @@ def _extract_code_language_symbols(
 ) -> list[SymbolChunk]:
     """Extract symbols for a code-like language via registry strategies."""
     extractor = DEFAULT_LANGUAGE_EXTRACTOR_REGISTRY.get(file_obj.language)
-    detections = extractor.detect_symbols(file_obj.content)
+    detections = extractor.detect_symbols(file_obj.content, path=file_obj.path)
     chunks: list[SymbolChunk] = []
 
     for detection in detections:

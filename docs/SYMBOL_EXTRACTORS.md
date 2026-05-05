@@ -18,6 +18,13 @@ Este documento describe el framework modular de extraccion de simbolos usado por
   - `JavaScriptBraceExtractor` (reutilizado para TypeScript)
   - `GenericFallbackExtractor`
 
+Cobertura frontend actual del extractor ECMAScript:
+
+- `.js` y `.jsx` se clasifican como `javascript`.
+- `.ts` y `.tsx` se clasifican como `typescript`.
+- React y Next.js reutilizan `JavaScriptBraceExtractor` para detección de
+    símbolos estructurales.
+
 ## Seleccion de estrategia
 
 La resolucion ocurre por `language` normalizado en minusculas:
@@ -27,6 +34,17 @@ La resolucion ocurre por `language` normalizado en minusculas:
 - `javascript`, `js`, `typescript`, `ts` -> `JavaScriptBraceExtractor`
 - cualquier otro -> `GenericFallbackExtractor`
 
+Notas prácticas para React y Next.js:
+
+- Los componentes React y hooks se indexan como `function`.
+- Las clases React se indexan como `class`.
+- Los `export default` anónimos se nombran sintéticamente a partir del archivo,
+    por ejemplo `page.tsx -> Page`, `layout.tsx -> Layout`, `middleware.ts -> Middleware`.
+- En `route.ts` y rutas API equivalentes, los handlers HTTP se indexan por
+    verbo exportado (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`).
+- Hay soporte básico para patrones simples de `styled-components` y HOCs como
+    `memo(Component)` o `withRouter(Component)`.
+
 ## Rollout y rollback
 
 El comportamiento se controla por `SYMBOL_EXTRACTOR_V2_ENABLED`:
@@ -35,6 +53,13 @@ El comportamiento se controla por `SYMBOL_EXTRACTOR_V2_ENABLED`:
 - `false`: usa modo legacy de ventana fija para codigo.
 
 La variable se lee desde `Settings.symbol_extractor_v2_enabled`.
+
+La extracción semántica de JavaScript usa un flag separado `SEMANTIC_GRAPH_JAVASCRIPT_ENABLED`.
+La de TypeScript mantiene `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED`.
+
+En TypeScript, la fase semántica también infiere relaciones `CALLS` desde uso de
+componentes JSX/TSX como `<Button />`, además de llamadas tradicionales con
+paréntesis.
 
 ## Como registrar un nuevo lenguaje
 

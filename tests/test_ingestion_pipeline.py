@@ -1011,6 +1011,112 @@ def test_index_graph_runs_typescript_semantics_only_when_enabled(
     assert diagnostics["semantic_graph"]["typescript_resolution_source_counts"] == {}
 
 
+def test_index_graph_runs_javascript_semantics_only_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ejecuta extractor JavaScript solo cuando el flag dedicado está activo."""
+    scanned = [
+        ScannedFile(
+            path="src/a.js",
+            language="javascript",
+            content="export function run() { helper(); }",
+        )
+    ]
+    symbols = [
+        SymbolChunk(
+            id="sj1",
+            repo_id="rj",
+            path="src/a.js",
+            language="javascript",
+            symbol_name="run",
+            symbol_type="function",
+            start_line=1,
+            end_line=1,
+            snippet="export function run() { helper(); }",
+        )
+    ]
+    diagnostics: dict[str, object] = {}
+
+    class _SettingsDisabled:
+        semantic_graph_enabled = True
+        semantic_graph_java_enabled = False
+        semantic_graph_javascript_enabled = False
+        semantic_graph_typescript_enabled = False
+
+    class _SettingsEnabled:
+        semantic_graph_enabled = True
+        semantic_graph_java_enabled = False
+        semantic_graph_javascript_enabled = True
+        semantic_graph_typescript_enabled = False
+
+    class _FakeGraphBuilder:
+        def upsert_repo_graph(
+            self,
+            repo_id: str,
+            scanned_files: list[ScannedFile],
+            symbols: list[SymbolChunk],
+            semantic_relations: list[SemanticRelation] | None = None,
+        ) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        pipeline,
+        "extract_python_semantic_relations",
+        lambda repo_id, scanned_files, symbols: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_java_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_typescript_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+
+    def _raise_if_called(*args, **kwargs):
+        raise RuntimeError("javascript extractor should not run")
+
+    monkeypatch.setattr(
+        pipeline,
+        "extract_javascript_semantic_relations",
+        _raise_if_called,
+    )
+    monkeypatch.setattr(pipeline, "get_settings", lambda: _SettingsDisabled())
+    pipeline._index_graph(
+        repo_id="rj",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    called: dict[str, bool] = {"value": False}
+
+    def _fake_extract_javascript(*args, **kwargs):
+        called["value"] = True
+        return []
+
+    monkeypatch.setattr(
+        pipeline,
+        "extract_javascript_semantic_relations",
+        _fake_extract_javascript,
+    )
+    monkeypatch.setattr(pipeline, "get_settings", lambda: _SettingsEnabled())
+    pipeline._index_graph(
+        repo_id="rj",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    assert called["value"] is True
+
+
 def test_ingest_repository_fails_when_purge_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
