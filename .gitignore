@@ -47,6 +47,7 @@ storage/workspace/
 storage/*.db
 storage/*.sqlite
 storage/*.sqlite3
+storage/fixtures/next-mini-e2e/
 
 # Jupyter
 .ipynb_checkpoints/
