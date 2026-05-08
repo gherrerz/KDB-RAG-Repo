@@ -247,3 +247,218 @@ def test_expand_with_graph_uses_structural_fallback_when_semantic_pruned_all(
     assert records[0]["props"]["id"] == "fallback-node"
     assert diagnostics["semantic_fallback_used"] is True
     assert diagnostics["semantic_fallback_reason"] == "semantic_budget_pruned_all"
+
+
+def test_expand_with_graph_appends_file_dependency_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anexa contexto de dependencias de archivo alcanzable desde símbolos semilla."""
+
+    class _Settings:
+        graph_hops = 2
+        semantic_graph_query_enabled = True
+        semantic_graph_query_max_edges = 10
+        semantic_graph_query_max_nodes = 5
+        semantic_graph_query_max_ms = 1000.0
+
+        @staticmethod
+        def resolve_semantic_relation_types(_override=None) -> list[str]:
+            return ["CALLS", "IMPORTS"]
+
+    class _Graph:
+        def expand_symbols(self, symbol_ids, hops, relation_types=None, limit=200):
+            return [
+                {
+                    "seed": "s1",
+                    "labels": ["Symbol"],
+                    "props": {"id": "n1"},
+                    "edge_count": 1,
+                    "relation_types": ["CALLS"],
+                    "relation_confidence_avg": 1.0,
+                }
+            ]
+
+        def expand_symbol_file_context(self, symbol_ids, limit=50):
+            assert symbol_ids == ["s1"]
+            assert limit == 5
+            return [
+                {
+                    "seed": "s1",
+                    "labels": ["File"],
+                    "props": {"path": "src/deps.py"},
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_FILE"],
+                    "relation_confidence_avg": 1.0,
+                },
+                {
+                    "seed": "s1",
+                    "labels": ["ExternalSymbol"],
+                    "props": {"ref": "requests"},
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                    "relation_confidence_avg": 1.0,
+                },
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(graph_expand, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(graph_expand, "GraphBuilder", _Graph)
+
+    chunks = [
+        RetrievalChunk(
+            id="s1",
+            text="x",
+            score=1.0,
+            metadata={"path": "src/a.py", "start_line": 1, "end_line": 1},
+        )
+    ]
+    records, diagnostics = graph_expand.expand_with_graph_with_diagnostics(chunks)
+
+    assert len(records) == 3
+    assert any(record["labels"] == ["File"] for record in records)
+    assert any(record["labels"] == ["ExternalSymbol"] for record in records)
+    assert diagnostics["semantic_file_context_used"] == 2
+
+
+def test_expand_with_graph_prioritizes_file_context_by_query_overlap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prioriza file-context con mayor solape textual respecto de la query."""
+
+    class _Settings:
+        graph_hops = 2
+        semantic_graph_query_enabled = True
+        semantic_graph_query_max_edges = 10
+        semantic_graph_query_max_nodes = 2
+        semantic_graph_query_max_ms = 1000.0
+
+        @staticmethod
+        def resolve_semantic_relation_types(_override=None) -> list[str]:
+            return ["CALLS", "IMPORTS"]
+
+    class _Graph:
+        def expand_symbols(self, symbol_ids, hops, relation_types=None, limit=200):
+            return [
+                {
+                    "seed": "s1",
+                    "labels": ["Symbol"],
+                    "props": {"id": "n1"},
+                    "edge_count": 1,
+                    "relation_types": ["CALLS"],
+                    "relation_confidence_avg": 1.0,
+                }
+            ]
+
+        def expand_symbol_file_context(self, symbol_ids, limit=50):
+            return [
+                {
+                    "seed": "s1",
+                    "labels": ["ExternalSymbol"],
+                    "props": {"ref": "requests", "source_path": "src/a.py"},
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                    "relation_confidence_avg": 1.0,
+                },
+                {
+                    "seed": "s1",
+                    "labels": ["ExternalSymbol"],
+                    "props": {"ref": "auth-provider", "source_path": "src/a.py"},
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                    "relation_confidence_avg": 1.0,
+                },
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(graph_expand, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(graph_expand, "GraphBuilder", _Graph)
+
+    chunks = [
+        RetrievalChunk(
+            id="s1",
+            text="x",
+            score=1.0,
+            metadata={"path": "src/a.py", "start_line": 1, "end_line": 1},
+        )
+    ]
+    records, diagnostics = graph_expand.expand_with_graph_with_diagnostics(
+        chunks,
+        query="where is auth provider configured",
+    )
+
+    assert len(records) == 2
+    assert records[1]["props"]["ref"] == "auth-provider"
+    assert diagnostics["semantic_file_context_used"] == 1
+
+
+def test_expand_with_graph_uses_file_chunk_paths_as_file_context_seeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Usa repo_id+path de file chunks para expandir dependencias aunque no haya seed symbol."""
+
+    class _Settings:
+        graph_hops = 2
+        semantic_graph_query_enabled = True
+        semantic_graph_query_max_edges = 10
+        semantic_graph_query_max_nodes = 5
+        semantic_graph_query_max_ms = 1000.0
+
+        @staticmethod
+        def resolve_semantic_relation_types(_override=None) -> list[str]:
+            return ["CALLS", "IMPORTS"]
+
+    class _Graph:
+        def expand_symbols(self, symbol_ids, hops, relation_types=None, limit=200):
+            return []
+
+        def expand_symbol_file_context(self, symbol_ids, limit=50):
+            return []
+
+        def expand_file_path_context(self, repo_id, file_paths, limit=50):
+            assert repo_id == "repo-x"
+            assert file_paths == ["src/coderag/ingestion/graph_builder.py"]
+            assert limit == 5
+            return [
+                {
+                    "seed": "src/coderag/ingestion/graph_builder.py",
+                    "labels": ["ExternalSymbol"],
+                    "props": {"ref": "neo4j.GraphDatabase"},
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                    "relation_confidence_avg": 1.0,
+                    "line": 4,
+                    "source_path": "src/coderag/ingestion/graph_builder.py",
+                }
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(graph_expand, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(graph_expand, "GraphBuilder", _Graph)
+
+    chunks = [
+        RetrievalChunk(
+            id="repo-x:src/coderag/ingestion/graph_builder.py",
+            text="x",
+            score=1.0,
+            metadata={
+                "repo_id": "repo-x",
+                "path": "src/coderag/ingestion/graph_builder.py",
+                "start_line": 1,
+                "end_line": 10,
+            },
+        )
+    ]
+    records, diagnostics = graph_expand.expand_with_graph_with_diagnostics(
+        chunks,
+        query="where is neo4j.GraphDatabase imported",
+    )
+
+    assert len(records) == 1
+    assert records[0]["labels"] == ["ExternalSymbol"]
+    assert diagnostics["semantic_file_context_used"] == 1

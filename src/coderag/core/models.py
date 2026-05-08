@@ -121,12 +121,12 @@ class RepoIngestRequest(BaseModel):
         ),
     )
     embedding_provider: str | None = Field(
-        default=None,
+        default="vertex",
         description="Proveedor de embeddings opcional para esta ingesta.",
         examples=["openai", "gemini", "vertex"],
     )
     embedding_model: str | None = Field(
-        default=None,
+        default="text-embedding-005",
         description="Modelo de embeddings opcional para esta ingesta.",
     )
 
@@ -180,7 +180,7 @@ class JobInfo(BaseModel):
         description="Eventos y mensajes operativos del proceso.",
     )
     repo_id: str | None = Field(
-        default=None,
+        default="gherrerz-kdb-rag-repo-main",
         description="Identificador de repo resultante al completar ingesta.",
     )
     error: str | None = Field(
@@ -207,7 +207,7 @@ class JobInfo(BaseModel):
 class QueryRequest(BaseModel):
     """Modelo de entrada para preguntas de usuario en lenguaje natural."""
 
-    repo_id: str = Field(description="Repositorio indexado objetivo.", examples=["mall"])
+    repo_id: str = Field(description="Repositorio indexado objetivo.", examples=["gherrerz-kdb-rag-repo-main"])
     query: str = Field(
         description="Pregunta en lenguaje natural.",
         examples=["cuales son todos los controller del modulo mall-admin?"],
@@ -218,30 +218,30 @@ class QueryRequest(BaseModel):
         description="Cantidad de candidatos recuperados antes del reranking.",
     )
     top_k: int = Field(
-        default=15,
+        default=20,
         ge=1,
         description="Cantidad final tras reranking usada para contexto/citas.",
     )
     embedding_provider: str | None = Field(
-        default=None,
+        default="vertex",
         description="Proveedor de embeddings opcional para vectorizar query.",
         examples=["openai", "gemini", "vertex"],
     )
     embedding_model: str | None = Field(
-        default=None,
+        default="text-embedding-005",
         description="Modelo de embeddings opcional para vectorizar query.",
     )
     llm_provider: str | None = Field(
-        default=None,
+        default="vertex",
         description="Proveedor LLM opcional para respuesta/verificación.",
         examples=["openai", "gemini", "vertex"],
     )
     answer_model: str | None = Field(
-        default=None,
+        default="gemini-2.5-flash",
         description="Modelo answer opcional para la consulta.",
     )
     verifier_model: str | None = Field(
-        default=None,
+        default="gemini-2.5-flash",
         description="Modelo verifier opcional para la consulta.",
     )
 
@@ -249,7 +249,7 @@ class QueryRequest(BaseModel):
 class RetrievalQueryRequest(BaseModel):
     """Modelo de entrada para consultas retrieval-only sin síntesis LLM."""
 
-    repo_id: str = Field(description="Repositorio indexado objetivo.", examples=["mall"])
+    repo_id: str = Field(description="Repositorio indexado objetivo.", examples=["gherrerz-kdb-rag-repo-main"])
     query: str = Field(
         description="Pregunta en lenguaje natural para retrieval de evidencia.",
         examples=["donde esta la configuracion de neo4j"],
@@ -260,17 +260,17 @@ class RetrievalQueryRequest(BaseModel):
         description="Cantidad de candidatos recuperados antes del reranking.",
     )
     top_k: int = Field(
-        default=15,
+        default=20,
         ge=1,
         description="Cantidad final tras reranking retornada como evidencia.",
     )
     embedding_provider: str | None = Field(
-        default=None,
+        default="vertex",
         description="Proveedor de embeddings opcional para vectorizar query.",
         examples=["openai", "gemini", "vertex"],
     )
     embedding_model: str | None = Field(
-        default=None,
+        default="text-embedding-005",
         description="Modelo de embeddings opcional para vectorizar query.",
     )
     include_context: bool = Field(
@@ -284,10 +284,10 @@ class RetrievalQueryRequest(BaseModel):
 class InventoryQueryRequest(BaseModel):
     """Modelo de entrada para consultas de inventario basadas en gráficos."""
 
-    repo_id: str = Field(description="Repositorio indexado objetivo.", examples=["mall"])
+    repo_id: str = Field(description="Repositorio indexado objetivo.", examples=["gherrerz-kdb-rag-repo-main"])
     query: str = Field(
         description="Consulta de inventario amplia (ejemplo: 'todos los modelos').",
-        examples=["cuales son todos los modelos de mall-mbg"],
+        examples=["cuales son todos los modulos y dependencias entre ellos?"],
     )
     page: int = Field(default=1, ge=1, description="Número de página (1-indexed).")
     page_size: int = Field(
@@ -304,7 +304,13 @@ class Citation(BaseModel):
     start_line: int = Field(description="Línea inicial de evidencia.")
     end_line: int = Field(description="Línea final de evidencia.")
     score: float = Field(description="Score de relevancia para la cita.")
-    reason: str = Field(description="Origen de la cita (hybrid_rag_match o inventory_graph_match).")
+    reason: str = Field(
+        description=(
+            "Origen de la cita (por ejemplo hybrid_rag_match, "
+            "inventory_graph_match, graph_file_dependency_match o "
+            "graph_external_dependency_source)."
+        )
+    )
 
 
 class QueryResponse(BaseModel):
@@ -579,6 +585,21 @@ class SemanticRelation(BaseModel):
     line: int
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     language: str
+    resolution_method: str | None = None
+
+
+class FileImportRelation(BaseModel):
+    """Import a nivel de archivo para dependencias top-level sin símbolo."""
+
+    repo_id: str
+    source_path: str
+    target_path: str | None = None
+    target_ref: str
+    target_kind: str
+    path: str
+    line: int
+    language: str
+    resolution_method: str | None = None
 
 
 class RetrievalChunk(BaseModel):

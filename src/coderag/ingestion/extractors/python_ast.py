@@ -8,6 +8,49 @@ from coderag.ingestion.extractors.base import SymbolDetection, SymbolSpan
 class PythonAstExtractor:
     """Extracts Python classes/functions and their exact spans using AST."""
 
+    class _DetectionVisitor(ast.NodeVisitor):
+        """Collect Python symbol detections while tracking class nesting."""
+
+        def __init__(self) -> None:
+            """Initialize the mutable detection state."""
+            self.class_stack: list[str] = []
+            self.detections: list[SymbolDetection] = []
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            """Record a class and recurse into its body."""
+            self.detections.append(
+                SymbolDetection(
+                    symbol_name=node.name,
+                    symbol_type="class",
+                    start_line=node.lineno,
+                )
+            )
+            self.class_stack.append(node.name)
+            self.generic_visit(node)
+            self.class_stack.pop()
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            """Record functions and methods with distinct symbol types."""
+            self.detections.append(
+                SymbolDetection(
+                    symbol_name=node.name,
+                    symbol_type=("method" if self.class_stack else "function"),
+                    start_line=node.lineno,
+                )
+            )
+            self.generic_visit(node)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            """Record async functions and methods with distinct symbol types."""
+            self.detections.append(
+                SymbolDetection(
+                    symbol_name=node.name,
+                    symbol_type=("method" if self.class_stack else "function"),
+                    start_line=node.lineno,
+                )
+            )
+            self.generic_visit(node)
+
     def detect_symbols(
         self,
         content: str,
@@ -20,34 +63,9 @@ class PythonAstExtractor:
         except (SyntaxError, ValueError):
             return []
 
-        detections: list[SymbolDetection] = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                detections.append(
-                    SymbolDetection(
-                        symbol_name=node.name,
-                        symbol_type="class",
-                        start_line=node.lineno,
-                    )
-                )
-                continue
-            if isinstance(node, ast.AsyncFunctionDef):
-                detections.append(
-                    SymbolDetection(
-                        symbol_name=node.name,
-                        symbol_type="function",
-                        start_line=node.lineno,
-                    )
-                )
-                continue
-            if isinstance(node, ast.FunctionDef):
-                detections.append(
-                    SymbolDetection(
-                        symbol_name=node.name,
-                        symbol_type="function",
-                        start_line=node.lineno,
-                    )
-                )
+        visitor = self._DetectionVisitor()
+        visitor.visit(tree)
+        detections = visitor.detections
 
         detections.sort(key=lambda item: (item.start_line, item.symbol_name))
         return detections

@@ -11,6 +11,8 @@ Reglas obligatorias:
 6) Identificar tecnologías, dependencias y decisiones arquitectónicas relevantes.
 7) Identificar restricciones técnicas, riesgos y oportunidades.
 8) Presentar hallazgos estructurados con secciones claras.
+9) Si la consulta pregunta dónde se importa, usa o configura algo, prioriza evidencia explícita de imports, wiring o bloques de dependencia de grafo antes que menciones textuales indirectas.
+10) Si no existe import directo en la evidencia, dilo explícitamente y distingue entre import directo, dependencia relacionada, uso indirecto o simple mención.
 """.strip()
 
 
@@ -21,6 +23,9 @@ def build_answer_prompt(query: str, context: str) -> str:
         "Contexto recuperado:\n"
         f"{context}\n\n"
         "Genera una respuesta completa y basada solo en evidencia. "
+        "Si la consulta es sobre imports o dependencias, prioriza evidencia explícita de líneas `import`/`from`, imports estáticos, o bloques `GRAPH_FILE_DEPENDENCY` y `GRAPH_EXTERNAL_DEPENDENCY`. "
+        "No confundas una mención textual del término con un import directo. "
+        "Si solo hay dependencias relacionadas o fuentes externas derivadas del grafo, repórtalo con esa precisión. "
         "Estructura tu respuesta con estas secciones cuando sea relevante:"
         "- **Resumen**: Resumen general de los hallazgos (2-3 oraciones)."
         "- **Análisis de la base de código**: Patrones clave, pila tecnológica, convenciones encontradas."

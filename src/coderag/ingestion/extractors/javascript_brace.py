@@ -24,6 +24,10 @@ _CLASS_PATTERN = re.compile(
     r"([A-Za-z_$][A-Za-z0-9_$]*)"
 )
 
+_INTERFACE_PATTERN = re.compile(
+    r"^\s*(?:export\s+)?interface\s+([A-Za-z_$][A-Za-z0-9_$]*)"
+)
+
 _ANONYMOUS_DEFAULT_CLASS_PATTERN = re.compile(
     r"^\s*export\s+default\s+class\s*(?:extends\s+[A-Za-z_$][A-Za-z0-9_$.]*)?\s*\{?"
 )
@@ -114,6 +118,17 @@ class JavaScriptBraceExtractor:
                     SymbolDetection(
                         symbol_name=class_match.group(1),
                         symbol_type="class",
+                        start_line=line_number,
+                    )
+                )
+                continue
+
+            interface_match = _INTERFACE_PATTERN.match(line)
+            if interface_match:
+                detections.append(
+                    SymbolDetection(
+                        symbol_name=interface_match.group(1),
+                        symbol_type="interface",
                         start_line=line_number,
                     )
                 )

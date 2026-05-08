@@ -645,3 +645,49 @@ def test_assemble_context_applies_token_limit() -> None:
     ]
     context = assemble_context(chunks=chunks, graph_records=[], max_tokens=30)
     assert len(context) <= 120
+
+
+def test_assemble_context_formats_file_and_external_graph_records() -> None:
+    """Renderiza dependencias de archivo y externas en bloques legibles."""
+    chunks = [
+        RetrievalChunk(
+            id="1",
+            text="def run():\n    return helper()",
+            score=1.0,
+            metadata={"path": "src/a.py", "start_line": 1, "end_line": 2},
+        )
+    ]
+    graph_records = [
+        {
+            "seed": "sym-1",
+            "labels": ["File"],
+            "props": {
+                "path": "src/deps.py",
+                "language": "python",
+                "module_path": "src",
+            },
+            "edge_count": 1,
+            "relation_types": ["IMPORTS_FILE"],
+        },
+        {
+            "seed": "sym-1",
+            "labels": ["ExternalSymbol"],
+            "props": {
+                "ref": "requests",
+                "language": "python",
+                "source_path": "src/a.py",
+            },
+            "edge_count": 1,
+            "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+        },
+    ]
+
+    context = assemble_context(chunks=chunks, graph_records=graph_records, max_tokens=400)
+
+    assert "GRAPH_CONTEXT:" in context
+    assert "GRAPH_FILE_DEPENDENCY" in context
+    assert "PATH: src/deps.py" in context
+    assert "RELATION_TYPES: IMPORTS_FILE" in context
+    assert "GRAPH_EXTERNAL_DEPENDENCY" in context
+    assert "REF: requests" in context
+    assert "SOURCE_PATH: src/a.py" in context

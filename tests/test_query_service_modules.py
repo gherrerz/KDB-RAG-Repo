@@ -38,6 +38,252 @@ def test_discover_repo_modules_uses_persisted_graph_modules(
     assert "node_modules" not in modules
 
 
+def test_apply_external_import_seed_boost_promotes_matching_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Promueve chunks cuyo path ya está conectado a IMPORTS_EXTERNAL_FILE."""
+
+    class _FakeGraphBuilder:
+        def query_external_import_source_paths(self, repo_id: str, candidates: list[str], limit: int = 100) -> list[dict[str, object]]:
+            assert repo_id == "repo1"
+            assert "neo4j.graphdatabase" in candidates
+            return [{"source_path": "src/coderag/ingestion/graph_builder.py", "match_score": 2}]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+
+    chunks = [
+        RetrievalChunk(
+            id="c1",
+            text="General config for services",
+            score=0.80,
+            metadata={"path": "src/config.py", "start_line": 1, "end_line": 5},
+        ),
+        RetrievalChunk(
+            id="c2",
+            text="from neo4j import GraphDatabase",
+            score=0.55,
+            metadata={
+                "path": "src/coderag/ingestion/graph_builder.py",
+                "symbol_name": "GraphBuilder",
+                "start_line": 1,
+                "end_line": 10,
+            },
+        ),
+    ]
+
+    boosted, boosted_count, matched_paths = query_service._apply_external_import_seed_boost(
+        repo_id="repo1",
+        query="where is neo4j.GraphDatabase imported",
+        chunks=chunks,
+    )
+
+    assert boosted_count == 1
+    assert matched_paths == {"src/coderag/ingestion/graph_builder.py": 2}
+    assert boosted[0].metadata["path"] == "src/coderag/ingestion/graph_builder.py"
+
+
+def test_build_external_import_seed_chunks_adds_missing_graph_seed_paths() -> None:
+    """Crea seeds sintéticos solo para archivos ausentes del resultado actual."""
+
+    chunks = [
+        RetrievalChunk(
+            id="c1",
+            text="existing chunk",
+            score=0.9,
+            metadata={"repo_id": "repo1", "path": "src/already.py", "start_line": 1, "end_line": 5},
+        )
+    ]
+
+    seed_chunks, seed_count = query_service._build_external_import_seed_chunks(
+        repo_id="repo1",
+        matched_paths={
+            "src/already.py": 1,
+            "src/coderag/ingestion/graph_builder.py": 2,
+        },
+        chunks=chunks,
+    )
+
+    assert seed_count == 1
+    assert seed_chunks[0].metadata["path"] == "src/coderag/ingestion/graph_builder.py"
+    assert seed_chunks[0].metadata["kind"] == "graph_external_seed"
+
+
+def test_run_retrieval_query_boosts_external_import_seed_paths_before_rerank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Aplica boost estructural externo antes del rerank para retener el archivo importador."""
+
+    class _Settings:
+        query_max_seconds = 30.0
+        max_context_tokens = 512
+        openai_embedding_model = "text-embedding-3-small"
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None) -> str:
+            return provider or "openai"
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, model: str | None) -> str:
+            _ = provider
+            return model or "text-embedding-3-small"
+
+    class _FakeGraphBuilder:
+        def query_external_import_source_paths(self, repo_id: str, candidates: list[str], limit: int = 100) -> list[dict[str, object]]:
+            assert repo_id == "repo1"
+            return [{"source_path": "src/coderag/ingestion/graph_builder.py", "match_score": 2}]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: [
+            RetrievalChunk(
+                id="c1",
+                text="Neo4j service ports",
+                score=0.70,
+                metadata={"path": "docker-compose.yml", "start_line": 1, "end_line": 20},
+            ),
+            RetrievalChunk(
+                id="c2",
+                text="from neo4j import GraphDatabase",
+                score=0.52,
+                metadata={
+                    "path": "src/coderag/ingestion/graph_builder.py",
+                    "symbol_name": "GraphBuilder",
+                    "start_line": 1,
+                    "end_line": 12,
+                },
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks[:top_k],
+    )
+    monkeypatch.setattr(
+        query_service,
+        "expand_with_graph_with_diagnostics",
+        lambda *, chunks, query=None: (
+            [],
+            {
+                "semantic_query_enabled": True,
+                "semantic_file_context_used": 0,
+                "semantic_file_context_pruned": 0,
+            },
+        ),
+    )
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="where is neo4j.GraphDatabase imported",
+        top_n=10,
+        top_k=1,
+        include_context=False,
+    )
+
+    assert result.chunks[0].path == "src/coderag/ingestion/graph_builder.py"
+    assert result.diagnostics["external_import_seed_boosted_count"] == 1
+
+
+def test_run_retrieval_query_adds_graph_seed_chunks_for_missing_external_import_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agrega seeds de archivo al graph expand aunque el archivo importador no esté en hybrid_search."""
+
+    class _Settings:
+        query_max_seconds = 30.0
+        max_context_tokens = 512
+        openai_embedding_model = "text-embedding-3-small"
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None) -> str:
+            return provider or "openai"
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, model: str | None) -> str:
+            _ = provider
+            return model or "text-embedding-3-small"
+
+    class _FakeGraphBuilder:
+        def query_external_import_source_paths(self, repo_id: str, candidates: list[str], limit: int = 100) -> list[dict[str, object]]:
+            return [{"source_path": "src/coderag/ingestion/graph_builder.py", "match_score": 2}]
+
+        def close(self) -> None:
+            return None
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: [
+            RetrievalChunk(
+                id="c1",
+                text="Neo4j service ports",
+                score=0.70,
+                metadata={"repo_id": "repo1", "path": "docker-compose.yml", "start_line": 1, "end_line": 20},
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks[:top_k],
+    )
+
+    def _fake_expand(*, chunks, query=None):
+        captured["paths"] = [str(chunk.metadata.get("path", "")) for chunk in chunks]
+        return (
+            [
+                {
+                    "seed": "src/coderag/ingestion/graph_builder.py",
+                    "labels": ["ExternalSymbol"],
+                    "props": {"ref": "neo4j.GraphDatabase"},
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                    "line": 4,
+                    "source_path": "src/coderag/ingestion/graph_builder.py",
+                }
+            ],
+            {
+                "semantic_query_enabled": True,
+                "semantic_file_context_used": 1,
+                "semantic_file_context_pruned": 0,
+            },
+        )
+
+    monkeypatch.setattr(
+        query_service,
+        "expand_with_graph_with_diagnostics",
+        _fake_expand,
+    )
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="where is neo4j.GraphDatabase imported",
+        top_n=10,
+        top_k=1,
+        include_context=True,
+    )
+
+    assert captured["paths"] == [
+        "docker-compose.yml",
+        "src/coderag/ingestion/graph_builder.py",
+    ]
+    assert "GRAPH_EXTERNAL_DEPENDENCY" in str(result.context)
+    assert result.diagnostics["external_import_seed_chunks_added_count"] == 1
+
+
 def test_is_inventory_query_detection() -> None:
     """Solo detecta inventario cuando el usuario lo pide explícitamente."""
     assert query_service._is_inventory_query(
@@ -275,6 +521,67 @@ def test_query_inventory_entities_uses_module_file_listing_for_components(
     assert graph.called_module_files
     assert len(entities) == 1
     assert entities[0]["path"] == "core/settings.py"
+
+
+def test_query_inventory_entities_keeps_distinct_external_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No colapsa dependencias externas distintas que salen del mismo archivo."""
+
+    class _Graph:
+        def query_inventory(
+            self,
+            repo_id: str,
+            target_term: str,
+            module_name: str | None,
+            limit: int,
+        ) -> list[dict]:
+            assert repo_id == "repo1"
+            assert module_name == "pkg"
+            if target_term == "dependency":
+                return [
+                    {
+                        "label": "requests",
+                        "path": "pkg/a.py",
+                        "kind": "external_dependency",
+                        "start_line": 2,
+                        "end_line": 2,
+                    },
+                    {
+                        "label": "numpy",
+                        "path": "pkg/a.py",
+                        "kind": "external_dependency",
+                        "start_line": 3,
+                        "end_line": 3,
+                    },
+                ]
+            if target_term == "dependencies":
+                return [
+                    {
+                        "label": "requests",
+                        "path": "pkg/a.py",
+                        "kind": "external_dependency",
+                        "start_line": 2,
+                        "end_line": 2,
+                    }
+                ]
+            return []
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "GraphBuilder", lambda: _Graph())
+
+    entities = query_service._query_inventory_entities(
+        repo_id="repo1",
+        target_term="dependencias",
+        module_name="pkg",
+    )
+
+    assert [(item["label"], item["path"]) for item in entities] == [
+        ("numpy", "pkg/a.py"),
+        ("requests", "pkg/a.py"),
+    ]
 
 
 def test_extract_module_name_is_generic() -> None:
@@ -969,6 +1276,579 @@ def test_run_retrieval_query_includes_context_when_enabled(
     assert result.context is not None
     assert "PATH: src/a.py" in result.context
     assert "context_assembly_ms" in result.diagnostics["stage_timings_ms"]
+
+
+def test_run_retrieval_query_smoke_includes_dependency_graph_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Integra contexto de dependencias de archivo y diagnostics semánticos en retrieval-only."""
+
+    class _Settings:
+        query_max_seconds = 30.0
+        max_context_tokens = 512
+        openai_embedding_model = "text-embedding-3-small"
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None) -> str:
+            return provider or "openai"
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, model: str | None) -> str:
+            _ = provider
+            return model or "text-embedding-3-small"
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: [
+            RetrievalChunk(
+                id="c1",
+                text="class AuthService handles external auth provider wiring",
+                score=0.92,
+                metadata={
+                    "path": "src/AuthService.java",
+                    "start_line": 10,
+                    "end_line": 20,
+                },
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
+
+    def _fake_expand(*, chunks, query=None):
+        assert query == "where is auth provider configured"
+        return (
+            [
+                {
+                    "seed": "c1",
+                    "labels": ["File"],
+                    "props": {
+                        "path": "src/config/auth_provider.py",
+                        "language": "python",
+                        "module_path": "src/config",
+                    },
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_FILE"],
+                },
+                {
+                    "seed": "c1",
+                    "labels": ["ExternalSymbol"],
+                    "props": {
+                        "ref": "auth-provider-sdk",
+                        "language": "python",
+                        "source_path": "src/AuthService.java",
+                    },
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                },
+            ],
+            {
+                "semantic_query_enabled": True,
+                "semantic_file_context_used": 2,
+                "semantic_file_context_pruned": 0,
+            },
+        )
+
+    monkeypatch.setattr(
+        query_service,
+        "expand_with_graph_with_diagnostics",
+        _fake_expand,
+    )
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="where is auth provider configured",
+        top_n=10,
+        top_k=5,
+        include_context=True,
+    )
+
+    assert result.context is not None
+    assert "GRAPH_FILE_DEPENDENCY" in result.context
+    assert "PATH: src/config/auth_provider.py" in result.context
+    assert "GRAPH_EXTERNAL_DEPENDENCY" in result.context
+    assert "REF: auth-provider-sdk" in result.context
+    assert result.statistics.graph_nodes_count == 2
+    assert result.diagnostics["semantic_file_context_used"] == 2
+    assert result.diagnostics["semantic_file_context_pruned"] == 0
+
+
+def test_run_retrieval_query_adds_graph_derived_citations_and_boosts_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Usa aristas de archivo para reordenar chunks y sumar citas derivadas."""
+
+    class _Settings:
+        query_max_seconds = 30.0
+        max_context_tokens = 512
+        openai_embedding_model = "text-embedding-3-small"
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None) -> str:
+            return provider or "openai"
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, model: str | None) -> str:
+            _ = provider
+            return model or "text-embedding-3-small"
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: [
+            RetrievalChunk(
+                id="c1",
+                text="Auth provider bootstrap",
+                score=0.80,
+                metadata={"path": "src/bootstrap.py", "start_line": 1, "end_line": 10},
+            ),
+            RetrievalChunk(
+                id="c2",
+                text="Runtime auth provider configuration",
+                score=0.70,
+                metadata={"path": "src/config/auth_provider.py", "start_line": 3, "end_line": 18},
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
+    monkeypatch.setattr(
+        query_service,
+        "expand_with_graph_with_diagnostics",
+        lambda *, chunks, query=None: (
+            [
+                {
+                    "seed": "c1",
+                    "labels": ["File"],
+                    "props": {
+                        "path": "src/config/auth_provider.py",
+                        "language": "python",
+                        "module_path": "src/config",
+                    },
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_FILE"],
+                },
+                {
+                    "seed": "c1",
+                    "labels": ["ExternalSymbol"],
+                    "props": {
+                        "ref": "auth-provider-sdk",
+                        "language": "python",
+                        "source_path": "src/bootstrap.py",
+                    },
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                    "line": 7,
+                },
+            ],
+            {
+                "semantic_query_enabled": True,
+                "semantic_file_context_used": 2,
+                "semantic_file_context_pruned": 0,
+            },
+        ),
+    )
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="where is auth provider configured",
+        top_n=10,
+        top_k=5,
+        include_context=False,
+    )
+
+    assert result.chunks[0].path == "src/config/auth_provider.py"
+    assert any(
+        citation.reason == "graph_file_dependency_match"
+        and citation.path == "src/config/auth_provider.py"
+        for citation in result.citations
+    )
+    assert any(
+        citation.reason == "graph_external_dependency_source"
+        and citation.path == "src/bootstrap.py"
+        and citation.start_line == 7
+        for citation in result.citations
+    )
+    assert result.diagnostics["semantic_graph_chunk_boosted_count"] == 2
+    assert result.diagnostics["semantic_graph_citations_count"] == 2
+
+
+def test_run_query_smoke_includes_dependency_graph_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Integra expansión de dependencias de archivo en query general sin LLM."""
+
+    class _Settings:
+        query_max_seconds = 30.0
+        max_context_tokens = 512
+        openai_timeout_seconds = 20.0
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None) -> str:
+            return provider or "openai"
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, model: str | None) -> str:
+            _ = provider
+            return model or "text-embedding-3-small"
+
+        @staticmethod
+        def is_verify_enabled() -> bool:
+            return True
+
+    class _AnswerClient:
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+            self.provider = "openai"
+            self.answer_model = "gpt-test"
+            self.verifier_model = "gpt-test"
+
+        enabled = False
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "AnswerClient", _AnswerClient)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: [
+            RetrievalChunk(
+                id="c1",
+                text=(
+                    "AuthService configures the external auth provider and "
+                    "delegates to runtime settings for initialization."
+                ),
+                score=0.95,
+                metadata={
+                    "path": "src/AuthService.java",
+                    "start_line": 10,
+                    "end_line": 24,
+                },
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_timed_module_discovery",
+        lambda repo_id, query: ([], 0.0),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_timed_graph_expand",
+        lambda chunks, query=None: (
+            [
+                {
+                    "seed": "c1",
+                    "labels": ["File"],
+                    "props": {
+                        "path": "src/config/auth_provider.py",
+                        "language": "python",
+                        "module_path": "src/config",
+                    },
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_FILE"],
+                },
+                {
+                    "seed": "c1",
+                    "labels": ["ExternalSymbol"],
+                    "props": {
+                        "ref": "auth-provider-sdk",
+                        "language": "python",
+                        "source_path": "src/AuthService.java",
+                    },
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                },
+            ],
+            1.25,
+            {
+                "semantic_query_enabled": True,
+                "semantic_file_context_used": 2,
+                "semantic_file_context_pruned": 0,
+            },
+        ),
+    )
+
+    result = query_service.run_query(
+        repo_id="repo1",
+        query="where is auth provider configured",
+        top_n=10,
+        top_k=5,
+    )
+
+    assert result.citations
+    assert result.citations[0].path == "src/AuthService.java"
+    assert result.diagnostics["graph_nodes"] == 2
+    assert result.diagnostics["semantic_file_context_used"] == 2
+    assert result.diagnostics["semantic_file_context_pruned"] == 0
+    assert result.diagnostics["fallback_reason"] == "not_configured"
+    assert result.diagnostics["context_sufficient"] is True
+
+
+def test_run_query_adds_graph_derived_citations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incorpora citas derivadas del grafo en query general cuando hay file-context."""
+
+    class _Settings:
+        query_max_seconds = 30.0
+        max_context_tokens = 512
+        openai_timeout_seconds = 20.0
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None) -> str:
+            return provider or "openai"
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, model: str | None) -> str:
+            _ = provider
+            return model or "text-embedding-3-small"
+
+        @staticmethod
+        def is_verify_enabled() -> bool:
+            return True
+
+    class _AnswerClient:
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+            self.provider = "openai"
+            self.answer_model = "gpt-test"
+            self.verifier_model = "gpt-test"
+
+        enabled = False
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "AnswerClient", _AnswerClient)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: [
+            RetrievalChunk(
+                id="c1",
+                text=(
+                    "Bootstrap loads auth provider settings and initializes "
+                    "the integration entrypoint for external auth."
+                ),
+                score=0.90,
+                metadata={"path": "src/bootstrap.py", "start_line": 1, "end_line": 14},
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_timed_module_discovery",
+        lambda repo_id, query: ([], 0.0),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_timed_graph_expand",
+        lambda chunks, query=None: (
+            [
+                {
+                    "seed": "c1",
+                    "labels": ["File"],
+                    "props": {
+                        "path": "src/config/auth_provider.py",
+                        "language": "python",
+                        "module_path": "src/config",
+                    },
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_FILE"],
+                },
+                {
+                    "seed": "c1",
+                    "labels": ["ExternalSymbol"],
+                    "props": {
+                        "ref": "auth-provider-sdk",
+                        "language": "python",
+                        "source_path": "src/bootstrap.py",
+                    },
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                    "line": 8,
+                },
+            ],
+            0.9,
+            {
+                "semantic_query_enabled": True,
+                "semantic_file_context_used": 2,
+                "semantic_file_context_pruned": 0,
+            },
+        ),
+    )
+
+    result = query_service.run_query(
+        repo_id="repo1",
+        query="where is auth provider configured",
+        top_n=10,
+        top_k=5,
+    )
+
+    assert any(
+        citation.reason == "graph_file_dependency_match"
+        and citation.path == "src/config/auth_provider.py"
+        for citation in result.citations
+    )
+    assert any(
+        citation.reason == "graph_external_dependency_source"
+        and citation.path == "src/bootstrap.py"
+        and citation.start_line == 8
+        for citation in result.citations
+    )
+    assert result.diagnostics["semantic_graph_citations_count"] == 2
+    assert result.diagnostics["semantic_graph_chunk_boosted_count"] == 1
+
+
+def test_run_query_passes_graph_file_context_to_llm_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entrega al LLM el contexto ensamblado con dependencias de archivo y externas."""
+
+    class _Settings:
+        query_max_seconds = 30.0
+        max_context_tokens = 512
+        openai_timeout_seconds = 20.0
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None) -> str:
+            return provider or "openai"
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, model: str | None) -> str:
+            _ = provider
+            return model or "text-embedding-3-small"
+
+        @staticmethod
+        def is_verify_enabled() -> bool:
+            return False
+
+    captured: dict[str, object] = {}
+
+    class _AnswerClient:
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+            self.provider = "openai"
+            self.answer_model = "gpt-test"
+            self.verifier_model = "gpt-test"
+
+        enabled = True
+
+        def answer(self, *, query: str, context: str, timeout_seconds: float) -> str:
+            captured["query"] = query
+            captured["context"] = context
+            captured["timeout_seconds"] = timeout_seconds
+            return "answer-from-llm"
+
+        def verify(self, *args, **kwargs):  # pragma: no cover - verify deshabilitado
+            raise AssertionError("verify no debe ejecutarse en esta prueba")
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "AnswerClient", _AnswerClient)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: [
+            RetrievalChunk(
+                id="c1",
+                text=(
+                    "Neo4j storage wiring imports the graph client and propagates "
+                    "configuration through graph-related helpers."
+                ),
+                score=0.91,
+                metadata={
+                    "path": "src/coderag/ingestion/semantic_python.py",
+                    "start_line": 168,
+                    "end_line": 187,
+                },
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_timed_module_discovery",
+        lambda repo_id, query: ([], 0.0),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_timed_graph_expand",
+        lambda chunks, query=None: (
+            [
+                {
+                    "seed": "c1",
+                    "labels": ["File"],
+                    "props": {
+                        "path": "src/coderag/core/storage_health.py",
+                        "language": "python",
+                        "module_path": "src/coderag/core",
+                    },
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_FILE"],
+                },
+                {
+                    "seed": "c1",
+                    "labels": ["ExternalSymbol"],
+                    "props": {
+                        "ref": "neo4j",
+                        "language": "python",
+                        "source_path": "src/coderag/ingestion/semantic_python.py",
+                    },
+                    "edge_count": 1,
+                    "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                    "line": 12,
+                },
+            ],
+            0.8,
+            {
+                "semantic_query_enabled": True,
+                "semantic_file_context_used": 2,
+                "semantic_file_context_pruned": 0,
+            },
+        ),
+    )
+    monkeypatch.setattr(query_service, "_is_context_sufficient", lambda **kwargs: True)
+
+    result = query_service.run_query(
+        repo_id="repo1",
+        query="where is neo4j imported",
+        top_n=10,
+        top_k=5,
+    )
+
+    assert result.answer == "answer-from-llm"
+    assert captured["query"] == "where is neo4j imported"
+    assert "GRAPH_FILE_DEPENDENCY" in str(captured["context"])
+    assert "PATH: src/coderag/core/storage_health.py" in str(captured["context"])
+    assert "GRAPH_EXTERNAL_DEPENDENCY" in str(captured["context"])
+    assert "REF: neo4j" in str(captured["context"])
+    assert "SOURCE_PATH: src/coderag/ingestion/semantic_python.py" in str(
+        captured["context"]
+    )
+    assert result.diagnostics["semantic_file_context_used"] == 2
+    assert result.diagnostics["semantic_graph_citations_count"] == 2
+    assert result.diagnostics["fallback_reason"] is None
 
 
 def test_run_retrieval_query_routes_inventory_intent_without_llm(

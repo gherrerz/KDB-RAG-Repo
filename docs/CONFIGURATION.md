@@ -131,10 +131,13 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 
 ### Grafo semantico (experimental)
 
-- `SEMANTIC_GRAPH_ENABLED`: activa extraccion semantica Python en ingesta. Default: `false`.
-- `SEMANTIC_GRAPH_JAVA_ENABLED`: activa extractor semantico Java fase 1. Default: `false`.
-- `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED`: activa extractor semantico TypeScript fase 1. Default: `false`.
-- `SEMANTIC_GRAPH_QUERY_ENABLED`: activa expansion semantica en query. Default: `false`.
+- `SEMANTIC_GRAPH_ENABLED`: activa extraccion semantica Python en ingesta. Default: `true`.
+- `SEMANTIC_GRAPH_JAVA_ENABLED`: activa extractor semantico Java fase 1. Default: `true`.
+- `SEMANTIC_GRAPH_JAVASCRIPT_ENABLED`: activa extractor semantico JavaScript fase 1. Default: `true`.
+- `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED`: activa extractor semantico TypeScript fase 1. Default: `true`.
+- `SEMANTIC_GRAPH_FILE_EDGES_ENABLED`: persiste aristas derivadas `(:File)-[:IMPORTS_FILE]->(:File)` a partir de relaciones semanticas resueltas. Default: `true`.
+- `SEMANTIC_TSCONFIG_RESOLUTION_ENABLED`: habilita resolucion de `baseUrl` y `paths` desde el primer `tsconfig.json` o `jsconfig.json` escaneado para imports JS/TS no relativos. Default: `true`.
+- `SEMANTIC_GRAPH_QUERY_ENABLED`: activa expansion semantica en query. Default: `true`.
 - `SEMANTIC_RELATION_TYPES`: tipos de relacion considerados en expansion semantica. Default: `CALLS,IMPORTS,EXTENDS,IMPLEMENTS`.
 - `SEMANTIC_RELATION_WEIGHTS`: pesos por tipo para scoring semantico. Default: `CALLS:1.0,IMPORTS:0.7,EXTENDS:1.1,IMPLEMENTS:1.0`.
 - `SEMANTIC_GRAPH_QUERY_MAX_EDGES`: tope de aristas por query semantica. Default: `400`.
@@ -199,6 +202,12 @@ GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
 - Si `SEMANTIC_GRAPH_JAVA_ENABLED=true` o
   `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED=true`, se activan extractores fase 1 para
   esos lenguajes.
+- Si `SEMANTIC_TSCONFIG_RESOLUTION_ENABLED=true`, los extractores JS/TS intentan
+  resolver imports no relativos usando `compilerOptions.baseUrl` y
+  `compilerOptions.paths` del primer `tsconfig.json` o `jsconfig.json` disponible.
+- Si `SEMANTIC_GRAPH_FILE_EDGES_ENABLED=true`, la persistencia a Neo4j agrega
+  aristas derivadas entre archivos a partir de relaciones `Symbol -> Symbol`
+  ya resueltas, sin cambiar el contrato de expansión semántica por símbolos.
 - Si `SEMANTIC_GRAPH_QUERY_ENABLED=true`, la expansion de grafo en query usa
   `SEMANTIC_RELATION_TYPES` y `SEMANTIC_RELATION_WEIGHTS` respetando budgets.
 - `NEO4J_URI` cambia por entorno:

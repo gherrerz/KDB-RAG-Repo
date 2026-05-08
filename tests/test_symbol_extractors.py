@@ -25,6 +25,28 @@ def test_python_ast_extractor_resolves_full_function_span() -> None:
     assert span.end_line == 4
 
 
+def test_python_ast_extractor_distinguishes_methods_from_functions() -> None:
+    """Python class members should be emitted as method symbols."""
+    content = (
+        "class Service:\n"
+        "    def run(self):\n"
+        "        return 1\n\n"
+        "def helper():\n"
+        "    return 2\n"
+    )
+    extractor = PythonAstExtractor()
+
+    detections = extractor.detect_symbols(content)
+
+    run_detection = next(item for item in detections if item.symbol_name == "run")
+    helper_detection = next(
+        item for item in detections if item.symbol_name == "helper"
+    )
+
+    assert run_detection.symbol_type == "method"
+    assert helper_detection.symbol_type == "function"
+
+
 def test_java_brace_extractor_resolves_balanced_class_span() -> None:
     """Java extractor should close at the matching class brace."""
     content = (
@@ -101,6 +123,24 @@ def test_javascript_brace_extractor_detects_typed_class_method() -> None:
     assert target.symbol_type == "method"
     assert span.start_line == 2
     assert span.end_line == 4
+
+
+def test_javascript_brace_extractor_detects_typescript_interface() -> None:
+    """TS interfaces should be indexed as interface symbols."""
+    content = (
+        "export interface Contract {\n"
+        "  run(): void;\n"
+        "}\n"
+    )
+    extractor = JavaScriptBraceExtractor()
+
+    detections = extractor.detect_symbols(content, path="src/contract.ts")
+    target = next(item for item in detections if item.symbol_name == "Contract")
+    span = extractor.resolve_span(content, target)
+
+    assert target.symbol_type == "interface"
+    assert span.start_line == 1
+    assert span.end_line == 3
 
 
 def test_javascript_brace_extractor_maps_anonymous_default_export_by_filename() -> None:

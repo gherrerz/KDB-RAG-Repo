@@ -296,6 +296,175 @@ def _is_inventory_query(query: str) -> bool:
     return any(token in normalized for token in inventory_tokens)
 
 
+def _is_external_import_query(query: str) -> bool:
+    """Detecta consultas sobre imports/dependencias externas."""
+    normalized = query.lower()
+    signals = (
+        "import",
+        "imported",
+        "imports",
+        "dependency",
+        "dependencies",
+        "dependencia",
+        "dependencias",
+    )
+    return any(token in normalized for token in signals)
+
+
+def _extract_external_import_candidates(query: str) -> tuple[str, ...]:
+    """Extrae refs candidatas para resolver imports externos desde la query."""
+    excluded = {
+        "where",
+        "is",
+        "the",
+        "a",
+        "an",
+        "in",
+        "of",
+        "from",
+        "to",
+        "used",
+        "by",
+        "import",
+        "imported",
+        "imports",
+        "dependency",
+        "dependencies",
+        "dependencia",
+        "dependencias",
+        "donde",
+        "dónde",
+        "esta",
+        "está",
+        "se",
+        "que",
+        "qué",
+        "el",
+        "la",
+        "los",
+        "las",
+        "en",
+        "archivo",
+        "file",
+    }
+    candidates: list[str] = []
+    for match in re.finditer(r"[A-Za-z_][A-Za-z0-9_.-]{1,}", query):
+        token = match.group(0).strip().lower().strip("._-")
+        if len(token) < 3 or token in excluded:
+            continue
+        candidates.append(token)
+        if "." in token:
+            head = token.split(".", maxsplit=1)[0].strip("._-")
+            if len(head) >= 3 and head not in excluded:
+                candidates.append(head)
+    return tuple(dict.fromkeys(candidates))
+
+
+def _resolve_external_import_source_paths(repo_id: str, query: str) -> dict[str, int]:
+    """Busca archivos conectados a imports externos relevantes para la query."""
+    if not _is_external_import_query(query):
+        return {}
+
+    candidates = _extract_external_import_candidates(query)
+    if not candidates:
+        return {}
+
+    graph = GraphBuilder()
+    try:
+        rows = graph.query_external_import_source_paths(
+            repo_id=repo_id,
+            candidates=list(candidates),
+            limit=100,
+        )
+    except Exception:
+        return {}
+    finally:
+        graph.close()
+
+    results: dict[str, int] = {}
+    for row in rows:
+        source_path = str(row.get("source_path", "") or "").strip()
+        match_score = int(row.get("match_score", 0) or 0)
+        if source_path:
+            results[source_path] = max(match_score, results.get(source_path, 0))
+    return results
+
+
+def _apply_external_import_seed_boost(
+    repo_id: str,
+    query: str,
+    chunks: list[RetrievalChunk],
+) -> tuple[list[RetrievalChunk], int, dict[str, int]]:
+    """Da prioridad previa al rerank a archivos respaldados por IMPORTS_EXTERNAL_FILE."""
+    if not chunks:
+        return chunks, 0, {}
+
+    matched_paths = _resolve_external_import_source_paths(repo_id=repo_id, query=query)
+    if not matched_paths:
+        return chunks, 0, {}
+
+    candidates = _extract_external_import_candidates(query)
+    boosted_count = 0
+    rescored: list[tuple[float, RetrievalChunk]] = []
+    for chunk in chunks:
+        path = str(chunk.metadata.get("path", "") or "").strip()
+        boost = 0.0
+        if path in matched_paths:
+            boost += 0.28 + min(0.18, 0.06 * max(0, matched_paths[path] - 1))
+            haystack = " ".join(
+                [
+                    path.lower(),
+                    str(chunk.metadata.get("symbol_name", "") or "").lower(),
+                    chunk.text.lower(),
+                ]
+            )
+            if any(candidate in haystack for candidate in candidates):
+                boost += 0.12
+        if boost > 0:
+            boosted_count += 1
+            chunk.score = float(chunk.score) + boost
+        rescored.append((float(chunk.score), chunk))
+
+    rescored.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in rescored], boosted_count, matched_paths
+
+
+def _build_external_import_seed_chunks(
+    repo_id: str,
+    matched_paths: dict[str, int],
+    chunks: list[RetrievalChunk],
+) -> tuple[list[RetrievalChunk], int]:
+    """Crea seeds sintéticos mínimos para graph expansion cuando falta el archivo importador."""
+    if not matched_paths:
+        return [], 0
+
+    existing_paths = {
+        str(chunk.metadata.get("path", "") or "").strip() for chunk in chunks
+    }
+    seed_chunks: list[RetrievalChunk] = []
+    for path, match_score in sorted(
+        matched_paths.items(),
+        key=lambda item: (-int(item[1]), item[0]),
+    ):
+        if not path or path in existing_paths:
+            continue
+        seed_chunks.append(
+            RetrievalChunk(
+                id=f"external-seed:{repo_id}:{path}",
+                text=f"Graph-backed external import seed for {path}",
+                score=0.45 + min(0.20, 0.08 * max(0, match_score - 1)),
+                metadata={
+                    "repo_id": repo_id,
+                    "path": path,
+                    "start_line": 1,
+                    "end_line": 1,
+                    "kind": "graph_external_seed",
+                },
+            )
+        )
+    return seed_chunks, len(seed_chunks)
+
+
 def _is_literal_code_query(query: str) -> bool:
     """Detecta solicitudes para devolver código literal de archivo completo."""
     normalized = query.lower()
@@ -1470,12 +1639,24 @@ def _query_inventory_entities(
             entities = alias_results.get(alias, [])
             for item in entities:
                 path = str(item.get("path", ""))
+                label = str(item.get("label", ""))
+                kind = str(item.get("kind", "file"))
                 start_line = int(item.get("start_line", 1))
                 end_line = int(item.get("end_line", 1))
-                key = (path, start_line, end_line)
+                if canonical_target in DEPENDENCY_INVENTORY_TERMS:
+                    key = (path, start_line, end_line, label, kind)
+                else:
+                    key = (path, start_line, end_line)
                 if key not in entities_by_key:
                     entities_by_key[key] = item
-        return sorted(entities_by_key.values(), key=lambda item: item.get("path", ""))
+        return sorted(
+            entities_by_key.values(),
+            key=lambda item: (
+                str(item.get("path", "")),
+                str(item.get("label", "")),
+                str(item.get("kind", "")),
+            ),
+        )
     except Exception:
         return []
     finally:
@@ -1575,6 +1756,101 @@ def _citation_priority(citation: Citation) -> tuple[int, float]:
     return (rank, -citation.score)
 
 
+def _graph_context_paths(graph_records: list[dict]) -> tuple[set[str], set[str]]:
+    """Resume paths internos y fuentes externas presentes en graph_context."""
+    file_dependency_paths: set[str] = set()
+    external_source_paths: set[str] = set()
+    for record in graph_records:
+        labels = {str(label) for label in (record.get("labels") or [])}
+        relation_types = {
+            str(item) for item in (record.get("relation_types") or []) if str(item)
+        }
+        props = record.get("props") or {}
+        if "File" in labels and "IMPORTS_FILE" in relation_types:
+            path = str(props.get("path", "") or "").strip()
+            if path:
+                file_dependency_paths.add(path)
+        if "ExternalSymbol" in labels and "IMPORTS_EXTERNAL_FILE" in relation_types:
+            source_path = str(
+                record.get("source_path") or props.get("source_path") or ""
+            ).strip()
+            if source_path:
+                external_source_paths.add(source_path)
+    return file_dependency_paths, external_source_paths
+
+
+def _apply_graph_context_chunk_boost(
+    chunks: list[RetrievalChunk],
+    graph_records: list[dict],
+) -> tuple[list[RetrievalChunk], int]:
+    """Aplica un boost liviano a chunks respaldados por aristas de archivo."""
+    if not chunks or not graph_records:
+        return chunks, 0
+
+    file_dependency_paths, external_source_paths = _graph_context_paths(graph_records)
+    boosted_count = 0
+    rescored: list[tuple[float, RetrievalChunk]] = []
+    for chunk in chunks:
+        path = str(chunk.metadata.get("path", "") or "")
+        boost = 0.0
+        if path in file_dependency_paths:
+            boost += 0.28
+        if path in external_source_paths:
+            boost += 0.12
+        if boost > 0:
+            boosted_count += 1
+            chunk.score = float(chunk.score) + boost
+        rescored.append((float(chunk.score), chunk))
+
+    rescored.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in rescored], boosted_count
+
+
+def _build_graph_context_citations(graph_records: list[dict]) -> list[Citation]:
+    """Construye citas derivadas desde aristas File -> File y externas."""
+    citations: list[Citation] = []
+    seen: set[tuple[str, int, int, str]] = set()
+    for record in graph_records:
+        labels = {str(label) for label in (record.get("labels") or [])}
+        relation_types = {
+            str(item) for item in (record.get("relation_types") or []) if str(item)
+        }
+        props = record.get("props") or {}
+
+        path = ""
+        line = 1
+        score = 0.7
+        reason = ""
+        if "File" in labels and "IMPORTS_FILE" in relation_types:
+            path = str(props.get("path", "") or "").strip()
+            reason = "graph_file_dependency_match"
+            score = 0.75
+        elif "ExternalSymbol" in labels and "IMPORTS_EXTERNAL_FILE" in relation_types:
+            path = str(
+                record.get("source_path") or props.get("source_path") or ""
+            ).strip()
+            line = int(record.get("line", 1) or 1)
+            reason = "graph_external_dependency_source"
+            score = 0.7
+
+        if not path:
+            continue
+        key = (path, line, line, reason)
+        if key in seen:
+            continue
+        seen.add(key)
+        citations.append(
+            Citation(
+                path=path,
+                start_line=line,
+                end_line=line,
+                score=score,
+                reason=reason,
+            )
+        )
+    return citations
+
+
 def _safe_discover_repo_modules(repo_id: str, query: str) -> list[str]:
     """Descubre módulos solo cuando la consulta contiene intención de módulo."""
     if not _is_module_query(query):
@@ -1587,10 +1863,14 @@ def _safe_discover_repo_modules(repo_id: str, query: str) -> list[str]:
 
 def _timed_graph_expand(
     chunks: list[RetrievalChunk],
+    query: str | None = None,
 ) -> tuple[list[dict], float, dict[str, object]]:
     """Ejecuta expansión de grafo y devuelve resultado/latencia/diagnostics."""
     started_at = monotonic()
-    result, semantic_diagnostics = expand_with_graph_with_diagnostics(chunks=chunks)
+    result, semantic_diagnostics = expand_with_graph_with_diagnostics(
+        chunks=chunks,
+        query=query,
+    )
     return result, _elapsed_milliseconds(started_at), semantic_diagnostics
 
 
@@ -1906,15 +2186,47 @@ def run_retrieval_query(
     )
     stage_timings["hybrid_search_ms"] = _elapsed_milliseconds(retrieval_started_at)
 
+    external_seed_started_at = monotonic()
+    initial, external_import_seed_boosted_count, external_import_matched_paths = _apply_external_import_seed_boost(
+        repo_id=repo_id,
+        query=query,
+        chunks=initial,
+    )
+    stage_timings["external_import_seed_boost_ms"] = _elapsed_milliseconds(
+        external_seed_started_at
+    )
+
     rerank_started_at = monotonic()
     reranked = rerank(query=query, chunks=initial, top_k=top_k)
     stage_timings["rerank_ms"] = _elapsed_milliseconds(rerank_started_at)
 
+    graph_seed_chunks, external_import_seed_chunks_added_count = _build_external_import_seed_chunks(
+        repo_id=repo_id,
+        matched_paths=external_import_matched_paths,
+        chunks=reranked,
+    )
+    graph_seed_input = reranked + graph_seed_chunks
+
     graph_started_at = monotonic()
     graph_context, semantic_expand_diagnostics = expand_with_graph_with_diagnostics(
-        chunks=reranked
+        chunks=graph_seed_input,
+        query=query,
     )
     stage_timings["graph_expand_ms"] = _elapsed_milliseconds(graph_started_at)
+    reranked, graph_chunk_boosted_count = _apply_graph_context_chunk_boost(
+        reranked,
+        graph_context,
+    )
+    semantic_expand_diagnostics = dict(semantic_expand_diagnostics)
+    semantic_expand_diagnostics["external_import_seed_boosted_count"] = (
+        external_import_seed_boosted_count
+    )
+    semantic_expand_diagnostics["external_import_seed_chunks_added_count"] = (
+        external_import_seed_chunks_added_count
+    )
+    semantic_expand_diagnostics["semantic_graph_chunk_boosted_count"] = (
+        graph_chunk_boosted_count
+    )
 
     context: str | None = None
     context_chars = 0
@@ -1928,6 +2240,10 @@ def run_retrieval_query(
         stage_timings["context_assembly_ms"] = _elapsed_milliseconds(context_started_at)
         context_chars = len(context)
 
+    graph_citations = _build_graph_context_citations(graph_context)
+    semantic_expand_diagnostics["semantic_graph_citations_count"] = len(
+        graph_citations
+    )
     raw_citations = [
         Citation(
             path=item.metadata.get("path", "unknown"),
@@ -1937,7 +2253,7 @@ def run_retrieval_query(
             reason="hybrid_rag_match",
         )
         for item in reranked
-    ]
+    ] + graph_citations
     filtered_citations = [
         item for item in raw_citations if not is_noisy_path(item.path)
     ]
@@ -2072,19 +2388,50 @@ def run_query(
     )
     stage_timings["hybrid_search_ms"] = _elapsed_milliseconds(retrieval_started_at)
 
+    external_seed_started_at = monotonic()
+    initial, external_import_seed_boosted_count, external_import_matched_paths = _apply_external_import_seed_boost(
+        repo_id=repo_id,
+        query=query,
+        chunks=initial,
+    )
+    stage_timings["external_import_seed_boost_ms"] = _elapsed_milliseconds(
+        external_seed_started_at
+    )
+
     rerank_started_at = monotonic()
     reranked = rerank(query=query, chunks=initial, top_k=top_k)
     stage_timings["rerank_ms"] = _elapsed_milliseconds(rerank_started_at)
 
+    graph_seed_chunks, external_import_seed_chunks_added_count = _build_external_import_seed_chunks(
+        repo_id=repo_id,
+        matched_paths=external_import_matched_paths,
+        chunks=reranked,
+    )
+    graph_seed_input = reranked + graph_seed_chunks
+
     parallel_started_at = monotonic()
     with ThreadPoolExecutor(max_workers=2) as executor:
-        graph_future = executor.submit(_timed_graph_expand, reranked)
+        graph_future = executor.submit(_timed_graph_expand, graph_seed_input, query)
         modules_future = executor.submit(_timed_module_discovery, repo_id, query)
         graph_context, graph_ms, semantic_expand_diagnostics = graph_future.result()
         discovered_modules, module_ms = modules_future.result()
     stage_timings["graph_expand_ms"] = graph_ms
     stage_timings["module_discovery_ms"] = module_ms
     stage_timings["post_rerank_parallel_ms"] = _elapsed_milliseconds(parallel_started_at)
+    reranked, graph_chunk_boosted_count = _apply_graph_context_chunk_boost(
+        reranked,
+        graph_context,
+    )
+    semantic_expand_diagnostics = dict(semantic_expand_diagnostics)
+    semantic_expand_diagnostics["external_import_seed_boosted_count"] = (
+        external_import_seed_boosted_count
+    )
+    semantic_expand_diagnostics["external_import_seed_chunks_added_count"] = (
+        external_import_seed_chunks_added_count
+    )
+    semantic_expand_diagnostics["semantic_graph_chunk_boosted_count"] = (
+        graph_chunk_boosted_count
+    )
 
     context_started_at = monotonic()
     context = assemble_context(
@@ -2102,6 +2449,10 @@ def run_query(
         context = f"{module_block}\n\n{context}"
     stage_timings["context_assembly_ms"] = _elapsed_milliseconds(context_started_at)
 
+    graph_citations = _build_graph_context_citations(graph_context)
+    semantic_expand_diagnostics["semantic_graph_citations_count"] = len(
+        graph_citations
+    )
     raw_citations = [
         Citation(
             path=item.metadata.get("path", "unknown"),
@@ -2111,7 +2462,7 @@ def run_query(
             reason="hybrid_rag_match",
         )
         for item in reranked
-    ]
+    ] + graph_citations
 
     filtered_citations = [
         item for item in raw_citations if not is_noisy_path(item.path)

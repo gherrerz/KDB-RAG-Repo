@@ -6,6 +6,7 @@ from time import perf_counter
 from typing import Callable
 
 from coderag.core.models import (
+    FileImportRelation,
     RepoAuthConfig,
     ScannedFile,
     SemanticRelation,
@@ -67,6 +68,19 @@ def _symbol_observability_summary(
         f"span_p95={p95_span}, "
         f"chunks_span_gt_30={long_spans}"
     )
+
+
+def _summarize_file_import_relations(
+    file_import_relations: list[FileImportRelation],
+) -> tuple[int, int, int]:
+    """Resume imports top-level a nivel archivo por destino interno/externo."""
+    internal_count = sum(
+        1 for item in file_import_relations if item.target_kind == "file"
+    )
+    external_count = sum(
+        1 for item in file_import_relations if item.target_kind == "external"
+    )
+    return len(file_import_relations), internal_count, external_count
 
 
 def _parse_csv_set(raw_value: str, prefix_dot: bool = False) -> set[str]:
@@ -469,11 +483,13 @@ def _index_graph(
         getattr(settings, "semantic_graph_typescript_enabled", False)
     )
     semantic_relations: list[SemanticRelation] = []
+    file_import_relations: list[FileImportRelation] = []
 
     if semantic_enabled:
         started_at = perf_counter()
         extraction_failed = False
         extraction_error: str | None = None
+        python_resolution_source_counts: dict[str, int] = {}
         java_resolution_source_counts: dict[str, int] = {}
         javascript_resolution_source_counts: dict[str, int] = {}
         typescript_resolution_source_counts: dict[str, int] = {}
@@ -482,6 +498,8 @@ def _index_graph(
                 repo_id=repo_id,
                 scanned_files=scanned_files,
                 symbols=symbols,
+                resolution_stats_sink=python_resolution_source_counts,
+                file_imports_sink=file_import_relations,
             )
             semantic_relations.extend(python_relations)
 
@@ -534,6 +552,27 @@ def _index_graph(
             Counter(item.relation_type for item in java_cross_file_relations)
         )
         java_cross_file_resolved_count = len(java_cross_file_relations)
+        javascript_cross_file_relations = [
+            item
+            for item in semantic_relations
+            if item.language == "javascript"
+            and item.target_symbol_id is not None
+            and symbol_path_by_id.get(item.target_symbol_id, item.path) != item.path
+        ]
+        javascript_cross_file_resolved_count = len(javascript_cross_file_relations)
+        typescript_cross_file_relations = [
+            item
+            for item in semantic_relations
+            if item.language == "typescript"
+            and item.target_symbol_id is not None
+            and symbol_path_by_id.get(item.target_symbol_id, item.path) != item.path
+        ]
+        typescript_cross_file_resolved_count = len(typescript_cross_file_relations)
+        (
+            python_top_level_file_import_count,
+            python_top_level_file_import_internal_count,
+            python_top_level_file_import_external_count,
+        ) = _summarize_file_import_relations(file_import_relations)
         unresolved_by_type = dict(
             Counter(
                 item.relation_type
@@ -557,6 +596,14 @@ def _index_graph(
                 f"relation_counts_by_type={relation_counts_by_type}, "
                 f"java_cross_file_resolved_count={java_cross_file_resolved_count}, "
                 f"java_cross_file_resolved_by_type={java_cross_file_resolved_by_type}, "
+                f"javascript_cross_file_resolved_count={javascript_cross_file_resolved_count}, "
+                f"typescript_cross_file_resolved_count={typescript_cross_file_resolved_count}, "
+                f"python_resolution_source_counts={python_resolution_source_counts}, "
+                f"python_top_level_file_import_count={python_top_level_file_import_count}, "
+                "python_top_level_file_import_internal_count="
+                f"{python_top_level_file_import_internal_count}, "
+                "python_top_level_file_import_external_count="
+                f"{python_top_level_file_import_external_count}, "
                 f"java_resolution_source_counts={java_resolution_source_counts}, "
                 f"javascript_resolution_source_counts={javascript_resolution_source_counts}, "
                 f"typescript_resolution_source_counts={typescript_resolution_source_counts}, "
@@ -574,6 +621,22 @@ def _index_graph(
                 "java_cross_file_resolved_count": java_cross_file_resolved_count,
                 "java_cross_file_resolved_by_type": (
                     java_cross_file_resolved_by_type
+                ),
+                "javascript_cross_file_resolved_count": (
+                    javascript_cross_file_resolved_count
+                ),
+                "typescript_cross_file_resolved_count": (
+                    typescript_cross_file_resolved_count
+                ),
+                "python_resolution_source_counts": python_resolution_source_counts,
+                "python_top_level_file_import_count": (
+                    python_top_level_file_import_count
+                ),
+                "python_top_level_file_import_internal_count": (
+                    python_top_level_file_import_internal_count
+                ),
+                "python_top_level_file_import_external_count": (
+                    python_top_level_file_import_external_count
                 ),
                 "java_resolution_source_counts": java_resolution_source_counts,
                 "javascript_resolution_source_counts": (
@@ -598,6 +661,12 @@ def _index_graph(
             "relation_counts_by_type": {},
             "java_cross_file_resolved_count": 0,
             "java_cross_file_resolved_by_type": {},
+            "javascript_cross_file_resolved_count": 0,
+            "typescript_cross_file_resolved_count": 0,
+            "python_resolution_source_counts": {},
+            "python_top_level_file_import_count": 0,
+            "python_top_level_file_import_internal_count": 0,
+            "python_top_level_file_import_external_count": 0,
             "java_resolution_source_counts": {},
             "javascript_resolution_source_counts": {},
             "typescript_resolution_source_counts": {},
@@ -614,6 +683,7 @@ def _index_graph(
             scanned_files=scanned_files,
             symbols=symbols,
             semantic_relations=semantic_relations,
+            file_import_relations=file_import_relations,
         )
     finally:
         graph.close()

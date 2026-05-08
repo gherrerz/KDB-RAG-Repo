@@ -71,6 +71,15 @@ Ejecuta consulta de inventario paginada.
 - Error responses:
   - `503`: preflight de storage falló antes de inventory query (`detail` es objeto)
 
+Notas de comportamiento:
+
+- Para objetivos de inventario como `dependency`, `dependencies`,
+  `dependencia` o `dependencias`, el endpoint consulta aristas de archivo
+  persistidas en Neo4j.
+- En ese modo, `items[].kind` puede ser `file_dependency` para dependencias
+  internas entre archivos del repositorio o `external_dependency` para
+  imports externos asociados al archivo fuente citado.
+
 ### Catalog
 
 #### GET /repos
@@ -244,6 +253,10 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 - `semantic_relation_types`: tipos de relación usados para expansión (`SEMANTIC_RELATION_TYPES`)
 - `semantic_edges_used`: aristas efectivamente usadas por expansión
 - `semantic_nodes_used`: nodos de grafo efectivamente incorporados
+- `semantic_file_context_used`: nodos adicionales incorporados desde `IMPORTS_FILE` e `IMPORTS_EXTERNAL_FILE`
+- `semantic_file_context_pruned`: nodos de file-context descartados por budget
+- `semantic_graph_chunk_boosted_count`: chunks rerankeados por señal de aristas de archivo
+- `semantic_graph_citations_count`: citas derivadas agregadas desde aristas de archivo
 - `semantic_expand_ms`: latencia de expansión semántica
 - `semantic_pruned_edges`: aristas podadas por budgets de query
 - `semantic_noise_ratio`: proporción de aristas podadas sobre total evaluado
@@ -294,6 +307,13 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 | `end_line` | `int` | sí |
 | `score` | `float` | sí |
 | `reason` | `str` | sí |
+
+Valores frecuentes de `reason`:
+
+- `hybrid_rag_match`: evidencia proveniente del retrieval híbrido principal.
+- `inventory_graph_match`: evidencia generada por el flujo de inventario.
+- `graph_file_dependency_match`: evidencia derivada de una arista `File -> File` relevante para la query.
+- `graph_external_dependency_source`: evidencia derivada de un import externo, citando el archivo fuente donde aparece.
 
 ### QueryResponse
 
@@ -363,6 +383,8 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 Notas operativas de inventory/discovery:
 
 - La explicación textual usa `purpose_summary` persistido en Neo4j cuando está disponible.
+- El inventario de dependencias usa `IMPORTS_FILE` e `IMPORTS_EXTERNAL_FILE`
+  cuando esas aristas existen en el grafo del repositorio.
 - Para frontend React/Next, la ingesta ahora reconoce heurísticas de archivo como
   `page.tsx`, `layout.tsx`, `loading.tsx`, `route.ts` y `middleware.ts`, además de
   hooks `use*` y providers `*Provider`, para describir mejor el propósito del archivo

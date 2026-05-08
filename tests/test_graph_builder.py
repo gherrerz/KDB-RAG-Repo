@@ -4,7 +4,13 @@ from typing import Any
 
 import pytest
 
-from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.core.models import (
+    FileImportRelation,
+    ScannedFile,
+    SemanticRelation,
+    SymbolChunk,
+)
+import coderag.ingestion.graph_builder as graph_builder_module
 from coderag.ingestion.graph_builder import GraphBuilder
 
 
@@ -122,6 +128,7 @@ def test_upsert_repo_graph_persists_semantic_relations() -> None:
             line=10,
             confidence=0.9,
             language="python",
+            resolution_method="local",
         ),
         SemanticRelation(
             repo_id="repo-x",
@@ -134,6 +141,7 @@ def test_upsert_repo_graph_persists_semantic_relations() -> None:
             line=11,
             confidence=0.8,
             language="python",
+            resolution_method="unresolved",
         ),
     ]
 
@@ -148,6 +156,276 @@ def test_upsert_repo_graph_persists_semantic_relations() -> None:
     assert session is not None
     assert any(":CALLS" in query for query, _ in session.calls)
     assert any(":IMPORTS" in query for query, _ in session.calls)
+    import_call = next(kwargs for query, kwargs in session.calls if ":IMPORTS" in query)
+    assert import_call["rows"][0]["resolution_method"] == "unresolved"
+    assert import_call["rows"][0]["source_path"] == "pkg/a.py"
+    import_query = next(query for query, _ in session.calls if ":IMPORTS" in query)
+    assert "ref: row.target_ref" in import_query
+    assert "source_path: row.source_path" not in import_query
+    assert "r.source_path = row.source_path" in import_query
+    assert "resolution_method = row.resolution_method" in import_query
+
+
+def test_derive_file_dependency_edges_deduplicates_resolved_relations() -> None:
+    """Colapsa relaciones resueltas entre símbolos a pares archivo->archivo."""
+    symbols = [
+        SymbolChunk(
+            id="source-1",
+            repo_id="repo-x",
+            path="pkg/a.py",
+            language="python",
+            symbol_name="run",
+            symbol_type="function",
+            start_line=1,
+            end_line=3,
+            snippet="def run():\n    helper()",
+        ),
+        SymbolChunk(
+            id="target-1",
+            repo_id="repo-x",
+            path="pkg/b.py",
+            language="python",
+            symbol_name="helper",
+            symbol_type="function",
+            start_line=1,
+            end_line=2,
+            snippet="def helper():\n    return 1",
+        ),
+    ]
+    relations = [
+        SemanticRelation(
+            repo_id="repo-x",
+            source_symbol_id="source-1",
+            relation_type="CALLS",
+            target_symbol_id="target-1",
+            target_ref="helper",
+            target_kind="symbol",
+            path="pkg/a.py",
+            line=2,
+            confidence=0.9,
+            language="python",
+        ),
+        SemanticRelation(
+            repo_id="repo-x",
+            source_symbol_id="source-1",
+            relation_type="IMPORTS",
+            target_symbol_id="target-1",
+            target_ref="pkg.b.helper",
+            target_kind="symbol",
+            path="pkg/a.py",
+            line=1,
+            confidence=0.8,
+            language="python",
+        ),
+    ]
+
+    rows = GraphBuilder._derive_file_dependency_edges(relations, symbols)
+
+    assert rows == [
+        {
+            "source_path": "pkg/a.py",
+            "target_path": "pkg/b.py",
+            "count": 2,
+            "relation_types": ["CALLS", "IMPORTS"],
+        }
+    ]
+
+
+def test_upsert_repo_graph_persists_file_dependency_edges_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persiste IMPORTS_FILE derivados solo cuando el flag dedicado está activo."""
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _FakeDriver(nodes_deleted=0, total_nodes=0)
+    builder.driver = driver
+
+    scanned_files = [
+        ScannedFile(path="pkg/a.py", language="python", content="def run():\n    helper()\n"),
+        ScannedFile(path="pkg/b.py", language="python", content="def helper():\n    return 1\n"),
+    ]
+    symbols = [
+        SymbolChunk(
+            id="source-1",
+            repo_id="repo-x",
+            path="pkg/a.py",
+            language="python",
+            symbol_name="run",
+            symbol_type="function",
+            start_line=1,
+            end_line=2,
+            snippet="def run():\n    helper()",
+        ),
+        SymbolChunk(
+            id="target-1",
+            repo_id="repo-x",
+            path="pkg/b.py",
+            language="python",
+            symbol_name="helper",
+            symbol_type="function",
+            start_line=1,
+            end_line=2,
+            snippet="def helper():\n    return 1",
+        ),
+    ]
+    relations = [
+        SemanticRelation(
+            repo_id="repo-x",
+            source_symbol_id="source-1",
+            relation_type="CALLS",
+            target_symbol_id="target-1",
+            target_ref="helper",
+            target_kind="symbol",
+            path="pkg/a.py",
+            line=2,
+            confidence=0.9,
+            language="python",
+        )
+    ]
+
+    class _SettingsEnabled:
+        semantic_graph_file_edges_enabled = True
+
+    monkeypatch.setattr(
+        graph_builder_module,
+        "get_settings",
+        lambda: _SettingsEnabled(),
+    )
+
+    builder.upsert_repo_graph(
+        repo_id="repo-x",
+        scanned_files=scanned_files,
+        symbols=symbols,
+        semantic_relations=relations,
+    )
+
+    session = driver.last_session
+    assert session is not None
+    file_edge_calls = [
+        kwargs for query, kwargs in session.calls if "IMPORTS_FILE" in query
+    ]
+    assert len(file_edge_calls) == 1
+    assert file_edge_calls[0]["rows"] == [
+        {
+            "source_path": "pkg/a.py",
+            "target_path": "pkg/b.py",
+            "count": 1,
+            "relation_types": ["CALLS"],
+        }
+    ]
+
+
+def test_upsert_repo_graph_skips_file_dependency_edges_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No persiste IMPORTS_FILE cuando el flag de rollout está apagado."""
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _FakeDriver(nodes_deleted=0, total_nodes=0)
+    builder.driver = driver
+
+    class _SettingsDisabled:
+        semantic_graph_file_edges_enabled = False
+
+    monkeypatch.setattr(
+        graph_builder_module,
+        "get_settings",
+        lambda: _SettingsDisabled(),
+    )
+
+    builder.upsert_repo_graph(
+        repo_id="repo-x",
+        scanned_files=[],
+        symbols=[],
+        semantic_relations=[],
+    )
+
+    session = driver.last_session
+    assert session is not None
+    assert not any("IMPORTS_FILE" in query for query, _ in session.calls)
+
+
+def test_upsert_repo_graph_persists_top_level_python_file_imports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persiste imports top-level Python como aristas File->File y File->ExternalSymbol."""
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _FakeDriver(nodes_deleted=0, total_nodes=0)
+    builder.driver = driver
+
+    class _SettingsEnabled:
+        semantic_graph_file_edges_enabled = True
+
+    monkeypatch.setattr(
+        graph_builder_module,
+        "get_settings",
+        lambda: _SettingsEnabled(),
+    )
+
+    builder.upsert_repo_graph(
+        repo_id="repo-x",
+        scanned_files=[
+            ScannedFile(path="pkg/a.py", language="python", content="import json\n"),
+            ScannedFile(path="pkg/b.py", language="python", content="def helper():\n    return 1\n"),
+        ],
+        symbols=[],
+        semantic_relations=[],
+        file_import_relations=[
+            FileImportRelation(
+                repo_id="repo-x",
+                source_path="pkg/a.py",
+                target_path="pkg/b.py",
+                target_ref="pkg.b.helper",
+                target_kind="file",
+                path="pkg/a.py",
+                line=1,
+                language="python",
+                resolution_method="qualified",
+            ),
+            FileImportRelation(
+                repo_id="repo-x",
+                source_path="pkg/a.py",
+                target_path=None,
+                target_ref="json",
+                target_kind="external",
+                path="pkg/a.py",
+                line=2,
+                language="python",
+                resolution_method="unresolved",
+            ),
+        ],
+    )
+
+    session = driver.last_session
+    assert session is not None
+    file_edge_call = next(
+        kwargs for query, kwargs in session.calls if "IMPORTS_FILE" in query
+    )
+    assert file_edge_call["rows"] == [
+        {
+            "source_path": "pkg/a.py",
+            "target_path": "pkg/b.py",
+            "count": 1,
+            "relation_types": ["IMPORTS"],
+        }
+    ]
+    external_call = next(
+        kwargs for query, kwargs in session.calls if "IMPORTS_EXTERNAL_FILE" in query
+    )
+    assert external_call["rows"] == [
+        {
+            "source_path": "pkg/a.py",
+            "target_ref": "json",
+            "path": "pkg/a.py",
+            "line": 2,
+            "language": "python",
+            "resolution_method": "unresolved",
+        }
+    ]
+    external_query = next(
+        query for query, _ in session.calls if "IMPORTS_EXTERNAL_FILE" in query
+    )
+    assert "ref: row.target_ref" in external_query
+    assert "language: row.language\n            })" in external_query
+    assert "source_path: row.source_path, target_ref: row.target_ref" in external_query
 
 
 def test_expand_symbols_uses_literal_hops_in_query() -> None:
@@ -204,6 +482,227 @@ def test_expand_symbols_uses_literal_hops_in_query() -> None:
     assert "[*1..3]" in driver.last_session.query
     assert "$hops" not in driver.last_session.query
     assert "hops" not in driver.last_session.kwargs
+
+
+def test_query_inventory_dependency_uses_file_edges() -> None:
+    """Consulta dependencias usando aristas File -> File y File -> External."""
+
+    class _DependencyRecord:
+        def __init__(
+            self,
+            label: str,
+            path: str,
+            kind: str,
+            start_line: int,
+            end_line: int,
+        ) -> None:
+            self._payload = {
+                "label": label,
+                "path": path,
+                "kind": kind,
+                "start_line": start_line,
+                "end_line": end_line,
+            }
+
+        def data(self) -> dict[str, object]:
+            return self._payload
+
+    class _DependencySession:
+        def __init__(self) -> None:
+            self.query = ""
+            self.kwargs: dict[str, Any] = {}
+
+        def run(self, query: str, **kwargs: Any) -> list[_DependencyRecord]:
+            self.query = query
+            self.kwargs = kwargs
+            return [
+                _DependencyRecord(
+                    label="pkg/b.py",
+                    path="pkg/b.py",
+                    kind="file_dependency",
+                    start_line=1,
+                    end_line=1,
+                ),
+                _DependencyRecord(
+                    label="requests",
+                    path="pkg/a.py",
+                    kind="external_dependency",
+                    start_line=2,
+                    end_line=2,
+                ),
+            ]
+
+        def __enter__(self) -> "_DependencySession":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class _DependencyDriver:
+        def __init__(self) -> None:
+            self.last_session: _DependencySession | None = None
+
+        def session(self) -> _DependencySession:
+            self.last_session = _DependencySession()
+            return self.last_session
+
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _DependencyDriver()
+    builder.driver = driver
+
+    records = builder.query_inventory(
+        repo_id="repo-x",
+        target_term="dependencias",
+        module_name="pkg",
+        limit=10,
+        offset=0,
+    )
+
+    assert [item["kind"] for item in records] == [
+        "file_dependency",
+        "external_dependency",
+    ]
+    assert driver.last_session is not None
+    assert "CALL () {" in driver.last_session.query
+    assert "IMPORTS_FILE" in driver.last_session.query
+    assert "IMPORTS_EXTERNAL_FILE" in driver.last_session.query
+    assert driver.last_session.kwargs == {
+        "repo_id": "repo-x",
+        "module_name": "pkg",
+        "limit": 10,
+        "offset": 0,
+    }
+
+
+def test_expand_symbol_file_context_uses_file_edges() -> None:
+    """Expande contexto de archivo a partir de símbolos semilla mediante aristas File."""
+
+    class _FileContextRecord:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def data(self) -> dict[str, object]:
+            return self._payload
+
+    class _FileContextSession:
+        def __init__(self) -> None:
+            self.query = ""
+            self.kwargs: dict[str, Any] = {}
+
+        def run(self, query: str, **kwargs: Any) -> list[_FileContextRecord]:
+            self.query = query
+            self.kwargs = kwargs
+            return [
+                _FileContextRecord(
+                    {
+                        "seed": "s1",
+                        "labels": ["File"],
+                        "props": {"path": "pkg/b.py"},
+                        "edge_count": 1,
+                        "relation_types": ["IMPORTS_FILE"],
+                        "relation_confidence_avg": 1.0,
+                    }
+                )
+            ]
+
+        def __enter__(self) -> "_FileContextSession":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class _FileContextDriver:
+        def __init__(self) -> None:
+            self.last_session: _FileContextSession | None = None
+
+        def session(self) -> _FileContextSession:
+            self.last_session = _FileContextSession()
+            return self.last_session
+
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _FileContextDriver()
+    builder.driver = driver
+
+    records = builder.expand_symbol_file_context(symbol_ids=["s1"], limit=7)
+
+    assert len(records) == 1
+    assert records[0]["relation_types"] == ["IMPORTS_FILE"]
+    assert driver.last_session is not None
+    assert "CALL () {" in driver.last_session.query
+    assert "IMPORTS_FILE" in driver.last_session.query
+    assert "IMPORTS_EXTERNAL_FILE" in driver.last_session.query
+    assert "coalesce(r.source_path, source.path, '') AS source_path" in driver.last_session.query
+    assert "coalesce(r.line, 1) AS line" in driver.last_session.query
+    assert driver.last_session.kwargs == {"symbol_ids": ["s1"], "limit": 7}
+
+
+def test_expand_file_path_context_uses_file_edges() -> None:
+    """Expande contexto de archivo a partir de paths semilla mediante aristas File."""
+
+    class _FilePathContextRecord:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def data(self) -> dict[str, object]:
+            return self._payload
+
+    class _FilePathContextSession:
+        def __init__(self) -> None:
+            self.query = ""
+            self.kwargs: dict[str, Any] = {}
+
+        def run(self, query: str, **kwargs: Any) -> list[_FilePathContextRecord]:
+            self.query = query
+            self.kwargs = kwargs
+            return [
+                _FilePathContextRecord(
+                    {
+                        "seed": "src/a.py",
+                        "labels": ["ExternalSymbol"],
+                        "props": {"ref": "neo4j.GraphDatabase"},
+                        "edge_count": 1,
+                        "relation_types": ["IMPORTS_EXTERNAL_FILE"],
+                        "relation_confidence_avg": 1.0,
+                        "line": 4,
+                        "source_path": "src/a.py",
+                    }
+                )
+            ]
+
+        def __enter__(self) -> "_FilePathContextSession":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class _FilePathContextDriver:
+        def __init__(self) -> None:
+            self.last_session: _FilePathContextSession | None = None
+
+        def session(self) -> _FilePathContextSession:
+            self.last_session = _FilePathContextSession()
+            return self.last_session
+
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _FilePathContextDriver()
+    builder.driver = driver
+
+    records = builder.expand_file_path_context(
+        repo_id="repo-x",
+        file_paths=["src/a.py", "src/a.py"],
+        limit=5,
+    )
+
+    assert len(records) == 1
+    assert records[0]["relation_types"] == ["IMPORTS_EXTERNAL_FILE"]
+    assert driver.last_session is not None
+    assert "IMPORTS_FILE" in driver.last_session.query
+    assert "IMPORTS_EXTERNAL_FILE" in driver.last_session.query
+    assert driver.last_session.kwargs == {
+        "repo_id": "repo-x",
+        "file_paths": ["src/a.py"],
+        "limit": 5,
+    }
 
 
 def test_query_repo_modules_returns_sorted_module_paths() -> None:

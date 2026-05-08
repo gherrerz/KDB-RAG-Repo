@@ -303,6 +303,7 @@ def _append_relation(
             line=max(1, line),
             confidence=confidence,
             language="java",
+            resolution_method=resolution_source,
         )
     )
     return resolution_source

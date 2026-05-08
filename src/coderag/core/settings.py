@@ -28,14 +28,14 @@ class Settings(BaseSettings):
 
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     llm_provider: ProviderName = Field(default="vertex", alias="LLM_PROVIDER")
-    llm_answer_model: str = Field(default="", alias="LLM_ANSWER_MODEL")
-    llm_verifier_model: str = Field(default="", alias="LLM_VERIFIER_MODEL")
-    llm_verify_enabled: bool = Field(default=True, alias="LLM_VERIFY_ENABLED")
+    llm_answer_model: str = Field(default="gemini-2.5-flash", alias="LLM_ANSWER_MODEL")
+    llm_verifier_model: str = Field(default="gemini-2.5-flash", alias="LLM_VERIFIER_MODEL")
+    llm_verify_enabled: bool = Field(default=False, alias="LLM_VERIFY_ENABLED")
     embedding_provider: ProviderName = Field(
         default="vertex",
         alias="EMBEDDING_PROVIDER",
     )
-    embedding_model: str = Field(default="", alias="EMBEDDING_MODEL")
+    embedding_model: str = Field(default="text-embedding-005", alias="EMBEDDING_MODEL")
 
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
     vertex_ai_auth_mode: VertexAuthMode = Field(
@@ -90,11 +90,11 @@ class Settings(BaseSettings):
         alias="VERTEX_AI_LABEL_SERVICE",
     )
     vertex_ai_label_service_account: str = Field(
-        default="",
+        default="qa-anthos",
         alias="VERTEX_AI_LABEL_SERVICE_ACCOUNT",
     )
     vertex_ai_label_use_case_id: str = Field(
-        default="rag_query",
+        default="tbd",
         alias="VERTEX_AI_LABEL_USE_CASE_ID",
     )
     vertex_ai_correlation_id_enabled: bool = Field(
@@ -191,19 +191,19 @@ class Settings(BaseSettings):
     inventory_alias_limit: int = Field(default=8, alias="INVENTORY_ALIAS_LIMIT")
     inventory_entity_limit: int = Field(default=500, alias="INVENTORY_ENTITY_LIMIT")
     scan_max_file_size_bytes: int | None = Field(
-        default=None,
+        default=2000000,
         alias="SCAN_MAX_FILE_SIZE_BYTES",
     )
     scan_excluded_dirs: str = Field(
-        default="",
+        default=".git,node_modules,dist,build,venv,.venv,__pycache__,.idea,.vscode,target,out,bin,obj,.gradle,.m2,.pytest_cache,.mypy_cache",
         alias="SCAN_EXCLUDED_DIRS",
     )
     scan_excluded_extensions: str = Field(
-        default="",
+        default=".png,.jpg,.jpeg,.gif,.webp,.ico,.mp3,.mp4,.wav,.ogg,.pdf,.zip,.tar,.gz,.7z,.rar,.jar,.war,.ear,.class,.dll,.exe,.so,.dylib,.o,.a,.bin,.sqlite,.db",
         alias="SCAN_EXCLUDED_EXTENSIONS",
     )
     scan_excluded_files: str = Field(
-        default="",
+        default=".gitignore,.env",
         alias="SCAN_EXCLUDED_FILES",
     )
     symbol_extractor_v2_enabled: bool = Field(
@@ -211,23 +211,31 @@ class Settings(BaseSettings):
         alias="SYMBOL_EXTRACTOR_V2_ENABLED",
     )
     semantic_graph_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="SEMANTIC_GRAPH_ENABLED",
     )
     semantic_graph_java_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="SEMANTIC_GRAPH_JAVA_ENABLED",
     )
     semantic_graph_javascript_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="SEMANTIC_GRAPH_JAVASCRIPT_ENABLED",
     )
     semantic_graph_typescript_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="SEMANTIC_GRAPH_TYPESCRIPT_ENABLED",
     )
+    semantic_graph_file_edges_enabled: bool = Field(
+        default=True,
+        alias="SEMANTIC_GRAPH_FILE_EDGES_ENABLED",
+    )
+    semantic_tsconfig_resolution_enabled: bool = Field(
+        default=True,
+        alias="SEMANTIC_TSCONFIG_RESOLUTION_ENABLED",
+    )
     semantic_graph_query_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="SEMANTIC_GRAPH_QUERY_ENABLED",
     )
     semantic_relation_types: str = Field(
@@ -418,10 +426,10 @@ class Settings(BaseSettings):
         if normalized_provider == "openai":
             return "gpt-4.1-mini"
         if normalized_provider == "gemini":
-            return "gemini-2.0-flash"
+            return "gemini-2.5-flash"
         if normalized_provider == "vertex":
-            return "gemini-2.0-flash"
-        return "gemini-2.0-flash"
+            return "gemini-2.5-flash"
+        return "gemini-2.5-flash"
 
     def resolve_verifier_model(self, provider: ProviderName, override: str | None = None) -> str:
         """Resuelve el modelo verifier con fallback a configuración actual."""
@@ -433,10 +441,10 @@ class Settings(BaseSettings):
         if normalized_provider == "openai":
             return "gpt-4.1-mini"
         if normalized_provider == "gemini":
-            return "gemini-2.0-flash"
+            return "gemini-2.5-flash"
         if normalized_provider == "vertex":
-            return "gemini-2.0-flash"
-        return "gemini-2.0-flash"
+            return "gemini-2.5-flash"
+        return "gemini-2.5-flash"
 
     def resolve_api_key(self, provider: ProviderName) -> str:
         """Obtiene la API key efectiva por proveedor."""

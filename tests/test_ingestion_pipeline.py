@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from coderag.core.models import RepoAuthConfig
+from coderag.core.models import FileImportRelation, RepoAuthConfig
 from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
 from coderag.ingestion import pipeline
 
@@ -512,6 +512,7 @@ def test_index_graph_adds_semantic_relations_when_enabled(
             scanned_files: list[ScannedFile],
             symbols: list[SymbolChunk],
             semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
         ) -> None:
             captured["repo_id"] = repo_id
             captured["semantic_relations"] = semantic_relations or []
@@ -524,7 +525,7 @@ def test_index_graph_adds_semantic_relations_when_enabled(
     monkeypatch.setattr(
         pipeline,
         "extract_python_semantic_relations",
-        lambda repo_id, scanned_files, symbols: [
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None, file_imports_sink=None: [
             SemanticRelation(
                 repo_id=repo_id,
                 source_symbol_id="s1",
@@ -554,6 +555,7 @@ def test_index_graph_adds_semantic_relations_when_enabled(
     assert diagnostics["semantic_graph"]["relation_counts_by_type"] == {
         "CALLS": 1
     }
+    assert diagnostics["semantic_graph"]["python_resolution_source_counts"] == {}
     assert diagnostics["semantic_graph"]["java_cross_file_resolved_count"] == 0
     assert diagnostics["semantic_graph"]["java_cross_file_resolved_by_type"] == {}
     assert diagnostics["semantic_graph"]["java_resolution_source_counts"] == {}
@@ -594,6 +596,7 @@ def test_index_graph_falls_back_when_semantic_extraction_fails(
             scanned_files: list[ScannedFile],
             symbols: list[SymbolChunk],
             semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
         ) -> None:
             captured["semantic_relations"] = semantic_relations or []
 
@@ -672,6 +675,7 @@ def test_index_graph_runs_java_semantics_only_when_enabled(
             scanned_files: list[ScannedFile],
             symbols: list[SymbolChunk],
             semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
         ) -> None:
             return None
 
@@ -682,7 +686,7 @@ def test_index_graph_runs_java_semantics_only_when_enabled(
     monkeypatch.setattr(
         pipeline,
         "extract_python_semantic_relations",
-        lambda repo_id, scanned_files, symbols: [],
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None, file_imports_sink=None: [],
     )
 
     def _raise_if_called(*args, **kwargs):
@@ -781,6 +785,7 @@ def test_index_graph_reports_java_cross_file_resolved_count(
             scanned_files: list[ScannedFile],
             symbols: list[SymbolChunk],
             semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
         ) -> None:
             return None
 
@@ -792,7 +797,7 @@ def test_index_graph_reports_java_cross_file_resolved_count(
     monkeypatch.setattr(
         pipeline,
         "extract_python_semantic_relations",
-        lambda repo_id, scanned_files, symbols: [],
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None, file_imports_sink=None: [],
     )
     monkeypatch.setattr(
         pipeline,
@@ -858,6 +863,7 @@ def test_index_graph_reports_java_resolution_source_counts(
             scanned_files: list[ScannedFile],
             symbols: list[SymbolChunk],
             semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
         ) -> None:
             return None
 
@@ -869,7 +875,7 @@ def test_index_graph_reports_java_resolution_source_counts(
     monkeypatch.setattr(
         pipeline,
         "extract_python_semantic_relations",
-        lambda repo_id, scanned_files, symbols: [],
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None, file_imports_sink=None: [],
     )
 
     def _fake_java_extract(
@@ -899,6 +905,215 @@ def test_index_graph_reports_java_resolution_source_counts(
         "import": 2,
         "same_package": 1,
     }
+
+
+def test_index_graph_reports_python_resolution_source_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incluye desglose de origen de resolución Python en diagnostics."""
+    scanned = [ScannedFile(path="src/a.py", language="python", content="def a():\n    pass")]
+    symbols = [
+        SymbolChunk(
+            id="sp1",
+            repo_id="rp",
+            path="src/a.py",
+            language="python",
+            symbol_name="a",
+            symbol_type="function",
+            start_line=1,
+            end_line=2,
+            snippet="def a():\n    pass",
+        )
+    ]
+    diagnostics: dict[str, object] = {}
+
+    class _Settings:
+        semantic_graph_enabled = True
+        semantic_graph_java_enabled = False
+        semantic_graph_javascript_enabled = False
+        semantic_graph_typescript_enabled = False
+
+    class _FakeGraphBuilder:
+        def upsert_repo_graph(
+            self,
+            repo_id: str,
+            scanned_files: list[ScannedFile],
+            symbols: list[SymbolChunk],
+            semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
+        ) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    def _fake_python_extract(
+        repo_id: str,
+        scanned_files: list[ScannedFile],
+        symbols: list[SymbolChunk],
+        resolution_stats_sink: dict[str, int] | None = None,
+        file_imports_sink=None,
+    ) -> list[SemanticRelation]:
+        if resolution_stats_sink is not None:
+            resolution_stats_sink.update({"alias": 2, "local": 1})
+        return []
+
+    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        pipeline,
+        "extract_python_semantic_relations",
+        _fake_python_extract,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_java_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_javascript_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_typescript_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+
+    pipeline._index_graph(
+        repo_id="rp",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    assert diagnostics["semantic_graph"]["python_resolution_source_counts"] == {
+        "alias": 2,
+        "local": 1,
+    }
+
+
+def test_index_graph_reports_python_top_level_file_import_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incluye conteos de imports top-level Python a nivel archivo."""
+    scanned = [
+        ScannedFile(
+            path="src/a.py",
+            language="python",
+            content="from pkg import mod\nimport requests\n",
+        )
+    ]
+    symbols = [
+        SymbolChunk(
+            id="sp1",
+            repo_id="rp",
+            path="src/a.py",
+            language="python",
+            symbol_name="a",
+            symbol_type="function",
+            start_line=1,
+            end_line=1,
+            snippet="def a():\n    pass",
+        )
+    ]
+    diagnostics: dict[str, object] = {}
+
+    class _Settings:
+        semantic_graph_enabled = True
+        semantic_graph_java_enabled = False
+        semantic_graph_javascript_enabled = False
+        semantic_graph_typescript_enabled = False
+
+    class _FakeGraphBuilder:
+        def upsert_repo_graph(
+            self,
+            repo_id: str,
+            scanned_files: list[ScannedFile],
+            symbols: list[SymbolChunk],
+            semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
+        ) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    def _fake_python_extract(
+        repo_id: str,
+        scanned_files: list[ScannedFile],
+        symbols: list[SymbolChunk],
+        resolution_stats_sink: dict[str, int] | None = None,
+        file_imports_sink: list[FileImportRelation] | None = None,
+    ) -> list[SemanticRelation]:
+        if file_imports_sink is not None:
+            file_imports_sink.extend(
+                [
+                    FileImportRelation(
+                        repo_id=repo_id,
+                        source_path="src/a.py",
+                        target_path="src/pkg/mod.py",
+                        target_ref="pkg.mod",
+                        target_kind="file",
+                        path="src/a.py",
+                        line=1,
+                        language="python",
+                        resolution_method="import_from",
+                    ),
+                    FileImportRelation(
+                        repo_id=repo_id,
+                        source_path="src/a.py",
+                        target_ref="requests",
+                        target_kind="external",
+                        path="src/a.py",
+                        line=2,
+                        language="python",
+                        resolution_method="import",
+                    ),
+                ]
+            )
+        return []
+
+    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        pipeline,
+        "extract_python_semantic_relations",
+        _fake_python_extract,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_java_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_javascript_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_typescript_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+
+    pipeline._index_graph(
+        repo_id="rp",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    assert diagnostics["semantic_graph"]["python_top_level_file_import_count"] == 2
+    assert (
+        diagnostics["semantic_graph"]["python_top_level_file_import_internal_count"]
+        == 1
+    )
+    assert (
+        diagnostics["semantic_graph"]["python_top_level_file_import_external_count"]
+        == 1
+    )
 
 
 def test_index_graph_runs_typescript_semantics_only_when_enabled(
@@ -944,6 +1159,7 @@ def test_index_graph_runs_typescript_semantics_only_when_enabled(
             scanned_files: list[ScannedFile],
             symbols: list[SymbolChunk],
             semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
         ) -> None:
             return None
 
@@ -954,7 +1170,7 @@ def test_index_graph_runs_typescript_semantics_only_when_enabled(
     monkeypatch.setattr(
         pipeline,
         "extract_python_semantic_relations",
-        lambda repo_id, scanned_files, symbols: [],
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None, file_imports_sink=None: [],
     )
     monkeypatch.setattr(
         pipeline,
@@ -1008,7 +1224,108 @@ def test_index_graph_runs_typescript_semantics_only_when_enabled(
     assert diagnostics["semantic_graph"]["relation_counts_by_type"] == {
         "CALLS": 1
     }
+    assert diagnostics["semantic_graph"]["typescript_cross_file_resolved_count"] == 0
     assert diagnostics["semantic_graph"]["typescript_resolution_source_counts"] == {}
+
+
+def test_index_graph_reports_typescript_cross_file_resolved_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cuenta relaciones TypeScript resueltas hacia símbolos en archivos distintos."""
+    scanned = [
+        ScannedFile(path="src/base.ts", language="typescript", content="export class Base {}"),
+        ScannedFile(path="src/service.ts", language="typescript", content="export class Service extends Base {}"),
+    ]
+    symbols = [
+        SymbolChunk(
+            id="st-base",
+            repo_id="rt",
+            path="src/base.ts",
+            language="typescript",
+            symbol_name="Base",
+            symbol_type="class",
+            start_line=1,
+            end_line=1,
+            snippet="export class Base {}",
+        ),
+        SymbolChunk(
+            id="st-service",
+            repo_id="rt",
+            path="src/service.ts",
+            language="typescript",
+            symbol_name="Service",
+            symbol_type="class",
+            start_line=1,
+            end_line=1,
+            snippet="export class Service extends Base {}",
+        ),
+    ]
+    diagnostics: dict[str, object] = {}
+
+    class _Settings:
+        semantic_graph_enabled = True
+        semantic_graph_java_enabled = False
+        semantic_graph_javascript_enabled = False
+        semantic_graph_typescript_enabled = True
+
+    class _FakeGraphBuilder:
+        def upsert_repo_graph(
+            self,
+            repo_id: str,
+            scanned_files: list[ScannedFile],
+            symbols: list[SymbolChunk],
+            semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
+        ) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        pipeline,
+        "extract_python_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None, file_imports_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_java_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_javascript_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_typescript_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [
+            SemanticRelation(
+                repo_id=repo_id,
+                source_symbol_id="st-service",
+                relation_type="EXTENDS",
+                target_symbol_id="st-base",
+                target_ref="Base",
+                target_kind="symbol",
+                path="src/service.ts",
+                line=1,
+                confidence=0.95,
+                language="typescript",
+            )
+        ],
+    )
+
+    pipeline._index_graph(
+        repo_id="rt",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    assert diagnostics["semantic_graph"]["typescript_cross_file_resolved_count"] == 1
 
 
 def test_index_graph_runs_javascript_semantics_only_when_enabled(
@@ -1056,6 +1373,7 @@ def test_index_graph_runs_javascript_semantics_only_when_enabled(
             scanned_files: list[ScannedFile],
             symbols: list[SymbolChunk],
             semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
         ) -> None:
             return None
 
@@ -1066,7 +1384,7 @@ def test_index_graph_runs_javascript_semantics_only_when_enabled(
     monkeypatch.setattr(
         pipeline,
         "extract_python_semantic_relations",
-        lambda repo_id, scanned_files, symbols: [],
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None, file_imports_sink=None: [],
     )
     monkeypatch.setattr(
         pipeline,
@@ -1115,6 +1433,106 @@ def test_index_graph_runs_javascript_semantics_only_when_enabled(
     )
 
     assert called["value"] is True
+
+
+def test_index_graph_reports_javascript_cross_file_resolved_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cuenta relaciones JavaScript resueltas hacia símbolos en archivos distintos."""
+    scanned = [
+        ScannedFile(path="src/base.js", language="javascript", content="export class Base {}"),
+        ScannedFile(path="src/service.js", language="javascript", content="export class Service extends Base {}"),
+    ]
+    symbols = [
+        SymbolChunk(
+            id="sj-base",
+            repo_id="rj",
+            path="src/base.js",
+            language="javascript",
+            symbol_name="Base",
+            symbol_type="class",
+            start_line=1,
+            end_line=1,
+            snippet="export class Base {}",
+        ),
+        SymbolChunk(
+            id="sj-service",
+            repo_id="rj",
+            path="src/service.js",
+            language="javascript",
+            symbol_name="Service",
+            symbol_type="class",
+            start_line=1,
+            end_line=1,
+            snippet="export class Service extends Base {}",
+        ),
+    ]
+    diagnostics: dict[str, object] = {}
+
+    class _Settings:
+        semantic_graph_enabled = True
+        semantic_graph_java_enabled = False
+        semantic_graph_javascript_enabled = True
+        semantic_graph_typescript_enabled = False
+
+    class _FakeGraphBuilder:
+        def upsert_repo_graph(
+            self,
+            repo_id: str,
+            scanned_files: list[ScannedFile],
+            symbols: list[SymbolChunk],
+            semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
+        ) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        pipeline,
+        "extract_python_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None, file_imports_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_java_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_typescript_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_javascript_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [
+            SemanticRelation(
+                repo_id=repo_id,
+                source_symbol_id="sj-service",
+                relation_type="EXTENDS",
+                target_symbol_id="sj-base",
+                target_ref="Base",
+                target_kind="symbol",
+                path="src/service.js",
+                line=1,
+                confidence=0.95,
+                language="javascript",
+            )
+        ],
+    )
+
+    pipeline._index_graph(
+        repo_id="rj",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    assert diagnostics["semantic_graph"]["javascript_cross_file_resolved_count"] == 1
 
 
 def test_ingest_repository_fails_when_purge_fails(
