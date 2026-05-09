@@ -75,7 +75,7 @@ def test_resolve_embedding_ui_state_unsupported_ingestion() -> None:
 
 def test_resolve_llm_ui_state_not_configured() -> None:
     """Resuelve bloqueo cuando LLM está soportado pero no configurado."""
-    state = resolve_llm_ui_state(_Settings(), "vertex_ai")
+    state = resolve_llm_ui_state(_Settings(), "vertex")
 
     assert state.default_model == "gemini-2.0-flash"
     assert "no configurado" in state.warning.lower()

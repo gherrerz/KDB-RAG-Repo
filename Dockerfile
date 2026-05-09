@@ -52,7 +52,7 @@ ENV PATH="/opt/venv/bin:${PATH}"
 COPY src ./src
 COPY .env.example ./.env.example
 
-RUN mkdir -p /app/storage/chroma /app/storage/workspace /app/storage/bm25 \
+RUN mkdir -p /app/storage/workspace \
     && chown -R app:app /app
 
 USER app

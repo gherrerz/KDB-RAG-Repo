@@ -3,7 +3,6 @@
 import gc
 import os
 import shutil
-import sqlite3
 import stat
 import time
 from pathlib import Path
@@ -45,27 +44,12 @@ def _remove_path(path: Path, retries: int = 3) -> None:
         raise RuntimeError(f"No se pudo eliminar {path}: {last_error}") from last_error
 
 
-def _compact_chroma_sqlite(chroma_path: Path) -> None:
-    """Fuerza la compactación del archivo SQLite tras borrar colecciones lógicamente."""
-    db_file = chroma_path / "chroma.sqlite3"
-    if not db_file.exists():
-        return
-
-    connection = sqlite3.connect(str(db_file), timeout=8)
-    try:
-        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        connection.execute("VACUUM")
-        connection.execute("PRAGMA optimize")
-        connection.commit()
-    finally:
-        connection.close()
-
-
 def reset_all_storage() -> tuple[list[str], list[str]]:
     """Persistencia clara de vectores, léxicos, gráficos, espacios de trabajo y metadatos."""
     settings = get_settings()
     cleared: list[str] = []
     warnings: list[str] = []
+    postgres_url = (settings.postgres_url or "").strip()
 
     ChromaIndex.reset_shared_state()
 
@@ -83,58 +67,93 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
             f"{exc}"
         )
 
-    chroma_reset_done = False
-    try:
-        client = chromadb.PersistentClient(
-            path=str(settings.chroma_path),
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
-        for collection_name in COLLECTIONS:
-            try:
-                client.delete_collection(collection_name)
-            except Exception:
-                continue
-        chroma_reset_done = True
-    except Exception as exc:
-        warnings.append(f"No se pudieron limpiar colecciones Chroma por API: {exc}")
-    finally:
+    if postgres_url:
         try:
-            del client
-        except Exception:
-            pass
-        gc.collect()
+            from coderag.storage.lexical_store import LexicalStore
+            LexicalStore(postgres_url).delete_all()
+            cleared.append("LexicalStore Postgres")
+        except Exception as exc:
+            warnings.append(f"No se pudo limpiar LexicalStore Postgres: {exc}")
+
+    chroma_reset_done = False
+    if settings.chroma_mode == "remote":
+        try:
+            headers: dict[str, str] = {}
+            if settings.chroma_token:
+                headers["Authorization"] = f"Bearer {settings.chroma_token}"
+            client = chromadb.HttpClient(
+                host=settings.chroma_host,
+                port=settings.chroma_port,
+                headers=headers,
+            )
+            for collection_name in COLLECTIONS:
+                try:
+                    client.delete_collection(collection_name)
+                except Exception:
+                    continue
+            chroma_reset_done = True
+        except Exception as exc:
+            warnings.append(f"No se pudieron limpiar colecciones Chroma remoto: {exc}")
+        finally:
+            try:
+                del client
+            except Exception:
+                pass
+            gc.collect()
+    else:
+        try:
+            client = chromadb.PersistentClient(
+                path=str(settings.chroma_path),
+                settings=ChromaSettings(anonymized_telemetry=False),
+            )
+            for collection_name in COLLECTIONS:
+                try:
+                    client.delete_collection(collection_name)
+                except Exception:
+                    continue
+            chroma_reset_done = True
+        except Exception as exc:
+            warnings.append(f"No se pudieron limpiar colecciones Chroma por API: {exc}")
+        finally:
+            try:
+                del client
+            except Exception:
+                pass
+            gc.collect()
+
+        ChromaIndex.reset_shared_state()
+
+        try:
+            _remove_path(settings.chroma_path)
+        except RuntimeError as exc:
+            warnings.append(
+                "No se pudo vaciar carpeta Chroma por lock de archivos: "
+                f"{exc}"
+            )
+        settings.chroma_path.mkdir(parents=True, exist_ok=True)
 
     ChromaIndex.reset_shared_state()
-
-    try:
-        _compact_chroma_sqlite(settings.chroma_path)
-        cleared.append("Chroma SQLite compactado")
-    except sqlite3.Error as exc:
-        warnings.append(
-            "No se pudo compactar chroma.sqlite3 tras borrado lógico: "
-            f"{exc}"
-        )
-
-    try:
-        _remove_path(settings.chroma_path)
-    except RuntimeError as exc:
-        warnings.append(
-            "No se pudo vaciar carpeta Chroma por lock de archivos: "
-            f"{exc}"
-        )
-    settings.chroma_path.mkdir(parents=True, exist_ok=True)
     if chroma_reset_done:
-        cleared.append(f"Chroma ({settings.chroma_path})")
+        cleared.append("Chroma")
 
     _remove_path(settings.workspace_path)
     settings.workspace_path.mkdir(parents=True, exist_ok=True)
     cleared.append(f"Workspace ({settings.workspace_path})")
 
-    metadata_db = settings.workspace_path.parent / "metadata.db"
-    _remove_path(metadata_db)
-    metadata_db.parent.mkdir(parents=True, exist_ok=True)
-    metadata_db.touch(exist_ok=True)
-    cleared.append(f"Metadata ({metadata_db})")
+    if postgres_url:
+        try:
+            from coderag.storage.postgres_metadata_store import PostgresMetadataStore
+            pg_store = PostgresMetadataStore(postgres_url)
+            pg_store.reset_all()
+            cleared.append("Metadata Postgres")
+        except Exception as exc:
+            warnings.append(f"No se pudo limpiar metadata Postgres: {exc}")
+    else:
+        metadata_db = settings.workspace_path.parent / "metadata.db"
+        _remove_path(metadata_db)
+        metadata_db.parent.mkdir(parents=True, exist_ok=True)
+        metadata_db.touch(exist_ok=True)
+        cleared.append(f"Metadata ({metadata_db})")
 
     graph = GraphBuilder()
     try:
@@ -199,6 +218,16 @@ def delete_repo_storage(
     except Exception as exc:
         warnings.append(f"No se pudo limpiar BM25 para '{normalized_repo_id}': {exc}")
 
+    postgres_url_del = (settings.postgres_url or "").strip()
+    if postgres_url_del:
+        try:
+            from coderag.storage.lexical_store import LexicalStore
+            lex_deleted = LexicalStore(postgres_url_del, settings.lexical_fts_language).delete_repo(normalized_repo_id)
+            deleted_counts["lexical_docs"] = int(lex_deleted.get("docs_removed", 0) or 0)
+            cleared.append("LexicalStore")
+        except Exception as exc:
+            warnings.append(f"No se pudo limpiar LexicalStore para '{normalized_repo_id}': {exc}")
+
     graph = GraphBuilder()
     try:
         graph_nodes_deleted = graph.delete_repo_subgraph(normalized_repo_id)
@@ -222,7 +251,7 @@ def delete_repo_storage(
     if workspace_removed > 0:
         cleared.append("Workspace")
 
-    metadata_store = MetadataStore(settings.workspace_path.parent / "metadata.db")
+    metadata_store = _build_metadata_store(settings)
     try:
         metadata_deleted = metadata_store.delete_repo_data(normalized_repo_id)
         deleted_counts["metadata_jobs"] = int(
@@ -234,11 +263,20 @@ def delete_repo_storage(
         deleted_counts["metadata_total"] = int(
             metadata_deleted.get("total", 0) or 0
         )
-        cleared.append("Metadata SQLite")
+        cleared.append("Metadata SQLite" if not (settings.postgres_url or "").strip() else "Metadata Postgres")
     except Exception as exc:
         warnings.append(
-            "No se pudo limpiar metadata SQLite para "
+            "No se pudo limpiar metadata para "
             f"'{normalized_repo_id}': {exc}"
         )
 
     return cleared, warnings, deleted_counts
+
+
+def _build_metadata_store(settings):
+    """Devuelve el store de metadatos apropiado según la configuración."""
+    postgres_url = (settings.postgres_url or "").strip()
+    if postgres_url:
+        from coderag.storage.postgres_metadata_store import PostgresMetadataStore
+        return PostgresMetadataStore(postgres_url)
+    return MetadataStore(settings.workspace_path.parent / "metadata.db")

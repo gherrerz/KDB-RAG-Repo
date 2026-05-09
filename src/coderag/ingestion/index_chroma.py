@@ -61,20 +61,36 @@ class ChromaIndex:
         gc.collect()
 
     def __init__(self) -> None:
-        """Inicialice el cliente y las colecciones persistentes de Chroma."""
+        """Inicialice el cliente y las colecciones de Chroma (embedded o remoto)."""
         settings = get_settings()
-        chroma_path = str(settings.chroma_path)
         hnsw_space = settings.resolve_chroma_hnsw_space()
+        chroma_mode = settings.chroma_mode
+
+        if chroma_mode == "remote":
+            client_key = f"remote:{settings.chroma_host}:{settings.chroma_port}"
+        else:
+            client_key = str(settings.chroma_path)
+
         with self._shared_lock:
             if (
                 self._shared_client is None
                 or self._shared_collections is None
-                or self._shared_path != chroma_path
+                or self._shared_path != client_key
             ):
-                client = chromadb.PersistentClient(
-                    path=chroma_path,
-                    settings=ChromaSettings(anonymized_telemetry=False),
-                )
+                if chroma_mode == "remote":
+                    headers: dict[str, str] = {}
+                    if settings.chroma_token:
+                        headers["Authorization"] = f"Bearer {settings.chroma_token}"
+                    client = chromadb.HttpClient(
+                        host=settings.chroma_host,
+                        port=settings.chroma_port,
+                        headers=headers,
+                    )
+                else:
+                    client = chromadb.PersistentClient(
+                        path=str(settings.chroma_path),
+                        settings=ChromaSettings(anonymized_telemetry=False),
+                    )
                 collections = {
                     name: client.get_or_create_collection(
                         name,
@@ -84,7 +100,7 @@ class ChromaIndex:
                 }
                 self.__class__._shared_client = client
                 self.__class__._shared_collections = collections
-                self.__class__._shared_path = chroma_path
+                self.__class__._shared_path = client_key
 
             self.client = self._shared_client
             self.collections = self._shared_collections

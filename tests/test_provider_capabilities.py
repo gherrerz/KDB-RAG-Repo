@@ -11,7 +11,7 @@ def test_embedding_capabilities_vertex_requires_project() -> None:
         VERTEX_AI_PROJECT_ID="",
         _env_file=None,
     )
-    info = settings.embedding_provider_capabilities("vertex_ai")
+    info = settings.embedding_provider_capabilities("vertex")
     assert info["supported"] is True
     assert info["configured"] is False
     assert info["reason"] == "missing_vertex_ai_api_key_or_project"

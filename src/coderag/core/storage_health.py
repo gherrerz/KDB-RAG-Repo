@@ -189,10 +189,27 @@ def _check_metadata_sqlite(db_path: Path) -> dict[str, Any]:
     return {"db_path": str(db_path), "repo_count": len(repo_ids)}
 
 
+def _check_metadata_postgres(postgres_url: str) -> dict[str, Any]:
+    """Valida conectividad básica a Postgres y acceso a tablas de metadatos."""
+    from coderag.storage.postgres_metadata_store import PostgresMetadataStore
+    store = PostgresMetadataStore(postgres_url)
+    repo_ids = store.list_repo_ids()
+    return {"backend": "postgres", "repo_count": len(repo_ids)}
+
+
 def _check_chroma() -> dict[str, Any]:
     """Valida inicialización y acceso básico a colecciones de Chroma."""
     settings = get_settings()
     index = ChromaIndex()
+    if settings.chroma_mode == "remote":
+        # Verificar conectividad HTTP explícitamente en modo remoto
+        try:
+            index.client.heartbeat()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Chroma remoto no responde en "
+                f"{settings.chroma_host}:{settings.chroma_port}: {exc}"
+            ) from exc
     collections = index.client.list_collections()
     expected_space = settings.resolve_chroma_hnsw_space()
     spaces_by_collection = index.collection_hnsw_spaces()
@@ -209,6 +226,7 @@ def _check_chroma() -> dict[str, Any]:
             "Ejecuta reset y reingesta para alinear índices."
         )
     return {
+        "mode": settings.chroma_mode,
         "collection_count": len(collections),
         "managed_collection_count": len(index.collections),
         "hnsw_space_configured": expected_space,
@@ -249,6 +267,25 @@ def _check_bm25(context: str, repo_id: str | None) -> dict[str, Any]:
             )
         return {"repo_id": repo_id, "indexed": True}
     return {"indexed_repos": GLOBAL_BM25.repo_count()}
+
+
+def _check_lexical_store(context: str, repo_id: str | None, postgres_url: str) -> dict[str, Any]:
+    """Valida estado del LexicalStore en Postgres (reemplaza BM25 cuando POSTGRES_URL configurado)."""
+    from coderag.storage.lexical_store import LexicalStore
+    settings = get_settings()
+    store = LexicalStore(postgres_url, settings.lexical_fts_language)
+    if context in {"query", "inventory_query"}:
+        if not repo_id:
+            raise RuntimeError(
+                "repo_id es requerido para validar LexicalStore en consulta."
+            )
+        has = store.has_corpus(repo_id)
+        if not has:
+            raise RuntimeError(
+                f"No hay corpus léxico en Postgres para repo '{repo_id}'."
+            )
+        return {"repo_id": repo_id, "indexed": True, "backend": "postgres"}
+    return {"backend": "postgres"}
 
 
 def _check_openai(timeout_seconds: float) -> dict[str, Any]:
@@ -302,6 +339,7 @@ def run_storage_preflight(
 
     workspace_path = settings.workspace_path
     metadata_path = settings.workspace_path.parent / "metadata.db"
+    postgres_url = (settings.postgres_url or "").strip()
 
     workspace_critical = context not in {
         "query",
@@ -318,9 +356,13 @@ def run_storage_preflight(
         },
         {
             "type": "check",
-            "name": "metadata_sqlite",
+            "name": "metadata_sqlite" if not postgres_url else "metadata_postgres",
             "critical": True,
-            "check_fn": lambda: _check_metadata_sqlite(metadata_path),
+            "check_fn": (
+                (lambda: _check_metadata_postgres(postgres_url))
+                if postgres_url
+                else (lambda: _check_metadata_sqlite(metadata_path))
+            ),
         },
         {
             "type": "check",
@@ -336,10 +378,14 @@ def run_storage_preflight(
         },
         {
             "type": "check",
-            "name": "bm25",
-            # BM25 is not critical, just warn if missing.
+            "name": "lexical" if postgres_url else "bm25",
+            # No crítico, solo advertencia si falta
             "critical": False,
-            "check_fn": lambda: _check_bm25(context=context, repo_id=repo_id),
+            "check_fn": (
+                (lambda: _check_lexical_store(context=context, repo_id=repo_id, postgres_url=postgres_url))
+                if postgres_url
+                else (lambda: _check_bm25(context=context, repo_id=repo_id))
+            ),
         },
     ]
 
@@ -532,9 +578,16 @@ def get_repo_query_status(
     chroma_spaces: dict[str, str | None] = {}
     chroma_space_mismatched_collections: list[str] = []
 
-    bm25_loaded = GLOBAL_BM25.ensure_repo_loaded(repo_id)
-    if not bm25_loaded:
-        warnings.append(f"No hay indice BM25 en memoria para repo '{repo_id}'.")
+    postgres_url = (settings.postgres_url or "").strip()
+    if postgres_url:
+        from coderag.storage.lexical_store import LexicalStore
+        bm25_loaded = LexicalStore(postgres_url, settings.lexical_fts_language).has_corpus(repo_id)
+        if not bm25_loaded:
+            warnings.append(f"No hay corpus léxico en Postgres para repo '{repo_id}'.")
+    else:
+        bm25_loaded = GLOBAL_BM25.ensure_repo_loaded(repo_id)
+        if not bm25_loaded:
+            warnings.append(f"No hay indice BM25 en memoria para repo '{repo_id}'.")
 
     try:
         chroma_counts = _count_query_collections_for_repo(repo_id)

@@ -158,7 +158,7 @@ def test_evaluate_embedding_compatibility_detects_dimension_mismatch() -> None:
             "last_embedding_provider": "openai",
             "last_embedding_model": "text-embedding-3-small",
         },
-        requested_embedding_provider="vertex_ai",
+        requested_embedding_provider="vertex",
         requested_embedding_model="text-embedding-005",
     )
 
@@ -194,7 +194,7 @@ def test_get_repo_query_status_blocks_ready_on_embedding_mismatch(
             "last_embedding_provider": "openai",
             "last_embedding_model": "text-embedding-3-small",
         },
-        requested_embedding_provider="vertex_ai",
+        requested_embedding_provider="vertex",
         requested_embedding_model="text-embedding-005",
     )
 

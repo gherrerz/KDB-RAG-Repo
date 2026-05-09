@@ -15,6 +15,7 @@ from coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
 from coderag.core.settings import get_settings
 from coderag.ingestion.git_client import build_repo_id, extract_repo_organization
 from coderag.storage.metadata_store import MetadataStore
+from coderag.storage.base_metadata_store import BaseMetadataStore
 
 
 class IngestionConflictError(RuntimeError):
@@ -203,11 +204,21 @@ def _execute_ingest_job(
     return job
 
 
+def _build_metadata_store() -> BaseMetadataStore:
+    """Crea el store de metadatos apropiado según la configuración activa."""
+    settings = get_settings()
+    postgres_url = (settings.postgres_url or "").strip()
+    if postgres_url:
+        from coderag.storage.postgres_metadata_store import PostgresMetadataStore
+        return PostgresMetadataStore(postgres_url)
+    metadata_path = settings.workspace_path.parent / "metadata.db"
+    return MetadataStore(metadata_path)
+
+
 def run_ingest_job_task(job_id: str, request_payload: dict[str, object]) -> str:
     """Tarea RQ: ejecuta ingesta de forma desacoplada del proceso API."""
     settings = get_settings()
-    metadata_path = settings.workspace_path.parent / "metadata.db"
-    store = MetadataStore(metadata_path)
+    store = _build_metadata_store()
 
     request = RepoIngestRequest.model_validate(request_payload)
     job = store.get_job(job_id)
@@ -255,7 +266,7 @@ class JobManager:
             True,
         )
         self._ingestion_mode = getattr(settings, "ingestion_execution_mode", "thread")
-        self.store = MetadataStore(self._metadata_path)
+        self.store = _build_metadata_store()
         self.store.recover_interrupted_jobs()
         self._jobs: dict[str, JobInfo] = {}
         self._create_job_lock = Lock()
@@ -286,7 +297,7 @@ class JobManager:
 
         cleared, warnings = reset_all_storage()
         self._jobs.clear()
-        self.store = MetadataStore(self._metadata_path)
+        self.store = _build_metadata_store()
         return cleared, warnings
 
     def delete_repo(self, repo_id: str) -> tuple[list[str], list[str], dict[str, int]]:

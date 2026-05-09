@@ -389,7 +389,7 @@ def test_call_vertex_ai_returns_text_from_candidates(monkeypatch) -> None:
 
         @staticmethod
         def resolve_llm_provider(provider: str | None = None) -> str:
-            return (provider or "vertex_ai").strip().lower()
+            return (provider or "vertex").strip().lower()
 
         @staticmethod
         def resolve_api_key(provider: str) -> str:
@@ -446,7 +446,7 @@ def test_call_vertex_ai_returns_text_from_candidates(monkeypatch) -> None:
 
     monkeypatch.setattr("coderag.llm.openai_client.requests.post", _fake_post)
 
-    client = AnswerClient(provider="vertex_ai", answer_model="gemini-2.0-flash")
+    client = AnswerClient(provider="vertex", answer_model="gemini-2.0-flash")
     result = client._call_vertex_ai("gemini-2.0-flash", "hola", timeout_seconds=5)
 
     assert result == "respuesta vertex ok"
@@ -468,7 +468,7 @@ def test_call_vertex_ai_returns_empty_when_project_not_configured(monkeypatch) -
 
         @staticmethod
         def resolve_llm_provider(provider: str | None = None) -> str:
-            return (provider or "vertex_ai").strip().lower()
+            return (provider or "vertex").strip().lower()
 
         @staticmethod
         def resolve_api_key(provider: str) -> str:
@@ -496,7 +496,7 @@ def test_call_vertex_ai_returns_empty_when_project_not_configured(monkeypatch) -
 
     monkeypatch.setattr("coderag.llm.openai_client.requests.post", _unexpected_post)
 
-    client = AnswerClient(provider="vertex_ai", answer_model="gemini-2.0-flash")
+    client = AnswerClient(provider="vertex", answer_model="gemini-2.0-flash")
     result = client._call_vertex_ai("gemini-2.0-flash", "hola", timeout_seconds=5)
 
     assert result == ""
@@ -516,7 +516,7 @@ def test_call_vertex_ai_fallbacks_when_selected_model_not_found(monkeypatch) -> 
 
         @staticmethod
         def resolve_llm_provider(provider: str | None = None) -> str:
-            return (provider or "vertex_ai").strip().lower()
+            return (provider or "vertex").strip().lower()
 
         @staticmethod
         def resolve_api_key(provider: str) -> str:
@@ -590,7 +590,7 @@ def test_call_vertex_ai_fallbacks_when_selected_model_not_found(monkeypatch) -> 
     )
     monkeypatch.setattr("coderag.llm.openai_client.requests.post", _fake_post)
 
-    client = AnswerClient(provider="vertex_ai", answer_model="gemini-2.0-flash")
+    client = AnswerClient(provider="vertex", answer_model="gemini-2.0-flash")
     result = client._call_vertex_ai("gemini-2.0-flash", "hola", timeout_seconds=5)
 
     assert result == "respuesta fallback ok"

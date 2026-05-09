@@ -14,11 +14,12 @@ from coderag.core.provider_model_catalog import normalize_provider_name
 from coderag.core.vertex_ai import derive_vertex_location_from_base_url
 
 
-ProviderName = Literal["openai", "gemini", "vertex", "vertex_ai"]
+ProviderName = Literal["openai", "gemini", "vertex"]
 HnswSpaceName = Literal["l2", "cosine"]
 IngestionExecutionMode = Literal["thread", "rq"]
 VertexAuthMode = Literal["service_account"]
 GitSshStrictHostKeyChecking = Literal["yes", "accept-new", "no"]
+ChromaMode = Literal["embedded", "remote"]
 
 
 class Settings(BaseSettings):
@@ -101,11 +102,20 @@ class Settings(BaseSettings):
         default=True,
         alias="VERTEX_AI_CORRELATION_ID_ENABLED",
     )
+    # chroma_path sólo es relevante en CHROMA_MODE=embedded
     chroma_path: Path = Field(default=Path("./storage/chroma"), alias="CHROMA_PATH")
     chroma_hnsw_space: HnswSpaceName = Field(
         default="cosine",
         alias="CHROMA_HNSW_SPACE",
     )
+    chroma_mode: ChromaMode = Field(default="remote", alias="CHROMA_MODE")
+    chroma_host: str = Field(default="localhost", alias="CHROMA_HOST")
+    chroma_port: int = Field(default=8000, alias="CHROMA_PORT")
+    chroma_token: str = Field(default="", alias="CHROMA_TOKEN")
+    postgres_url: str = Field(default="", alias="POSTGRES_URL")
+    postgres_pool_size: int = Field(default=5, alias="POSTGRES_POOL_SIZE")
+    postgres_pool_timeout: float = Field(default=30.0, alias="POSTGRES_POOL_TIMEOUT")
+    lexical_fts_language: str = Field(default="english", alias="LEXICAL_FTS_LANGUAGE")
     neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")
     neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
     neo4j_password: str = Field(default="password", alias="NEO4J_PASSWORD")

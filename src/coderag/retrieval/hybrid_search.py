@@ -7,6 +7,7 @@ import re
 import unicodedata
 
 from coderag.core.models import RetrievalChunk
+from coderag.core.settings import get_settings
 from coderag.ingestion.embedding import EmbeddingClient
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import ChromaIndex
@@ -326,25 +327,37 @@ def hybrid_search(
                 metadata=meta,
             )
 
-    GLOBAL_BM25.ensure_repo_loaded(repo_id)
-    bm25_results = GLOBAL_BM25.query(
-        repo_id=repo_id,
-        text=normalized_query,
-        top_n=candidate_top_n,
+    settings = get_settings()
+    postgres_url = (settings.postgres_url or "").strip()
+
+    if postgres_url:
+        from coderag.storage.lexical_store import LexicalStore
+        lexical_results = LexicalStore(
+            postgres_url, settings.lexical_fts_language
+        ).query(repo_id=repo_id, text=normalized_query, top_n=candidate_top_n)
+    else:
+        GLOBAL_BM25.ensure_repo_loaded(repo_id)
+        lexical_results = GLOBAL_BM25.query(
+            repo_id=repo_id,
+            text=normalized_query,
+            top_n=candidate_top_n,
+        )
+
+    max_lexical_score = max(
+        (float(item["score"]) for item in lexical_results), default=0.0
     )
-    max_bm25_score = max((float(item["score"]) for item in bm25_results), default=0.0)
-    for item in bm25_results:
+    for item in lexical_results:
         item_id = str(item["id"])
-        bm25_score = float(item["score"])
-        normalized_bm25 = 0.0
-        if max_bm25_score > 0:
-            normalized_bm25 = bm25_score / max_bm25_score
-        weighted_bm25 = normalized_bm25 * BM25_WEIGHT
-        scores[item_id] += weighted_bm25
+        lexical_score = float(item["score"])
+        normalized_lexical = 0.0
+        if max_lexical_score > 0:
+            normalized_lexical = lexical_score / max_lexical_score
+        weighted_lexical = normalized_lexical * BM25_WEIGHT
+        scores[item_id] += weighted_lexical
         fused[item_id] = RetrievalChunk(
             id=item_id,
             text=item["text"],
-            score=weighted_bm25,
+            score=weighted_lexical,
             metadata=item["metadata"],
         )
 

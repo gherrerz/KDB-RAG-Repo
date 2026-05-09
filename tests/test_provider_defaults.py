@@ -12,7 +12,6 @@ def test_default_embedding_models_catalog() -> None:
     """Resuelve modelos por defecto esperados para embeddings."""
     assert default_embedding_model("openai") == "text-embedding-3-small"
     assert default_embedding_model("gemini") == "text-embedding-004"
-    assert default_embedding_model("vertex_ai") == "text-embedding-005"
     assert default_embedding_model("vertex") == "text-embedding-005"
 
 
@@ -20,7 +19,6 @@ def test_default_llm_models_catalog() -> None:
     """Resuelve modelos por defecto esperados para LLM."""
     assert default_llm_model("openai") == "gpt-4.1-mini"
     assert default_llm_model("gemini") == "gemini-2.0-flash"
-    assert default_llm_model("vertex_ai") == "gemini-2.0-flash"
     assert default_llm_model("vertex") == "gemini-2.0-flash"
 
 
@@ -43,7 +41,7 @@ def test_embedding_models_for_provider_catalog() -> None:
 def test_llm_models_for_provider_catalog() -> None:
     """Expone listas predefinidas de modelos LLM por provider."""
     gemini_models = llm_models_for_provider("gemini")
-    vertex_models = llm_models_for_provider("vertex_ai")
+    vertex_models = llm_models_for_provider("vertex")
 
     assert "gemini-2.0-flash" in gemini_models
     assert "gemini-2.0-flash-lite" in gemini_models

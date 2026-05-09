@@ -116,7 +116,7 @@ def test_repo_switch_syncs_embedding_runtime_defaults(
                 {
                     "query_ready": True,
                     "warnings": [],
-                    "last_embedding_provider": "vertex_ai",
+                    "last_embedding_provider": "vertex",
                     "last_embedding_model": "text-embedding-005",
                 }
             )

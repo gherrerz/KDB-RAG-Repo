@@ -64,7 +64,7 @@ def test_embedding_vertex_uses_predict_endpoint(monkeypatch: pytest.MonkeyPatch)
     )
     monkeypatch.setattr(module.requests, "post", fake_post)
 
-    client = EmbeddingClient(provider="vertex_ai", model="text-embedding-005")
+    client = EmbeddingClient(provider="vertex", model="text-embedding-005")
     vectors = client.embed_texts(["hola"])  # noqa: S101 - test
 
     assert "aiplatform.googleapis.com" in captured["url"]
@@ -105,5 +105,5 @@ def test_answer_client_vertex_enabled_requires_project(monkeypatch: pytest.Monke
     import coderag.llm.openai_client as module
 
     monkeypatch.setattr(module, "get_settings", lambda: _Settings())
-    client = AnswerClient(provider="vertex_ai")
+    client = AnswerClient(provider="vertex")
     assert client.enabled is False

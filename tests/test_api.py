@@ -1174,7 +1174,7 @@ def test_query_endpoint_returns_422_when_embedding_is_incompatible(monkeypatch) 
         assert repo_id == "mall"
         assert listed_in_catalog is True
         assert runtime_payload is not None
-        assert requested_embedding_provider == "vertex_ai"
+        assert requested_embedding_provider == "vertex"
         assert requested_embedding_model == "text-embedding-005"
         return {
             "repo_id": "mall",
@@ -1206,7 +1206,7 @@ def test_query_endpoint_returns_422_when_embedding_is_incompatible(monkeypatch) 
             "query": "cuales son las dependencias del proyecto",
             "top_n": 5,
             "top_k": 3,
-            "embedding_provider": "vertex_ai",
+            "embedding_provider": "vertex",
             "embedding_model": "text-embedding-005",
         },
     )

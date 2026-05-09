@@ -7,6 +7,12 @@ services:
     depends_on:
       neo4j:
         condition: service_healthy
+      chroma:
+        condition: service_healthy
+        required: false
+      postgres:
+        condition: service_healthy
+        required: false
     ports:
       - "8000:8000"
     environment:
@@ -35,6 +41,11 @@ services:
       VERTEX_AI_LABEL_USE_CASE_ID: ${VERTEX_AI_LABEL_USE_CASE_ID:-rag_query}
       VERTEX_AI_CORRELATION_ID_ENABLED: ${VERTEX_AI_CORRELATION_ID_ENABLED:-true}
       CHROMA_PATH: /app/storage/chroma
+      CHROMA_MODE: ${CHROMA_MODE:-embedded}
+      CHROMA_HOST: ${CHROMA_HOST:-chroma}
+      CHROMA_PORT: ${CHROMA_PORT:-8000}
+      CHROMA_TOKEN: ${CHROMA_TOKEN:-}
+      POSTGRES_URL: ${POSTGRES_URL:-}
       WORKSPACE_PATH: /app/storage/workspace
       RETAIN_WORKSPACE_AFTER_INGEST: ${RETAIN_WORKSPACE_AFTER_INGEST:-false}
       NEO4J_URI: bolt://neo4j:7687
@@ -128,6 +139,42 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  chroma:
+    image: chromadb/chroma:latest
+    profiles: ["remote"]
+    ports:
+      - "8001:8000"
+    environment:
+      IS_PERSISTENT: "TRUE"
+    volumes:
+      - chroma_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD-SHELL", "grep -aq 'chroma' /proc/1/cmdline"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    profiles: ["remote"]
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-coderag}
+      POSTGRES_USER: ${POSTGRES_USER:-coderag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-coderag}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-coderag} -d ${POSTGRES_DB:-coderag}"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
   worker:
     build:
       context: .
@@ -139,6 +186,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      chroma:
+        condition: service_healthy
+        required: false
+      postgres:
+        condition: service_healthy
+        required: false
     command:
       - python
       - -m
@@ -171,6 +224,11 @@ services:
       VERTEX_AI_LABEL_USE_CASE_ID: ${VERTEX_AI_LABEL_USE_CASE_ID:-rag_query}
       VERTEX_AI_CORRELATION_ID_ENABLED: ${VERTEX_AI_CORRELATION_ID_ENABLED:-true}
       CHROMA_PATH: /app/storage/chroma
+      CHROMA_MODE: ${CHROMA_MODE:-embedded}
+      CHROMA_HOST: ${CHROMA_HOST:-chroma}
+      CHROMA_PORT: ${CHROMA_PORT:-8000}
+      CHROMA_TOKEN: ${CHROMA_TOKEN:-}
+      POSTGRES_URL: ${POSTGRES_URL:-}
       WORKSPACE_PATH: /app/storage/workspace
       RETAIN_WORKSPACE_AFTER_INGEST: ${RETAIN_WORKSPACE_AFTER_INGEST:-false}
       NEO4J_URI: bolt://neo4j:7687
@@ -207,3 +265,5 @@ volumes:
   api_storage:
   neo4j_data:
   redis_data:
+  chroma_data:
+  postgres_data:

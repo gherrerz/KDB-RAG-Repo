@@ -292,7 +292,7 @@ def test_vertex_falls_back_to_gemini_rest_when_publisher_fails(monkeypatch) -> N
 
     monkeypatch.setattr(model_discovery, "_discover_gemini_rest_names", _fake_gemini)
 
-    result = model_discovery.discover_models("vertex_ai", "llm", force_refresh=True)
+    result = model_discovery.discover_models("vertex", "llm", force_refresh=True)
 
     assert result.source == "remote"
     assert result.warning == "vertex_catalog_via_gemini_rest"

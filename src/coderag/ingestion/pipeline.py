@@ -136,7 +136,13 @@ def _repo_has_existing_index_data(repo_id: str, logger: LoggerFn) -> bool:
             repo_id=repo_id,
         )
 
-    bm25_exists = GLOBAL_BM25.has_repo(repo_id) or GLOBAL_BM25.has_repo_snapshot(repo_id)
+    settings = get_settings()
+    postgres_url = (settings.postgres_url or "").strip()
+    if postgres_url:
+        from coderag.storage.lexical_store import LexicalStore
+        lexical_exists = LexicalStore(postgres_url, settings.lexical_fts_language).has_corpus(repo_id)
+    else:
+        lexical_exists = GLOBAL_BM25.has_repo(repo_id) or GLOBAL_BM25.has_repo_snapshot(repo_id)
 
     graph_exists = False
     graph = GraphBuilder()
@@ -150,15 +156,26 @@ def _repo_has_existing_index_data(repo_id: str, logger: LoggerFn) -> bool:
     finally:
         graph.close()
 
-    return chroma_total > 0 or bm25_exists or graph_exists
+    return chroma_total > 0 or lexical_exists or graph_exists
 
 
 def _purge_repo_indices(repo_id: str, logger: LoggerFn) -> None:
-    """Purga datos indexados previos por repo_id en Chroma, BM25 y Neo4j."""
+    """Purga datos indexados previos por repo_id en Chroma, BM25/Lexical y Neo4j."""
     chroma = ChromaIndex()
     chroma_deleted = chroma.delete_by_repo_id(repo_id=repo_id)
 
-    bm25_deleted = GLOBAL_BM25.delete_repo(repo_id)
+    settings = get_settings()
+    postgres_url = (settings.postgres_url or "").strip()
+    if postgres_url:
+        from coderag.storage.lexical_store import LexicalStore
+        lexical_deleted = LexicalStore(postgres_url, settings.lexical_fts_language).delete_repo(repo_id)
+        lexical_msg = f"lexical_docs={lexical_deleted['docs_removed']}"
+    else:
+        bm25_deleted = GLOBAL_BM25.delete_repo(repo_id)
+        lexical_msg = (
+            f"bm25_docs={bm25_deleted['docs_removed']}, "
+            f"bm25_snapshot={bm25_deleted['snapshot_removed']}"
+        )
 
     graph = GraphBuilder()
     try:
@@ -169,8 +186,7 @@ def _purge_repo_indices(repo_id: str, logger: LoggerFn) -> None:
     logger(
         "Purge por repo_id completado: "
         f"chroma_total={chroma_deleted['total']}, "
-        f"bm25_docs={bm25_deleted['docs_removed']}, "
-        f"bm25_snapshot={bm25_deleted['snapshot_removed']}, "
+        f"{lexical_msg}, "
         f"neo4j_nodes={graph_deleted}"
     )
 
@@ -461,6 +477,14 @@ def _index_bm25(
 
     GLOBAL_BM25.build(repo_id=repo_id, docs=docs, metadatas=metadatas)
     GLOBAL_BM25.persist_repo(repo_id)
+
+    settings = get_settings()
+    postgres_url = (settings.postgres_url or "").strip()
+    if postgres_url:
+        from coderag.storage.lexical_store import LexicalStore
+        LexicalStore(postgres_url, settings.lexical_fts_language).index_documents(
+            repo_id=repo_id, docs=docs, metadatas=metadatas
+        )
 
 
 def _index_graph(
