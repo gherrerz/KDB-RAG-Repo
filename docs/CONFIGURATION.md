@@ -228,8 +228,10 @@ GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
 
 Variables relevantes en Compose:
 
-- `API_IMAGE` (tag/registry de la imagen API).
+- `API_IMAGE`: tag/registry de la imagen API/worker. Default: `kdb-rag-api:local`.
+- `PYTHONPATH`: path de modulos dentro del contenedor API/worker. Default: `/app/src`.
 - `NEO4J_USER`, `NEO4J_PASSWORD`.
+- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`: defaults del servicio Postgres de Compose. Defaults: `coderag`, `coderag`, `coderag`.
 - `HEALTH_CHECK_OPENAI`, `HEALTH_CHECK_REDIS`.
 - `INGESTION_EXECUTION_MODE`, `INGESTION_QUEUE_NAME`.
 

@@ -27,6 +27,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    api_image: str = Field(default="kdb-rag-api:local", alias="API_IMAGE")
+    python_path: str = Field(default="/app/src", alias="PYTHONPATH")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     llm_provider: ProviderName = Field(default="vertex", alias="LLM_PROVIDER")
     llm_answer_model: str = Field(default="gemini-2.5-flash", alias="LLM_ANSWER_MODEL")
@@ -87,7 +89,7 @@ class Settings(BaseSettings):
         alias="VERTEX_AI_LABELS_ENABLED",
     )
     vertex_ai_label_service: str = Field(
-        default="kdb-rag",
+        default="webspec-coipo",
         alias="VERTEX_AI_LABEL_SERVICE",
     )
     vertex_ai_label_service_account: str = Field(
@@ -103,7 +105,7 @@ class Settings(BaseSettings):
         alias="VERTEX_AI_CORRELATION_ID_ENABLED",
     )
     # chroma_path sólo es relevante en CHROMA_MODE=embedded
-    chroma_path: Path = Field(default=Path("./storage/chroma"), alias="CHROMA_PATH")
+    chroma_path: Path = Field(default=Path("/app/storage/chroma"), alias="CHROMA_PATH")
     chroma_hnsw_space: HnswSpaceName = Field(
         default="cosine",
         alias="CHROMA_HNSW_SPACE",
@@ -113,6 +115,9 @@ class Settings(BaseSettings):
     chroma_port: int = Field(default=8000, alias="CHROMA_PORT")
     chroma_token: str = Field(default="", alias="CHROMA_TOKEN")
     postgres_url: str = Field(default="", alias="POSTGRES_URL")
+    postgres_db: str = Field(default="coderag", alias="POSTGRES_DB")
+    postgres_user: str = Field(default="coderag", alias="POSTGRES_USER")
+    postgres_password: str = Field(default="coderag", alias="POSTGRES_PASSWORD")
     postgres_pool_size: int = Field(default=5, alias="POSTGRES_POOL_SIZE")
     postgres_pool_timeout: float = Field(default=30.0, alias="POSTGRES_POOL_TIMEOUT")
     lexical_fts_language: str = Field(default="english", alias="LEXICAL_FTS_LANGUAGE")
@@ -181,7 +186,7 @@ class Settings(BaseSettings):
         alias="GIT_SSH_STRICT_HOST_KEY_CHECKING",
     )
     workspace_path: Path = Field(
-        default=Path("./storage/workspace"),
+        default=Path("/app/storage/workspace"),
         alias="WORKSPACE_PATH",
     )
     retain_workspace_after_ingest: bool = Field(
@@ -191,7 +196,7 @@ class Settings(BaseSettings):
     max_context_tokens: int = Field(default=8000, alias="MAX_CONTEXT_TOKENS")
     graph_hops: int = Field(default=2, alias="GRAPH_HOPS")
     query_max_seconds: float = Field(default=55.0, alias="QUERY_MAX_SECONDS")
-    openai_timeout_seconds: float = Field(default=20.0, alias="OPENAI_TIMEOUT_SECONDS")
+    openai_timeout_seconds: float = Field(default=60, alias="OPENAI_TIMEOUT_SECONDS")
     ui_request_timeout_seconds: float = Field(
         default=90.0,
         alias="UI_REQUEST_TIMEOUT_SECONDS",
@@ -281,7 +286,7 @@ class Settings(BaseSettings):
         default=10.0,
         alias="HEALTH_CHECK_TTL_SECONDS",
     )
-    health_check_openai: bool = Field(default=True, alias="HEALTH_CHECK_OPENAI")
+    health_check_openai: bool = Field(default=False, alias="HEALTH_CHECK_OPENAI")
     health_check_redis: bool = Field(default=False, alias="HEALTH_CHECK_REDIS")
     discovery_timeout_seconds: float = Field(
         default=8.0,
