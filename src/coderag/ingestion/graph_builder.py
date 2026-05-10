@@ -642,6 +642,87 @@ class GraphBuilder:
             )
             return [record.data() for record in records]
 
+    def query_file_paths_by_suffix(
+        self,
+        repo_id: str,
+        candidates: list[str],
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Resuelve archivos del repo por path exacto o sufijo relevante."""
+        normalized_candidates = [
+            item.strip().lower().lstrip("./")
+            for item in candidates
+            if item and item.strip()
+        ]
+        if not normalized_candidates:
+            return []
+
+        query = """
+        MATCH (f:File {repo_id: $repo_id})
+        WITH f, toLower(f.path) AS path_lower, $candidates AS candidates
+        WHERE any(candidate IN candidates
+                  WHERE path_lower = candidate
+                     OR path_lower ENDS WITH '/' + candidate)
+        WITH f, path_lower, candidates,
+             reduce(
+                 best = 0,
+                 candidate IN candidates |
+                 CASE
+                     WHEN path_lower = candidate THEN 3
+                     WHEN split(path_lower, '/')[size(split(path_lower, '/')) - 1] = candidate THEN
+                         CASE WHEN 2 > best THEN 2 ELSE best END
+                     WHEN path_lower ENDS WITH '/' + candidate THEN
+                         CASE WHEN 1 > best THEN 1 ELSE best END
+                     ELSE best
+                 END
+             ) AS match_score
+        RETURN f.path AS path, match_score
+        ORDER BY match_score DESC, size(split(f.path, '/')) ASC, f.path ASC
+        LIMIT $limit
+        """
+        with self.driver.session() as session:
+            records = session.run(
+                query,
+                repo_id=repo_id,
+                candidates=normalized_candidates,
+                limit=max(1, int(limit)),
+            )
+            return [record.data() for record in records]
+
+    def query_file_importers(
+        self,
+        repo_id: str,
+        target_paths: list[str],
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Devuelve importadores directos de archivos objetivo vía IMPORTS_FILE."""
+        normalized_target_paths = [
+            item.strip() for item in target_paths if item and item.strip()
+        ]
+        if not normalized_target_paths:
+            return []
+
+        query = """
+        MATCH (source:File {repo_id: $repo_id})-[r:IMPORTS_FILE]->(target:File {repo_id: $repo_id})
+        WHERE target.path IN $target_paths
+        RETURN DISTINCT target.path AS target_path,
+               split(source.path, '/')[size(split(source.path, '/')) - 1] AS label,
+               source.path AS path,
+               'file_importer' AS kind,
+               1 AS start_line,
+               1 AS end_line
+        ORDER BY target_path ASC, path ASC
+        LIMIT $limit
+        """
+        with self.driver.session() as session:
+            records = session.run(
+                query,
+                repo_id=repo_id,
+                target_paths=normalized_target_paths,
+                limit=max(1, int(limit)),
+            )
+            return [record.data() for record in records]
+
     def query_file_purpose_summaries(
         self,
         repo_id: str,

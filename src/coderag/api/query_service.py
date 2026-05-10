@@ -311,6 +311,72 @@ def _is_external_import_query(query: str) -> bool:
     return any(token in normalized for token in signals)
 
 
+def _normalize_query_signal_text(query: str) -> str:
+    """Normaliza texto de query para detectar intenciones con o sin tildes."""
+    normalized = unicodedata.normalize("NFKD", query.lower())
+    return "".join(
+        character
+        for character in normalized
+        if not unicodedata.combining(character)
+    )
+
+
+def _extract_file_reference_candidates(query: str) -> tuple[str, ...]:
+    """Extrae referencias tipo archivo/path desde la query del usuario."""
+    matches = re.findall(
+        r"[A-Za-z0-9_./\\-]+\."
+        r"(?:py|js|jsx|ts|tsx|java|json|ya?ml|md|txt|c|h|cpp|hpp|cs|go|rb|php|rs)",
+        query,
+        flags=re.IGNORECASE,
+    )
+    candidates: list[str] = []
+    for raw_match in matches:
+        candidate = raw_match.strip().strip("'\"`()[]{}<>,;:")
+        candidate = candidate.replace("\\", "/").lstrip("./")
+        if not candidate:
+            continue
+        candidates.append(candidate.lower())
+    return tuple(dict.fromkeys(candidates))
+
+
+def _is_reverse_file_import_query(query: str) -> bool:
+    """Detecta preguntas sobre qué archivos importan o usan un archivo dado."""
+    candidates = _extract_file_reference_candidates(query)
+    if not candidates:
+        return False
+
+    normalized = _normalize_query_signal_text(query)
+    reverse_patterns = (
+        r"\bwho\s+(?:imports?|uses?)\b",
+        r"\b(?:which|what)\s+files?\s+(?:import|imports|use|uses)\b",
+        r"\bwhere\s+is\s+.+\s+(?:imported|used)\b",
+        r"\b(?:imported|used)\s+by\b",
+        r"\bquien\s+(?:importa|usa)\b",
+        r"\b(?:que|cuales?)\s+archivos?\s+(?:importa|importan|usa|usan)\b",
+        r"\b(?:en\s+)?que\s+archivos?\s+se\s+(?:importa|importan|usa|usan)\b",
+        r"\bdonde\s+se\s+(?:importa|usa)\b",
+    )
+    if any(re.search(pattern, normalized) for pattern in reverse_patterns):
+        return True
+
+    has_file_scope = any(token in normalized for token in ("archivo", "archivos", "file", "files"))
+    has_import_signal = any(
+        token in normalized
+        for token in (
+            "importa",
+            "importan",
+            "imports",
+            "imported",
+            "usa",
+            "usan",
+            "use",
+            "uses",
+            "used",
+        )
+    )
+    return has_file_scope and has_import_signal
+
+
 def _extract_external_import_candidates(query: str) -> tuple[str, ...]:
     """Extrae refs candidatas para resolver imports externos desde la query."""
     excluded = {
@@ -463,6 +529,249 @@ def _build_external_import_seed_chunks(
             )
         )
     return seed_chunks, len(seed_chunks)
+
+
+def _resolve_reverse_file_target_paths(
+    repo_id: str,
+    query: str,
+) -> tuple[list[str], int, tuple[str, ...]]:
+    """Resuelve archivos objetivo mencionados en queries inversas de imports."""
+    if not _is_reverse_file_import_query(query):
+        return [], 0, ()
+
+    candidates = _extract_file_reference_candidates(query)
+    if not candidates:
+        return [], 0, ()
+
+    graph = GraphBuilder()
+    try:
+        rows = graph.query_file_paths_by_suffix(
+            repo_id=repo_id,
+            candidates=list(candidates),
+            limit=20,
+        )
+    except Exception:
+        return [], 0, candidates
+    finally:
+        graph.close()
+
+    if not rows:
+        return [], 0, candidates
+
+    best_score = max(int(row.get("match_score", 0) or 0) for row in rows)
+    target_paths = [
+        str(row.get("path", "") or "").strip()
+        for row in rows
+        if int(row.get("match_score", 0) or 0) == best_score
+        and str(row.get("path", "") or "").strip()
+    ]
+    return list(dict.fromkeys(target_paths)), best_score, candidates
+
+
+def _resolve_internal_file_importer_paths(
+    repo_id: str,
+    query: str,
+) -> tuple[dict[str, int], list[str], tuple[str, ...]]:
+    """Busca archivos que importan directamente al archivo objetivo citado."""
+    target_paths, match_score, candidates = _resolve_reverse_file_target_paths(
+        repo_id=repo_id,
+        query=query,
+    )
+    if not target_paths:
+        return {}, [], candidates
+
+    graph = GraphBuilder()
+    try:
+        rows = graph.query_file_importers(
+            repo_id=repo_id,
+            target_paths=target_paths,
+            limit=100,
+        )
+    except Exception:
+        return {}, target_paths, candidates
+    finally:
+        graph.close()
+
+    results: dict[str, int] = {}
+    for row in rows:
+        source_path = str(row.get("path", "") or "").strip()
+        if source_path:
+            results[source_path] = max(match_score, results.get(source_path, 0))
+    return results, target_paths, candidates
+
+
+def _apply_internal_file_importer_seed_boost(
+    repo_id: str,
+    query: str,
+    chunks: list[RetrievalChunk],
+) -> tuple[list[RetrievalChunk], int, dict[str, int], list[str]]:
+    """Prioriza paths respaldados por IMPORTS_FILE inverso para queries de importadores."""
+    if not chunks:
+        return chunks, 0, {}, []
+
+    matched_paths, target_paths, candidates = _resolve_internal_file_importer_paths(
+        repo_id=repo_id,
+        query=query,
+    )
+    if not matched_paths:
+        return chunks, 0, {}, target_paths
+
+    boosted_count = 0
+    rescored: list[tuple[float, RetrievalChunk]] = []
+    for chunk in chunks:
+        path = str(chunk.metadata.get("path", "") or "").strip()
+        boost = 0.0
+        if path in matched_paths:
+            boost += 0.24 + min(0.16, 0.05 * max(0, matched_paths[path] - 1))
+            haystack = " ".join(
+                [
+                    path.lower(),
+                    str(chunk.metadata.get("symbol_name", "") or "").lower(),
+                    chunk.text.lower(),
+                ]
+            )
+            if any(candidate in haystack for candidate in candidates):
+                boost += 0.08
+        if boost > 0:
+            boosted_count += 1
+            chunk.score = float(chunk.score) + boost
+        rescored.append((float(chunk.score), chunk))
+
+    rescored.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in rescored], boosted_count, matched_paths, target_paths
+
+
+def _build_internal_file_importer_seed_chunks(
+    repo_id: str,
+    matched_paths: dict[str, int],
+    chunks: list[RetrievalChunk],
+) -> tuple[list[RetrievalChunk], int]:
+    """Crea seeds sintéticos para importadores internos ausentes del retrieval inicial."""
+    if not matched_paths:
+        return [], 0
+
+    existing_paths = {
+        str(chunk.metadata.get("path", "") or "").strip() for chunk in chunks
+    }
+    seed_chunks: list[RetrievalChunk] = []
+    for path, match_score in sorted(
+        matched_paths.items(),
+        key=lambda item: (-int(item[1]), item[0]),
+    ):
+        if not path or path in existing_paths:
+            continue
+        seed_chunks.append(
+            RetrievalChunk(
+                id=f"reverse-import-seed:{repo_id}:{path}",
+                text=f"Graph-backed file importer seed for {path}",
+                score=0.44 + min(0.18, 0.06 * max(0, match_score - 1)),
+                metadata={
+                    "repo_id": repo_id,
+                    "path": path,
+                    "start_line": 1,
+                    "end_line": 1,
+                    "kind": "graph_file_importer_seed",
+                },
+            )
+        )
+    return seed_chunks, len(seed_chunks)
+
+
+def _build_reverse_file_import_answer(
+    target_paths: list[str],
+    items: list[InventoryItem],
+) -> str:
+    """Construye respuesta extractiva para importadores directos de un archivo."""
+    if not target_paths:
+        return "No se pudo resolver el archivo objetivo dentro del repositorio."
+    if len(target_paths) > 1:
+        lines = [
+            "La consulta coincide con múltiples archivos objetivo. Refina la ruta o nombre exacto.",
+            "",
+            "Candidatos:",
+        ]
+        lines.extend(f"- {path}" for path in target_paths[:10])
+        return "\n".join(lines)
+    if not items:
+        return (
+            f"No se encontraron archivos que importen directamente {target_paths[0]}."
+        )
+
+    lines = [
+        f"Se encontraron {len(items)} archivos que importan directamente {target_paths[0]}:",
+        "",
+        "Importadores directos:",
+    ]
+    lines.extend(f"- {item.path}" for item in items[:20])
+    return "\n".join(lines)
+
+
+def _run_reverse_file_import_query(
+    repo_id: str,
+    query: str,
+    page: int,
+    page_size: int,
+) -> InventoryQueryResponse | None:
+    """Ejecuta un lookup graph-first para preguntas de importadores directos."""
+    if not _is_reverse_file_import_query(query):
+        return None
+
+    settings = get_settings()
+    safe_page, safe_page_size = _sanitize_inventory_pagination(page, page_size)
+    target_paths, match_score, candidates = _resolve_reverse_file_target_paths(
+        repo_id=repo_id,
+        query=query,
+    )
+    target_ambiguous = len(target_paths) > 1
+
+    discovered_importers: list[dict] = []
+    if target_paths and not target_ambiguous:
+        graph = GraphBuilder()
+        try:
+            discovered_importers = graph.query_file_importers(
+                repo_id=repo_id,
+                target_paths=target_paths,
+                limit=int(getattr(settings, "inventory_entity_limit", 500)),
+            )
+        except Exception:
+            discovered_importers = []
+        finally:
+            graph.close()
+
+    total_items = len(discovered_importers)
+    offset = (safe_page - 1) * safe_page_size
+    paged_importers = discovered_importers[offset:offset + safe_page_size]
+    items = [
+        InventoryItem(
+            label=str(item.get("label", "")),
+            path=str(item.get("path", "unknown")),
+            kind=str(item.get("kind", "file_importer")),
+            start_line=int(item.get("start_line", 1)),
+            end_line=int(item.get("end_line", 1)),
+        )
+        for item in paged_importers
+    ]
+    citations = build_inventory_citations(items)
+    diagnostics = {
+        "reverse_import_lookup_used": True,
+        "reverse_import_target_candidates": list(candidates),
+        "reverse_import_target_paths": target_paths,
+        "reverse_import_target_match_score": match_score,
+        "reverse_import_target_ambiguous": target_ambiguous,
+        "reverse_import_match_count": total_items,
+        "inventory_route": "graph_reverse_import",
+    }
+    return InventoryQueryResponse(
+        answer=_build_reverse_file_import_answer(target_paths, items),
+        target=target_paths[0] if len(target_paths) == 1 else None,
+        module_name=None,
+        total=total_items,
+        page=safe_page,
+        page_size=safe_page_size,
+        items=items,
+        citations=citations,
+        diagnostics=diagnostics,
+    )
 
 
 def _is_literal_code_query(query: str) -> bool:
@@ -1718,9 +2027,13 @@ def _sanitize_inventory_pagination(page: int, page_size: int) -> tuple[int, int]
     """Normalice los argumentos de paginación de inventario frente a los límites configurados."""
     settings = get_settings()
     safe_page = max(1, int(page))
-    default_size = max(1, settings.inventory_page_size)
+    default_size = max(1, int(getattr(settings, "inventory_page_size", 80)))
     requested_size = int(page_size) if int(page_size) > 0 else default_size
-    safe_page_size = min(max(1, requested_size), settings.inventory_max_page_size)
+    max_page_size = max(
+        default_size,
+        int(getattr(settings, "inventory_max_page_size", 300)),
+    )
+    safe_page_size = min(max(1, requested_size), max_page_size)
     return safe_page, safe_page_size
 
 
@@ -2134,6 +2447,19 @@ def run_retrieval_query(
 ) -> RetrievalQueryResponse:
     """Ejecuta retrieval híbrido sin síntesis LLM y retorna evidencia estructurada."""
     settings = get_settings()
+    inventory_page_size = int(getattr(settings, "inventory_page_size", 80))
+    reverse_import_response = _run_reverse_file_import_query(
+        repo_id=repo_id,
+        query=query,
+        page=1,
+        page_size=inventory_page_size,
+    )
+    if reverse_import_response is not None:
+        return _build_retrieval_inventory_response(
+            inventory_response=reverse_import_response,
+            include_context=include_context,
+        )
+
     inventory_intent = _is_inventory_query(query)
     inventory_target = _extract_inventory_target(query) if inventory_intent else None
     if inventory_intent and inventory_target:
@@ -2141,7 +2467,7 @@ def run_retrieval_query(
             repo_id=repo_id,
             query=query,
             page=1,
-            page_size=settings.inventory_page_size,
+            page_size=inventory_page_size,
         )
         return _build_retrieval_inventory_response(
             inventory_response=inventory_response,
@@ -2186,6 +2512,16 @@ def run_retrieval_query(
     )
     stage_timings["hybrid_search_ms"] = _elapsed_milliseconds(retrieval_started_at)
 
+    internal_seed_started_at = monotonic()
+    initial, reverse_import_seed_boosted_count, reverse_import_matched_paths, reverse_import_target_paths = _apply_internal_file_importer_seed_boost(
+        repo_id=repo_id,
+        query=query,
+        chunks=initial,
+    )
+    stage_timings["reverse_import_seed_boost_ms"] = _elapsed_milliseconds(
+        internal_seed_started_at
+    )
+
     external_seed_started_at = monotonic()
     initial, external_import_seed_boosted_count, external_import_matched_paths = _apply_external_import_seed_boost(
         repo_id=repo_id,
@@ -2200,12 +2536,17 @@ def run_retrieval_query(
     reranked = rerank(query=query, chunks=initial, top_k=top_k)
     stage_timings["rerank_ms"] = _elapsed_milliseconds(rerank_started_at)
 
+    reverse_graph_seed_chunks, reverse_import_seed_chunks_added_count = _build_internal_file_importer_seed_chunks(
+        repo_id=repo_id,
+        matched_paths=reverse_import_matched_paths,
+        chunks=reranked,
+    )
     graph_seed_chunks, external_import_seed_chunks_added_count = _build_external_import_seed_chunks(
         repo_id=repo_id,
         matched_paths=external_import_matched_paths,
         chunks=reranked,
     )
-    graph_seed_input = reranked + graph_seed_chunks
+    graph_seed_input = reranked + reverse_graph_seed_chunks + graph_seed_chunks
 
     graph_started_at = monotonic()
     graph_context, semantic_expand_diagnostics = expand_with_graph_with_diagnostics(
@@ -2218,6 +2559,15 @@ def run_retrieval_query(
         graph_context,
     )
     semantic_expand_diagnostics = dict(semantic_expand_diagnostics)
+    semantic_expand_diagnostics["reverse_import_seed_boosted_count"] = (
+        reverse_import_seed_boosted_count
+    )
+    semantic_expand_diagnostics["reverse_import_seed_chunks_added_count"] = (
+        reverse_import_seed_chunks_added_count
+    )
+    semantic_expand_diagnostics["reverse_import_target_paths"] = (
+        reverse_import_target_paths
+    )
     semantic_expand_diagnostics["external_import_seed_boosted_count"] = (
         external_import_seed_boosted_count
     )
@@ -2326,6 +2676,29 @@ def run_query(
 ) -> QueryResponse:
     """Ejecute el proceso de consulta completo y devuelva la respuesta con citas."""
     settings = get_settings()
+    inventory_page_size = int(getattr(settings, "inventory_page_size", 80))
+    reverse_import_response = _run_reverse_file_import_query(
+        repo_id=repo_id,
+        query=query,
+        page=1,
+        page_size=inventory_page_size,
+    )
+    if reverse_import_response is not None:
+        diagnostics = dict(reverse_import_response.diagnostics)
+        diagnostics.update(
+            {
+                "inventory_route": "graph_reverse_import",
+                "inventory_page": reverse_import_response.page,
+                "inventory_page_size": reverse_import_response.page_size,
+                "inventory_total": reverse_import_response.total,
+            }
+        )
+        return QueryResponse(
+            answer=reverse_import_response.answer,
+            citations=reverse_import_response.citations,
+            diagnostics=diagnostics,
+        )
+
     inventory_intent = _is_inventory_query(query)
     inventory_target = _extract_inventory_target(query) if inventory_intent else None
     if inventory_intent and inventory_target:
@@ -2333,7 +2706,7 @@ def run_query(
             repo_id=repo_id,
             query=query,
             page=1,
-            page_size=settings.inventory_page_size,
+            page_size=inventory_page_size,
         )
         diagnostics = dict(inventory_response.diagnostics)
         diagnostics.update(
@@ -2388,6 +2761,16 @@ def run_query(
     )
     stage_timings["hybrid_search_ms"] = _elapsed_milliseconds(retrieval_started_at)
 
+    internal_seed_started_at = monotonic()
+    initial, reverse_import_seed_boosted_count, reverse_import_matched_paths, reverse_import_target_paths = _apply_internal_file_importer_seed_boost(
+        repo_id=repo_id,
+        query=query,
+        chunks=initial,
+    )
+    stage_timings["reverse_import_seed_boost_ms"] = _elapsed_milliseconds(
+        internal_seed_started_at
+    )
+
     external_seed_started_at = monotonic()
     initial, external_import_seed_boosted_count, external_import_matched_paths = _apply_external_import_seed_boost(
         repo_id=repo_id,
@@ -2402,12 +2785,17 @@ def run_query(
     reranked = rerank(query=query, chunks=initial, top_k=top_k)
     stage_timings["rerank_ms"] = _elapsed_milliseconds(rerank_started_at)
 
+    reverse_graph_seed_chunks, reverse_import_seed_chunks_added_count = _build_internal_file_importer_seed_chunks(
+        repo_id=repo_id,
+        matched_paths=reverse_import_matched_paths,
+        chunks=reranked,
+    )
     graph_seed_chunks, external_import_seed_chunks_added_count = _build_external_import_seed_chunks(
         repo_id=repo_id,
         matched_paths=external_import_matched_paths,
         chunks=reranked,
     )
-    graph_seed_input = reranked + graph_seed_chunks
+    graph_seed_input = reranked + reverse_graph_seed_chunks + graph_seed_chunks
 
     parallel_started_at = monotonic()
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -2423,6 +2811,15 @@ def run_query(
         graph_context,
     )
     semantic_expand_diagnostics = dict(semantic_expand_diagnostics)
+    semantic_expand_diagnostics["reverse_import_seed_boosted_count"] = (
+        reverse_import_seed_boosted_count
+    )
+    semantic_expand_diagnostics["reverse_import_seed_chunks_added_count"] = (
+        reverse_import_seed_chunks_added_count
+    )
+    semantic_expand_diagnostics["reverse_import_target_paths"] = (
+        reverse_import_target_paths
+    )
     semantic_expand_diagnostics["external_import_seed_boosted_count"] = (
         external_import_seed_boosted_count
     )

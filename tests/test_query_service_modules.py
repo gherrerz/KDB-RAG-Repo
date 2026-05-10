@@ -16,6 +16,24 @@ def test_is_module_query_detects_spanish_and_english_terms() -> None:
     assert not query_service._is_module_query("donde se define auth")
 
 
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("who uses metadata_store.py", True),
+        ("where is metadata_store.py used", True),
+        ("quien usa metadata_store.py", True),
+        ("en que archivos se usa metadata_store.py", True),
+        ("metadata_store.py", False),
+    ],
+)
+def test_is_reverse_file_import_query_detects_use_variants(
+    query: str,
+    expected: bool,
+) -> None:
+    """Reconoce variantes frecuentes de consultas inversas basadas en uso/import."""
+    assert query_service._is_reverse_file_import_query(query) is expected
+
+
 def test_discover_repo_modules_uses_persisted_graph_modules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -36,6 +54,194 @@ def test_discover_repo_modules_uses_persisted_graph_modules(
     assert "web-client" in modules
     assert "docs" not in modules
     assert "node_modules" not in modules
+
+
+def test_apply_internal_file_importer_seed_boost_promotes_importer_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Promueve chunks cuyo path importa directamente al archivo objetivo."""
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(self, repo_id: str, candidates: list[str], limit: int = 20) -> list[dict[str, object]]:
+            assert repo_id == "repo1"
+            assert "metadata_store.py" in candidates
+            return [{"path": "src/coderag/storage/metadata_store.py", "match_score": 2}]
+
+        def query_file_importers(self, repo_id: str, target_paths: list[str], limit: int = 100) -> list[dict[str, object]]:
+            assert repo_id == "repo1"
+            assert target_paths == ["src/coderag/storage/metadata_store.py"]
+            return [{"path": "src/coderag/jobs/worker.py", "target_path": target_paths[0]}]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+
+    chunks = [
+        RetrievalChunk(
+            id="c1",
+            text="General storage helpers",
+            score=0.80,
+            metadata={"path": "src/coderag/core/storage_health.py", "start_line": 1, "end_line": 5},
+        ),
+        RetrievalChunk(
+            id="c2",
+            text="from coderag.storage.metadata_store import MetadataStore",
+            score=0.55,
+            metadata={
+                "path": "src/coderag/jobs/worker.py",
+                "symbol_name": "_build_metadata_store",
+                "start_line": 1,
+                "end_line": 10,
+            },
+        ),
+    ]
+
+    boosted, boosted_count, matched_paths, target_paths = query_service._apply_internal_file_importer_seed_boost(
+        repo_id="repo1",
+        query="which files import metadata_store.py directly",
+        chunks=chunks,
+    )
+
+    assert boosted_count == 1
+    assert matched_paths == {"src/coderag/jobs/worker.py": 2}
+    assert target_paths == ["src/coderag/storage/metadata_store.py"]
+    assert boosted[0].metadata["path"] == "src/coderag/jobs/worker.py"
+
+
+def test_build_internal_file_importer_seed_chunks_adds_missing_importer_paths() -> None:
+    """Crea seeds sintéticos solo para importadores internos ausentes del resultado actual."""
+
+    chunks = [
+        RetrievalChunk(
+            id="c1",
+            text="existing chunk",
+            score=0.9,
+            metadata={"repo_id": "repo1", "path": "src/already.py", "start_line": 1, "end_line": 5},
+        )
+    ]
+
+    seed_chunks, seed_count = query_service._build_internal_file_importer_seed_chunks(
+        repo_id="repo1",
+        matched_paths={
+            "src/already.py": 1,
+            "src/coderag/jobs/worker.py": 2,
+        },
+        chunks=chunks,
+    )
+
+    assert seed_count == 1
+    assert seed_chunks[0].metadata["path"] == "src/coderag/jobs/worker.py"
+    assert seed_chunks[0].metadata["kind"] == "graph_file_importer_seed"
+
+
+def test_run_retrieval_query_routes_reverse_import_query_graph_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Atiende queries explícitas de importadores sin depender de hybrid search."""
+
+    class _Settings:
+        inventory_page_size = 50
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(self, repo_id: str, candidates: list[str], limit: int = 20) -> list[dict[str, object]]:
+            assert repo_id == "repo1"
+            return [{"path": "src/coderag/storage/metadata_store.py", "match_score": 2}]
+
+        def query_file_importers(self, repo_id: str, target_paths: list[str], limit: int = 100) -> list[dict[str, object]]:
+            return [
+                {
+                    "target_path": target_paths[0],
+                    "label": "worker.py",
+                    "path": "src/coderag/jobs/worker.py",
+                    "kind": "file_importer",
+                    "start_line": 1,
+                    "end_line": 1,
+                },
+                {
+                    "target_path": target_paths[0],
+                    "label": "storage_health.py",
+                    "path": "src/coderag/core/storage_health.py",
+                    "kind": "file_importer",
+                    "start_line": 1,
+                    "end_line": 1,
+                },
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("hybrid_search no debe ejecutarse")),
+    )
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="which files import metadata_store.py directly",
+        top_n=10,
+        top_k=5,
+        include_context=False,
+    )
+
+    assert [chunk.path for chunk in result.chunks] == [
+        "src/coderag/jobs/worker.py",
+        "src/coderag/core/storage_health.py",
+    ]
+    assert result.diagnostics["reverse_import_lookup_used"] is True
+    assert result.diagnostics["reverse_import_target_paths"] == [
+        "src/coderag/storage/metadata_store.py"
+    ]
+
+
+def test_run_query_routes_reverse_import_query_graph_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Responde queries explícitas de importadores en query general vía grafo."""
+
+    class _Settings:
+        inventory_page_size = 50
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(self, repo_id: str, candidates: list[str], limit: int = 20) -> list[dict[str, object]]:
+            return [{"path": "src/coderag/storage/metadata_store.py", "match_score": 2}]
+
+        def query_file_importers(self, repo_id: str, target_paths: list[str], limit: int = 100) -> list[dict[str, object]]:
+            return [
+                {
+                    "target_path": target_paths[0],
+                    "label": "reset_service.py",
+                    "path": "src/coderag/maintenance/reset_service.py",
+                    "kind": "file_importer",
+                    "start_line": 1,
+                    "end_line": 1,
+                }
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("hybrid_search no debe ejecutarse")),
+    )
+
+    result = query_service.run_query(
+        repo_id="repo1",
+        query="who imports metadata_store.py",
+        top_n=10,
+        top_k=5,
+    )
+
+    assert "src/coderag/maintenance/reset_service.py" in result.answer
+    assert result.diagnostics["reverse_import_lookup_used"] is True
+    assert result.citations[0].path == "src/coderag/maintenance/reset_service.py"
 
 
 def test_apply_external_import_seed_boost_promotes_matching_paths(

@@ -255,6 +255,9 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 - `semantic_nodes_used`: nodos de grafo efectivamente incorporados
 - `semantic_file_context_used`: nodos adicionales incorporados desde `IMPORTS_FILE` e `IMPORTS_EXTERNAL_FILE`
 - `semantic_file_context_pruned`: nodos de file-context descartados por budget
+- `reverse_import_seed_boosted_count`: chunks rerankeados por lookup inverso de `IMPORTS_FILE`
+- `reverse_import_seed_chunks_added_count`: seeds sintéticos agregados para importadores internos ausentes del retrieval inicial
+- `reverse_import_target_paths`: archivos objetivo resueltos cuando la query pregunta qué archivos importan un path concreto
 - `semantic_graph_chunk_boosted_count`: chunks rerankeados por señal de aristas de archivo
 - `semantic_graph_citations_count`: citas derivadas agregadas desde aristas de archivo
 - `semantic_expand_ms`: latencia de expansión semántica
@@ -385,6 +388,11 @@ Notas operativas de inventory/discovery:
 - La explicación textual usa `purpose_summary` persistido en Neo4j cuando está disponible.
 - El inventario de dependencias usa `IMPORTS_FILE` e `IMPORTS_EXTERNAL_FILE`
   cuando esas aristas existen en el grafo del repositorio.
+- Consultas como `who imports metadata_store.py`, `who uses metadata_store.py`,
+  `where is X used`, `which files import X directly` o `qué archivos importan`
+  y `en qué archivos se usa X` pueden resolverse por una ruta graph-first
+  específica que busca importadores directos del archivo objetivo vía
+  `IMPORTS_FILE`, sin depender del retrieval híbrido.
 - Para frontend React/Next, la ingesta ahora reconoce heurísticas de archivo como
   `page.tsx`, `layout.tsx`, `loading.tsx`, `route.ts` y `middleware.ts`, además de
   hooks `use*` y providers `*Provider`, para describir mejor el propósito del archivo

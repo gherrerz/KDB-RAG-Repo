@@ -574,6 +574,159 @@ def test_query_inventory_dependency_uses_file_edges() -> None:
     }
 
 
+def test_query_file_paths_by_suffix_prefers_exact_and_suffix_matches() -> None:
+    """Resuelve archivos candidatos por path exacto, basename o sufijo."""
+
+    class _FilePathRecord:
+        def __init__(self, path: str, match_score: int) -> None:
+            self._payload = {"path": path, "match_score": match_score}
+
+        def data(self) -> dict[str, object]:
+            return self._payload
+
+    class _FilePathSession:
+        def __init__(self) -> None:
+            self.query = ""
+            self.kwargs: dict[str, Any] = {}
+
+        def run(self, query: str, **kwargs: Any) -> list[_FilePathRecord]:
+            self.query = query
+            self.kwargs = kwargs
+            return [
+                _FilePathRecord(
+                    path="src/coderag/storage/metadata_store.py",
+                    match_score=2,
+                )
+            ]
+
+        def __enter__(self) -> "_FilePathSession":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class _FilePathDriver:
+        def __init__(self) -> None:
+            self.last_session: _FilePathSession | None = None
+
+        def session(self) -> _FilePathSession:
+            self.last_session = _FilePathSession()
+            return self.last_session
+
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _FilePathDriver()
+    builder.driver = driver
+
+    records = builder.query_file_paths_by_suffix(
+        repo_id="repo-x",
+        candidates=["metadata_store.py", "./src/coderag/storage/metadata_store.py"],
+        limit=5,
+    )
+
+    assert records == [
+        {"path": "src/coderag/storage/metadata_store.py", "match_score": 2}
+    ]
+    assert driver.last_session is not None
+    assert "path_lower ENDS WITH '/' + candidate" in driver.last_session.query
+    assert "split(path_lower, '/')[size(split(path_lower, '/')) - 1] = candidate" in driver.last_session.query
+    assert driver.last_session.kwargs == {
+        "repo_id": "repo-x",
+        "candidates": ["metadata_store.py", "src/coderag/storage/metadata_store.py"],
+        "limit": 5,
+    }
+
+
+def test_query_file_importers_returns_direct_importer_files() -> None:
+    """Busca importadores directos de un archivo objetivo mediante IMPORTS_FILE."""
+
+    class _ImporterRecord:
+        def __init__(
+            self,
+            target_path: str,
+            label: str,
+            path: str,
+            kind: str,
+            start_line: int,
+            end_line: int,
+        ) -> None:
+            self._payload = {
+                "target_path": target_path,
+                "label": label,
+                "path": path,
+                "kind": kind,
+                "start_line": start_line,
+                "end_line": end_line,
+            }
+
+        def data(self) -> dict[str, object]:
+            return self._payload
+
+    class _ImporterSession:
+        def __init__(self) -> None:
+            self.query = ""
+            self.kwargs: dict[str, Any] = {}
+
+        def run(self, query: str, **kwargs: Any) -> list[_ImporterRecord]:
+            self.query = query
+            self.kwargs = kwargs
+            return [
+                _ImporterRecord(
+                    target_path="src/coderag/storage/metadata_store.py",
+                    label="worker.py",
+                    path="src/coderag/jobs/worker.py",
+                    kind="file_importer",
+                    start_line=1,
+                    end_line=1,
+                ),
+                _ImporterRecord(
+                    target_path="src/coderag/storage/metadata_store.py",
+                    label="storage_health.py",
+                    path="src/coderag/core/storage_health.py",
+                    kind="file_importer",
+                    start_line=1,
+                    end_line=1,
+                ),
+            ]
+
+        def __enter__(self) -> "_ImporterSession":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class _ImporterDriver:
+        def __init__(self) -> None:
+            self.last_session: _ImporterSession | None = None
+
+        def session(self) -> _ImporterSession:
+            self.last_session = _ImporterSession()
+            return self.last_session
+
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _ImporterDriver()
+    builder.driver = driver
+
+    records = builder.query_file_importers(
+        repo_id="repo-x",
+        target_paths=["src/coderag/storage/metadata_store.py"],
+        limit=10,
+    )
+
+    assert [item["path"] for item in records] == [
+        "src/coderag/jobs/worker.py",
+        "src/coderag/core/storage_health.py",
+    ]
+    assert all(item["kind"] == "file_importer" for item in records)
+    assert driver.last_session is not None
+    assert "-[r:IMPORTS_FILE]->(target:File" in driver.last_session.query
+    assert "WHERE target.path IN $target_paths" in driver.last_session.query
+    assert driver.last_session.kwargs == {
+        "repo_id": "repo-x",
+        "target_paths": ["src/coderag/storage/metadata_store.py"],
+        "limit": 10,
+    }
+
+
 def test_expand_symbol_file_context_uses_file_edges() -> None:
     """Expande contexto de archivo a partir de símbolos semilla mediante aristas File."""
 
