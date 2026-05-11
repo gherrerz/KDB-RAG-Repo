@@ -1,6 +1,8 @@
 """Pruebas de comportamiento de procesamiento por lotes del índice Chroma."""
 
+import base64
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 from chromadb.errors import InvalidDimensionException
@@ -91,6 +93,27 @@ class _FakeClient:
         return 3
 
 
+class _FakeRemoteClient(_FakeClient):
+    """Cliente remoto falso que registra los parámetros de construcción."""
+
+    def __init__(self, host: str, port: int, headers: dict[str, str]) -> None:
+        """Inicializa un cliente remoto falso con su configuración efectiva."""
+        super().__init__()
+        self.host = host
+        self.port = port
+        self.headers = headers
+
+
+def _prepare_embedded_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    module: Any,
+) -> None:
+    """Fuerza CHROMA_MODE=embedded para pruebas unitarias locales del índice."""
+    monkeypatch.setenv("CHROMA_MODE", "embedded")
+    module.get_settings.cache_clear()
+    module.ChromaIndex.reset_shared_state()
+
+
 def test_upsert_is_split_by_chroma_max_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:
     """Divide los upserts en múltiples llamadas que respetan el tamaño máximo de lote."""
     fake_client = _FakeClient()
@@ -102,10 +125,11 @@ def test_upsert_is_split_by_chroma_max_batch_size(monkeypatch: pytest.MonkeyPatc
         "PersistentClient",
         lambda *args, **kwargs: fake_client,
     )
-    module.ChromaIndex._shared_client = None
-    module.ChromaIndex._shared_collections = None
-    module.ChromaIndex._shared_path = None
-    index = ChromaIndex()
+    _prepare_embedded_settings(monkeypatch, module)
+    try:
+        index = ChromaIndex()
+    finally:
+        module.get_settings.cache_clear()
 
     ids = [f"id{i}" for i in range(7)]
     docs = ["x"] * 7
@@ -131,10 +155,7 @@ def test_collections_are_created_with_configured_hnsw_space(
         lambda *args, **kwargs: fake_client,
     )
     monkeypatch.setenv("CHROMA_HNSW_SPACE", "l2")
-    module.get_settings.cache_clear()
-    module.ChromaIndex._shared_client = None
-    module.ChromaIndex._shared_collections = None
-    module.ChromaIndex._shared_path = None
+    _prepare_embedded_settings(monkeypatch, module)
 
     try:
         module.ChromaIndex()
@@ -143,6 +164,77 @@ def test_collections_are_created_with_configured_hnsw_space(
 
     for metadata in fake_client.metadata_calls.values():
         assert metadata == {"hnsw:space": "l2"}
+
+
+def test_remote_client_uses_bearer_token_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Construye Authorization Bearer cuando CHROMA_TOKEN está configurado."""
+    import coderag.ingestion.index_chroma as module
+
+    captured: dict[str, Any] = {}
+
+    def _fake_http_client(host: str, port: int, headers: dict[str, str]) -> _FakeRemoteClient:
+        captured["client"] = _FakeRemoteClient(host, port, headers)
+        return captured["client"]
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="bearer-token",
+        chroma_username="",
+        chroma_password="",
+        resolve_chroma_hnsw_space=lambda: "cosine",
+    )
+
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module.chromadb, "HttpClient", _fake_http_client)
+    module.ChromaIndex.reset_shared_state()
+
+    index = module.ChromaIndex()
+
+    assert index.client is captured["client"]
+    assert captured["client"].host == "chroma.example.local"
+    assert captured["client"].port == 8443
+    assert captured["client"].headers == {
+        "Authorization": "Bearer bearer-token"
+    }
+
+
+def test_remote_client_uses_basic_auth_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Construye Authorization Basic cuando hay usuario y password."""
+    import coderag.ingestion.index_chroma as module
+
+    captured: dict[str, Any] = {}
+
+    def _fake_http_client(host: str, port: int, headers: dict[str, str]) -> _FakeRemoteClient:
+        captured["client"] = _FakeRemoteClient(host, port, headers)
+        return captured["client"]
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="",
+        chroma_username="svc-user",
+        chroma_password="svc-pass",
+        resolve_chroma_hnsw_space=lambda: "cosine",
+    )
+
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module.chromadb, "HttpClient", _fake_http_client)
+    module.ChromaIndex.reset_shared_state()
+
+    index = module.ChromaIndex()
+
+    expected = base64.b64encode(b"svc-user:svc-pass").decode("ascii")
+    assert index.client is captured["client"]
+    assert captured["client"].headers == {
+        "Authorization": f"Basic {expected}"
+    }
 
 
 def test_upsert_recovers_from_dimension_message_error(
@@ -163,10 +255,11 @@ def test_upsert_recovers_from_dimension_message_error(
         "PersistentClient",
         lambda *args, **kwargs: fake_client,
     )
-    module.ChromaIndex._shared_client = None
-    module.ChromaIndex._shared_collections = None
-    module.ChromaIndex._shared_path = None
-    index = ChromaIndex()
+    _prepare_embedded_settings(monkeypatch, module)
+    try:
+        index = ChromaIndex()
+    finally:
+        module.get_settings.cache_clear()
 
     ids = ["id1", "id2"]
     docs = ["x", "y"]
@@ -197,10 +290,11 @@ def test_upsert_recovers_from_collection_expect_dimension_error(
         "PersistentClient",
         lambda *args, **kwargs: fake_client,
     )
-    module.ChromaIndex._shared_client = None
-    module.ChromaIndex._shared_collections = None
-    module.ChromaIndex._shared_path = None
-    index = ChromaIndex()
+    _prepare_embedded_settings(monkeypatch, module)
+    try:
+        index = ChromaIndex()
+    finally:
+        module.get_settings.cache_clear()
 
     ids = ["id1", "id2"]
     docs = ["x", "y"]
@@ -226,10 +320,11 @@ def test_delete_by_repo_id_removes_documents_from_all_collections(
         "PersistentClient",
         lambda *args, **kwargs: fake_client,
     )
-    module.ChromaIndex._shared_client = None
-    module.ChromaIndex._shared_collections = None
-    module.ChromaIndex._shared_path = None
-    index = ChromaIndex()
+    _prepare_embedded_settings(monkeypatch, module)
+    try:
+        index = ChromaIndex()
+    finally:
+        module.get_settings.cache_clear()
 
     for collection in fake_client.collections.values():
         collection.repo_ids = ["r1:a", "r1:b", "other:c"]

@@ -13,7 +13,11 @@ from chromadb.config import Settings as ChromaSettings
 from coderag.core.settings import get_settings
 from coderag.ingestion.graph_builder import GraphBuilder
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
-from coderag.ingestion.index_chroma import COLLECTIONS, ChromaIndex
+from coderag.ingestion.index_chroma import (
+    COLLECTIONS,
+    ChromaIndex,
+    build_remote_chroma_client,
+)
 from coderag.storage.metadata_store import MetadataStore
 
 
@@ -78,14 +82,7 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
     chroma_reset_done = False
     if settings.chroma_mode == "remote":
         try:
-            headers: dict[str, str] = {}
-            if settings.chroma_token:
-                headers["Authorization"] = f"Bearer {settings.chroma_token}"
-            client = chromadb.HttpClient(
-                host=settings.chroma_host,
-                port=settings.chroma_port,
-                headers=headers,
-            )
+            client = build_remote_chroma_client(settings)
             for collection_name in COLLECTIONS:
                 try:
                     client.delete_collection(collection_name)

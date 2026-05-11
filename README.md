@@ -63,12 +63,20 @@ VERTEX_API_BASE_URL=https://us-central1-aiplatform.googleapis.com
 CHROMA_MODE=remote
 CHROMA_HOST=<chroma-host>
 CHROMA_PORT=8000
+# Opcion A: bearer token
+CHROMA_TOKEN=<chroma-bearer-token>
+# Opcion B: Basic auth (mutuamente excluyente con CHROMA_TOKEN)
+# CHROMA_USERNAME=<chroma-username>
+# CHROMA_PASSWORD=<chroma-password>
 POSTGRES_URL=<postgres-connection-string>
 ```
 
 `project_id` se deriva del JSON Base64 del service account y `location` se deriva
 del host configurado en `VERTEX_API_BASE_URL`. `VERTEX_AI_PROJECT_ID` y
 `VERTEX_AI_LOCATION` quedan solo como fallback legacy.
+
+Para Chroma remoto, el runtime soporta `CHROMA_TOKEN` o `CHROMA_USERNAME` +
+`CHROMA_PASSWORD`, pero no ambos mecanismos a la vez.
 
 1. Levanta stack local simplificado con Docker Compose.
 

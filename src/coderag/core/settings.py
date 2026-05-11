@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from coderag.core.provider_model_catalog import normalize_provider_name
@@ -114,6 +114,8 @@ class Settings(BaseSettings):
     chroma_host: str = Field(default="localhost", alias="CHROMA_HOST")
     chroma_port: int = Field(default=8000, alias="CHROMA_PORT")
     chroma_token: str = Field(default="", alias="CHROMA_TOKEN")
+    chroma_username: str = Field(default="", alias="CHROMA_USERNAME")
+    chroma_password: str = Field(default="", alias="CHROMA_PASSWORD")
     postgres_url: str = Field(default="", alias="POSTGRES_URL")
     postgres_db: str = Field(default="coderag", alias="POSTGRES_DB")
     postgres_user: str = Field(default="coderag", alias="POSTGRES_USER")
@@ -316,6 +318,33 @@ class Settings(BaseSettings):
                 f"(valor recibido: {value!r})."
             )
         return normalized
+
+    @model_validator(mode="after")
+    def _validate_chroma_remote_auth(self) -> "Settings":
+        """Valida combinaciones soportadas de autenticación remota de Chroma."""
+        token = (self.chroma_token or "").strip()
+        username = (self.chroma_username or "").strip()
+        password = (self.chroma_password or "").strip()
+
+        self.chroma_token = token
+        self.chroma_username = username
+        self.chroma_password = password
+
+        has_basic = bool(username or password)
+        if token and has_basic:
+            raise ValueError(
+                "CHROMA_TOKEN es mutuamente excluyente con "
+                "CHROMA_USERNAME/CHROMA_PASSWORD."
+            )
+        if username and not password:
+            raise ValueError(
+                "CHROMA_PASSWORD es obligatorio cuando CHROMA_USERNAME está configurado."
+            )
+        if password and not username:
+            raise ValueError(
+                "CHROMA_USERNAME es obligatorio cuando CHROMA_PASSWORD está configurado."
+            )
+        return self
 
     def resolve_embedding_provider(self, override: str | None = None) -> ProviderName:
         """Resuelve el proveedor de embeddings con prioridad override > env."""

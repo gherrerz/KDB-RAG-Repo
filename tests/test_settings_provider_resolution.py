@@ -93,32 +93,77 @@ def test_chroma_hnsw_space_rejects_invalid_values() -> None:
         Settings(CHROMA_HNSW_SPACE="ip", _env_file=None)
 
 
-def test_semantic_graph_java_flag_defaults_to_false() -> None:
-    """Mantiene deshabilitada la extracción semántica Java por defecto."""
+def test_chroma_remote_auth_accepts_token_only() -> None:
+    """Permite autenticación bearer cuando no se configura Basic auth."""
+    settings = Settings(CHROMA_TOKEN="secret-token", _env_file=None)
+
+    assert settings.chroma_token == "secret-token"
+    assert settings.chroma_username == ""
+    assert settings.chroma_password == ""
+
+
+def test_chroma_remote_auth_accepts_basic_only() -> None:
+    """Permite autenticación Basic cuando no se configura token bearer."""
+    settings = Settings(
+        CHROMA_USERNAME="svc-user",
+        CHROMA_PASSWORD="svc-pass",
+        _env_file=None,
+    )
+
+    assert settings.chroma_token == ""
+    assert settings.chroma_username == "svc-user"
+    assert settings.chroma_password == "svc-pass"
+
+
+def test_chroma_remote_auth_rejects_mixed_token_and_basic() -> None:
+    """Rechaza configurar simultáneamente bearer token y Basic auth."""
+    with pytest.raises(ValueError, match="mutuamente excluyente"):
+        Settings(
+            CHROMA_TOKEN="secret-token",
+            CHROMA_USERNAME="svc-user",
+            CHROMA_PASSWORD="svc-pass",
+            _env_file=None,
+        )
+
+
+def test_chroma_remote_auth_rejects_username_without_password() -> None:
+    """Rechaza usuario Basic sin password asociado."""
+    with pytest.raises(ValueError, match="CHROMA_PASSWORD"):
+        Settings(CHROMA_USERNAME="svc-user", _env_file=None)
+
+
+def test_chroma_remote_auth_rejects_password_without_username() -> None:
+    """Rechaza password Basic sin usuario asociado."""
+    with pytest.raises(ValueError, match="CHROMA_USERNAME"):
+        Settings(CHROMA_PASSWORD="svc-pass", _env_file=None)
+
+
+def test_semantic_graph_java_flag_defaults_to_true() -> None:
+    """Mantiene habilitada la extracción semántica Java por defecto."""
     settings = Settings(_env_file=None)
 
-    assert settings.semantic_graph_java_enabled is False
+    assert settings.semantic_graph_java_enabled is True
 
 
-def test_semantic_graph_typescript_flag_defaults_to_false() -> None:
-    """Mantiene deshabilitada la extracción semántica TypeScript por defecto."""
+def test_semantic_graph_typescript_flag_defaults_to_true() -> None:
+    """Mantiene habilitada la extracción semántica TypeScript por defecto."""
     settings = Settings(_env_file=None)
 
-    assert settings.semantic_graph_typescript_enabled is False
+    assert settings.semantic_graph_typescript_enabled is True
 
 
-def test_semantic_graph_javascript_flag_defaults_to_false() -> None:
-    """Mantiene deshabilitada la extracción semántica JavaScript por defecto."""
+def test_semantic_graph_javascript_flag_defaults_to_true() -> None:
+    """Mantiene habilitada la extracción semántica JavaScript por defecto."""
     settings = Settings(_env_file=None)
 
-    assert settings.semantic_graph_javascript_enabled is False
+    assert settings.semantic_graph_javascript_enabled is True
 
 
 def test_semantic_graph_query_flags_defaults() -> None:
-    """Configura por defecto la expansión semántica de query desactivada."""
+    """Configura por defecto la expansión semántica de query habilitada."""
     settings = Settings(_env_file=None)
 
-    assert settings.semantic_graph_query_enabled is False
+    assert settings.semantic_graph_query_enabled is True
     assert settings.semantic_graph_query_max_edges == 400
     assert settings.semantic_graph_query_max_nodes == 200
     assert settings.semantic_graph_query_max_ms == 120.0

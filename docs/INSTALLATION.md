@@ -134,6 +134,8 @@ ademas como se resolveran Chroma remoto y Postgres en ese entorno.
 - OpenAPI: <http://127.0.0.1:8000/docs>
 - Health storage: GET /health
 - Readiness por repositorio: GET /repos/{repo_id}/status
+- Si Chroma remoto requiere autenticacion, configura `CHROMA_TOKEN` o
+  `CHROMA_USERNAME` + `CHROMA_PASSWORD` antes de validar `GET /health`.
 
 ## Siguientes pasos
 

@@ -1,5 +1,7 @@
 """Contenedor ChromaDB para indexación y búsqueda de vectores."""
 
+import base64
+import hashlib
 from threading import Lock
 from typing import Any
 import gc
@@ -18,6 +20,51 @@ COLLECTIONS = [
     "infra_ci",
 ]
 CHROMA_HNSW_SPACES = {"l2", "cosine"}
+
+
+def _build_remote_auth_header(settings: Any) -> str | None:
+    """Resuelve el header Authorization para Chroma remoto."""
+    token = str(getattr(settings, "chroma_token", "") or "").strip()
+    if token:
+        return f"Bearer {token}"
+
+    username = str(getattr(settings, "chroma_username", "") or "").strip()
+    password = str(getattr(settings, "chroma_password", "") or "").strip()
+    if not username or not password:
+        return None
+
+    encoded = base64.b64encode(
+        f"{username}:{password}".encode("utf-8")
+    ).decode("ascii")
+    return f"Basic {encoded}"
+
+
+def build_remote_chroma_headers(settings: Any) -> dict[str, str]:
+    """Construye headers opcionales para un cliente remoto de Chroma."""
+    auth_header = _build_remote_auth_header(settings)
+    if not auth_header:
+        return {}
+    return {"Authorization": auth_header}
+
+
+def build_remote_chroma_client(settings: Any | None = None) -> Any:
+    """Crea un cliente HTTP de Chroma remoto con auth opcional."""
+    runtime_settings = settings or get_settings()
+    return chromadb.HttpClient(
+        host=runtime_settings.chroma_host,
+        port=runtime_settings.chroma_port,
+        headers=build_remote_chroma_headers(runtime_settings),
+    )
+
+
+def _build_remote_client_key(settings: Any) -> str:
+    """Genera una clave estable del cliente remoto incluyendo auth efectiva."""
+    auth_header = _build_remote_auth_header(settings) or ""
+    auth_fingerprint = hashlib.sha256(auth_header.encode("utf-8")).hexdigest()[:12]
+    return (
+        f"remote:{settings.chroma_host}:{settings.chroma_port}:"
+        f"{auth_fingerprint}"
+    )
 
 
 def _is_dimension_mismatch_error(exc: Exception) -> bool:
@@ -67,7 +114,7 @@ class ChromaIndex:
         chroma_mode = settings.chroma_mode
 
         if chroma_mode == "remote":
-            client_key = f"remote:{settings.chroma_host}:{settings.chroma_port}"
+            client_key = _build_remote_client_key(settings)
         else:
             client_key = str(settings.chroma_path)
 
@@ -78,14 +125,7 @@ class ChromaIndex:
                 or self._shared_path != client_key
             ):
                 if chroma_mode == "remote":
-                    headers: dict[str, str] = {}
-                    if settings.chroma_token:
-                        headers["Authorization"] = f"Bearer {settings.chroma_token}"
-                    client = chromadb.HttpClient(
-                        host=settings.chroma_host,
-                        port=settings.chroma_port,
-                        headers=headers,
-                    )
+                    client = build_remote_chroma_client(settings)
                 else:
                     client = chromadb.PersistentClient(
                         path=str(settings.chroma_path),
