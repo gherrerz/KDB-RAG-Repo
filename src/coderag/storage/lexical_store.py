@@ -8,6 +8,10 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
+from coderag.storage.postgres_table_names import (
+    POSTGRES_LEXICAL_CORPUS_TABLE,
+)
+
 
 class LexicalStore:
     """Indexación y búsqueda léxica de corpus de código usando PostgreSQL FTS."""
@@ -32,8 +36,8 @@ class LexicalStore:
                 pass
 
             conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS lexical_corpus (
+                f"""
+                CREATE TABLE IF NOT EXISTS {POSTGRES_LEXICAL_CORPUS_TABLE} (
                     id TEXT NOT NULL,
                     repo_id TEXT NOT NULL,
                     doc TEXT NOT NULL,
@@ -49,11 +53,11 @@ class LexicalStore:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_lexical_fts "
-                "ON lexical_corpus USING GIN (fts_vector)"
+                f"ON {POSTGRES_LEXICAL_CORPUS_TABLE} USING GIN (fts_vector)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_lexical_repo "
-                "ON lexical_corpus (repo_id)"
+                f"ON {POSTGRES_LEXICAL_CORPUS_TABLE} (repo_id)"
             )
 
     def index_documents(
@@ -97,8 +101,8 @@ class LexicalStore:
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.executemany(
-                    """
-                    INSERT INTO lexical_corpus (
+                    f"""
+                    INSERT INTO {POSTGRES_LEXICAL_CORPUS_TABLE} (
                         id, repo_id, doc, path, symbol_name, entity_type,
                         metadata, fts_vector
                     ) VALUES (
@@ -134,7 +138,7 @@ class LexicalStore:
         lang = self._lang
         with self._connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT
                     id,
                     doc,
@@ -146,7 +150,7 @@ class LexicalStore:
                         fts_vector,
                         plainto_tsquery(%s, %s)
                     ) AS score
-                FROM lexical_corpus
+                FROM {POSTGRES_LEXICAL_CORPUS_TABLE}
                 WHERE
                     repo_id = %s
                     AND fts_vector @@ plainto_tsquery(%s, %s)
@@ -180,7 +184,10 @@ class LexicalStore:
         """Indica si el repositorio tiene documentos indexados."""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT 1 FROM lexical_corpus WHERE repo_id = %s LIMIT 1",
+                (
+                    f"SELECT 1 FROM {POSTGRES_LEXICAL_CORPUS_TABLE} "
+                    "WHERE repo_id = %s LIMIT 1"
+                ),
                 (repo_id,),
             ).fetchone()
         return row is not None
@@ -189,7 +196,10 @@ class LexicalStore:
         """Elimina todos los documentos del repositorio y retorna conteo."""
         with self._connect() as conn:
             cursor = conn.execute(
-                "DELETE FROM lexical_corpus WHERE repo_id = %s",
+                (
+                    f"DELETE FROM {POSTGRES_LEXICAL_CORPUS_TABLE} "
+                    "WHERE repo_id = %s"
+                ),
                 (repo_id,),
             )
             deleted = int(cursor.rowcount or 0)
@@ -198,4 +208,4 @@ class LexicalStore:
     def delete_all(self) -> None:
         """Elimina todo el corpus léxico. Usar solo en reset global."""
         with self._connect() as conn:
-            conn.execute("DELETE FROM lexical_corpus")
+            conn.execute(f"DELETE FROM {POSTGRES_LEXICAL_CORPUS_TABLE}")

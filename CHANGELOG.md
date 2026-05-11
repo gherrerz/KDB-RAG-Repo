@@ -27,6 +27,11 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- El backend Postgres ahora crea y consulta las tablas
+    `tbl_repository_jobs`, `tbl_repository_repos` y
+    `tbl_repository_lexical_corpus`; despliegues existentes con tablas legacy
+    `jobs`, `repos` y `lexical_corpus` requieren reset o recreacion de la base
+    si no se aplica una migracion manual.
 - La organización persistida del repositorio ahora usa solo el último segmento
     padre del path Git y deja de derivarse al vuelo en `GET /repos`.
 - `repo_id` pasa a formarse como `organizacion-repo-rama`; las ingestas

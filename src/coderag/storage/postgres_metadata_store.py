@@ -11,6 +11,10 @@ from psycopg.rows import dict_row
 
 from coderag.core.models import JobInfo, JobStatus
 from coderag.storage.base_metadata_store import BaseMetadataStore
+from coderag.storage.postgres_table_names import (
+    POSTGRES_JOBS_TABLE,
+    POSTGRES_REPOS_TABLE,
+)
 
 
 class PostgresMetadataStore(BaseMetadataStore):
@@ -29,8 +33,8 @@ class PostgresMetadataStore(BaseMetadataStore):
         """Crea las tablas requeridas si no existen."""
         with self._connect() as conn:
             conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS jobs (
+                f"""
+                CREATE TABLE IF NOT EXISTS {POSTGRES_JOBS_TABLE} (
                     id TEXT PRIMARY KEY,
                     status TEXT NOT NULL,
                     progress REAL NOT NULL,
@@ -44,8 +48,8 @@ class PostgresMetadataStore(BaseMetadataStore):
                 """
             )
             conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS repos (
+                f"""
+                CREATE TABLE IF NOT EXISTS {POSTGRES_REPOS_TABLE} (
                     id TEXT PRIMARY KEY,
                     organization TEXT,
                     url TEXT NOT NULL,
@@ -63,8 +67,8 @@ class PostgresMetadataStore(BaseMetadataStore):
         """Inserta o reemplaza la instantánea del trabajo."""
         with self._connect() as conn:
             conn.execute(
-                """
-                INSERT INTO jobs (
+                f"""
+                INSERT INTO {POSTGRES_JOBS_TABLE} (
                     id, status, progress, logs, repo_id, error,
                     diagnostics, created_at, updated_at
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -99,8 +103,8 @@ class PostgresMetadataStore(BaseMetadataStore):
         now = datetime.datetime.now(datetime.UTC).isoformat()
         with self._connect() as conn:
             cursor = conn.execute(
-                """
-                UPDATE jobs
+                f"""
+                UPDATE {POSTGRES_JOBS_TABLE}
                 SET
                     status = %s,
                     error = CASE
@@ -130,7 +134,7 @@ class PostgresMetadataStore(BaseMetadataStore):
         """Lee la instantánea del trabajo por identificador."""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM jobs WHERE id = %s",
+                f"SELECT * FROM {POSTGRES_JOBS_TABLE} WHERE id = %s",
                 (job_id,),
             ).fetchone()
         if row is None:
@@ -162,10 +166,10 @@ class PostgresMetadataStore(BaseMetadataStore):
         """Lista ids de repositorio conocidos desde tablas de jobs y repos."""
         with self._connect() as conn:
             rows = conn.execute(
-                """
-                SELECT DISTINCT id AS repo_id FROM repos
+                f"""
+                SELECT DISTINCT id AS repo_id FROM {POSTGRES_REPOS_TABLE}
                 UNION
-                SELECT DISTINCT repo_id FROM jobs
+                SELECT DISTINCT repo_id FROM {POSTGRES_JOBS_TABLE}
                 WHERE repo_id IS NOT NULL AND repo_id <> ''
                 ORDER BY repo_id ASC
                 """
@@ -176,9 +180,9 @@ class PostgresMetadataStore(BaseMetadataStore):
         """Retorna catálogo de repos persistidos con metadata de ingesta."""
         with self._connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT id AS repo_id, organization, url, branch
-                FROM repos
+                FROM {POSTGRES_REPOS_TABLE}
                 ORDER BY id ASC
                 """
             ).fetchall()
@@ -205,8 +209,8 @@ class PostgresMetadataStore(BaseMetadataStore):
         if normalized_repo_id:
             with self._connect() as conn:
                 rows = conn.execute(
-                    """
-                    SELECT id FROM jobs
+                    f"""
+                    SELECT id FROM {POSTGRES_JOBS_TABLE}
                     WHERE status IN (%s, %s) AND repo_id = %s
                     ORDER BY created_at ASC
                     """,
@@ -215,8 +219,8 @@ class PostgresMetadataStore(BaseMetadataStore):
         else:
             with self._connect() as conn:
                 rows = conn.execute(
-                    """
-                    SELECT id FROM jobs
+                    f"""
+                    SELECT id FROM {POSTGRES_JOBS_TABLE}
                     WHERE status IN (%s, %s)
                     ORDER BY created_at ASC
                     """,
@@ -239,8 +243,8 @@ class PostgresMetadataStore(BaseMetadataStore):
         now = datetime.datetime.now(datetime.UTC).isoformat()
         with self._connect() as conn:
             conn.execute(
-                """
-                INSERT INTO repos (
+                f"""
+                INSERT INTO {POSTGRES_REPOS_TABLE} (
                     id, organization, url, branch, local_path, created_at,
                     updated_at, embedding_provider, embedding_model
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -270,9 +274,9 @@ class PostgresMetadataStore(BaseMetadataStore):
         """Obtiene metadata runtime almacenada para un repositorio."""
         with self._connect() as conn:
             row = conn.execute(
-                """
+                f"""
                 SELECT embedding_provider, embedding_model
-                FROM repos
+                FROM {POSTGRES_REPOS_TABLE}
                 WHERE id = %s
                 """,
                 (repo_id,),
@@ -288,7 +292,7 @@ class PostgresMetadataStore(BaseMetadataStore):
         """Elimina metadata runtime del repositorio y devuelve filas afectadas."""
         with self._connect() as conn:
             cursor = conn.execute(
-                "DELETE FROM repos WHERE id = %s",
+                f"DELETE FROM {POSTGRES_REPOS_TABLE} WHERE id = %s",
                 (repo_id,),
             )
             return int(cursor.rowcount or 0)
@@ -297,7 +301,7 @@ class PostgresMetadataStore(BaseMetadataStore):
         """Elimina historial de jobs asociados al repositorio y devuelve filas."""
         with self._connect() as conn:
             cursor = conn.execute(
-                "DELETE FROM jobs WHERE repo_id = %s",
+                f"DELETE FROM {POSTGRES_JOBS_TABLE} WHERE repo_id = %s",
                 (repo_id,),
             )
             return int(cursor.rowcount or 0)
@@ -315,5 +319,5 @@ class PostgresMetadataStore(BaseMetadataStore):
     def reset_all(self) -> None:
         """Elimina todos los jobs y repos. Usar solo en reset global."""
         with self._connect() as conn:
-            conn.execute("DELETE FROM jobs")
-            conn.execute("DELETE FROM repos")
+            conn.execute(f"DELETE FROM {POSTGRES_JOBS_TABLE}")
+            conn.execute(f"DELETE FROM {POSTGRES_REPOS_TABLE}")

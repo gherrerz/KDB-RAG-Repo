@@ -80,6 +80,11 @@ Notas operativas de storage:
 
 - Arquitectura operativa principal: Chroma remoto + Postgres + Neo4j.
 - Si `POSTGRES_URL` esta vacio, el codigo aun puede caer en compatibilidad legacy con SQLite para metadata y BM25 local para lexical.
+- Si `POSTGRES_URL` esta activo, el runtime crea y usa las tablas Postgres
+  `tbl_repository_jobs`, `tbl_repository_repos` y
+  `tbl_repository_lexical_corpus`; una base existente con tablas legacy
+  `jobs`, `repos` y `lexical_corpus` requiere limpieza o recreacion si no se
+  aplica una migracion manual.
 - Si `CHROMA_MODE=embedded`, `CHROMA_PATH` vuelve a ser relevante, pero ese modo no es el default del runtime.
 - En modo remoto, usa exactamente uno de estos mecanismos: `CHROMA_TOKEN` o `CHROMA_USERNAME` + `CHROMA_PASSWORD`.
 

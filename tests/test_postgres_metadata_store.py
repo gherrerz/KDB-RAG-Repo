@@ -27,6 +27,10 @@ if "psycopg" not in sys.modules:
     sys.modules["psycopg.rows.dict_row"] = _psycopg_rows_stub.dict_row
 
 from coderag.core.models import JobInfo, JobStatus
+from coderag.storage.postgres_table_names import (
+    POSTGRES_JOBS_TABLE,
+    POSTGRES_REPOS_TABLE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -93,8 +97,14 @@ class TestInitSchema:
             PostgresMetadataStore("postgresql://fake/db")
 
         calls_sql = [str(c.args[0]) for c in init_conn.execute.call_args_list]
-        assert any("CREATE TABLE IF NOT EXISTS jobs" in s for s in calls_sql)
-        assert any("CREATE TABLE IF NOT EXISTS repos" in s for s in calls_sql)
+        assert any(
+            f"CREATE TABLE IF NOT EXISTS {POSTGRES_JOBS_TABLE}" in s
+            for s in calls_sql
+        )
+        assert any(
+            f"CREATE TABLE IF NOT EXISTS {POSTGRES_REPOS_TABLE}" in s
+            for s in calls_sql
+        )
 
 
 # ===========================================================================
@@ -114,7 +124,7 @@ class TestUpsertJob:
 
         test_conn.execute.assert_called_once()
         sql, params = test_conn.execute.call_args.args
-        assert "INSERT INTO jobs" in str(sql)
+        assert f"INSERT INTO {POSTGRES_JOBS_TABLE}" in str(sql)
         assert job.id in params
         assert job.status.value in params
 
@@ -172,7 +182,7 @@ class TestRecoverInterruptedJobs:
             store.recover_interrupted_jobs()
 
         sql, params = test_conn.execute.call_args.args
-        assert "UPDATE jobs" in str(sql)
+        assert f"UPDATE {POSTGRES_JOBS_TABLE}" in str(sql)
         assert "queued" in params
         assert "running" in params
 
@@ -360,8 +370,10 @@ class TestResetAll:
             store.reset_all()
 
         calls_sql = [str(c.args[0]) for c in test_conn.execute.call_args_list]
-        assert any("DELETE FROM jobs" in s for s in calls_sql)
-        assert any("DELETE FROM repos" in s for s in calls_sql)
+        assert any(f"DELETE FROM {POSTGRES_JOBS_TABLE}" in s for s in calls_sql)
+        assert any(
+            f"DELETE FROM {POSTGRES_REPOS_TABLE}" in s for s in calls_sql
+        )
 
 
 # ===========================================================================
@@ -387,7 +399,7 @@ class TestRepoRuntime:
             )
 
         sql, params = test_conn.execute.call_args.args
-        assert "INSERT INTO repos" in str(sql)
+        assert f"INSERT INTO {POSTGRES_REPOS_TABLE}" in str(sql)
         assert "r1" in params
 
     def test_get_repo_runtime_retorna_dict(self):

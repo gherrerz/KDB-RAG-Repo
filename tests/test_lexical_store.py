@@ -13,6 +13,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from coderag.storage.postgres_table_names import (
+    POSTGRES_LEXICAL_CORPUS_TABLE,
+)
+
 # ---------------------------------------------------------------------------
 # Stub psycopg en sys.modules si no está disponible (entorno de dev sin Docker)
 # ---------------------------------------------------------------------------
@@ -79,7 +83,7 @@ class TestInitSchema:
         store, init_conn = _make_store()
 
         calls_sql = [str(c.args[0]) for c in init_conn.execute.call_args_list]
-        assert any("lexical_corpus" in s for s in calls_sql)
+        assert any(POSTGRES_LEXICAL_CORPUS_TABLE in s for s in calls_sql)
         assert any("idx_lexical_fts" in s for s in calls_sql)
         assert any("idx_lexical_repo" in s for s in calls_sql)
 
@@ -353,7 +357,7 @@ class TestDeleteAll:
             store.delete_all()
 
         sql = test_conn.execute.call_args.args[0]
-        assert "DELETE FROM lexical_corpus" in str(sql)
+        assert f"DELETE FROM {POSTGRES_LEXICAL_CORPUS_TABLE}" in str(sql)
         assert "WHERE" not in str(sql)
 
 
