@@ -88,8 +88,8 @@ Lista los `repo_id` disponibles para consultar y, cuando existe metadata de
 ingesta persistida, retorna además URL, rama y organización persistida.
 
 - Formato actual de `repo_id`: `organizacion-repo-rama`
-- `organization` se almacena en SQLite durante la ingesta y deja de derivarse
-  al vuelo en el endpoint.
+- `organization` se persiste en el backend de metadata operativa,
+  normalmente Postgres, y deja de derivarse al vuelo en el endpoint.
 
 - Response schema: `RepoCatalogResponse`
 
@@ -99,16 +99,16 @@ Retorna estado de readiness de consulta para un repositorio.
 
 Notas de comportamiento:
 
-- `query_ready=true` ya no exige workspace local si Chroma, BM25, Neo4j y
-  SQLite están disponibles.
+- `query_ready=true` ya no exige workspace local si Chroma, Postgres y Neo4j
+  estan disponibles.
 - `workspace_available=false` no bloquea query semántico, retrieval-only ni
   inventory query, pero sí implica que modo literal quedará rechazado.
 
 Notas de catálogo:
 
-- `GET /repos` y `GET /repos/{repo_id}/status` se apoyan en metadata SQLite
-  persistida, por lo que el repo puede seguir visible aunque el clone local
-  haya sido eliminado post-ingesta.
+- `GET /repos` y `GET /repos/{repo_id}/status` se apoyan en metadata
+  operativa persistida, normalmente en Postgres, por lo que el repo puede
+  seguir visible aunque el clone local haya sido eliminado post-ingesta.
 
 - Path params:
   - `repo_id: str`
@@ -160,13 +160,13 @@ Limpia todo el estado indexado.
 ## Mapping interno
 
 | Method | Path | Internal service | Request model | Response model |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | POST | `/repos/ingest` | `JobManager.create_ingest_job` | `RepoIngestRequest` | `JobInfo` |
 | GET | `/jobs/{job_id}` | `JobManager.get_job` | Path/query params | `JobInfo` |
 | POST | `/query` | `run_query` | `QueryRequest` | `QueryResponse` |
 | POST | `/query/retrieval` | `run_retrieval_query` | `RetrievalQueryRequest` | `RetrievalQueryResponse` |
 | POST | `/inventory/query` | `run_inventory_query` | `InventoryQueryRequest` | `InventoryQueryResponse` |
-| GET | `/repos` | `JobManager.list_repo_ids` | N/A | `RepoCatalogResponse` |
+| GET | `/repos` | `JobManager.list_repo_catalog` | N/A | `RepoCatalogResponse` |
 | GET | `/repos/{repo_id}/status` | `get_repo_query_status` | Path/query params | `RepoQueryStatusResponse` |
 | GET | `/providers/models` | `discover_models` | Query params | `ProviderModelCatalogResponse` |
 | GET | `/health` | `run_storage_preflight` | N/A | `StorageHealthResponse` |
@@ -174,6 +174,13 @@ Limpia todo el estado indexado.
 | POST | `/admin/reset` | `JobManager.reset_all_data` | N/A | `ResetResponse` |
 
 ## Schemas
+
+Notas operativas de storage:
+
+- Arquitectura operativa principal: Chroma remoto + Postgres + Neo4j.
+- SQLite y BM25 local pueden seguir apareciendo como compatibilidad legacy en
+  algunas rutas cuando `POSTGRES_URL` no esta configurado, pero no son el
+  backend principal documentado aqui.
 
 ### Enum: JobStatus
 
@@ -186,15 +193,15 @@ Limpia todo el estado indexado.
 ### RepoIngestRequest
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `provider` | `str` | no | `"github"` |
 | `repo_url` | `str` | sí | - |
 | `branch` | `str` | no | `"main"` |
-| `commit` | `str | null` | no | `null` |
-| `token` | `str | null` | no | `null` |
-| `auth` | `object | null` | no | `null` |
-| `embedding_provider` | `str | null` | no | `null` |
-| `embedding_model` | `str | null` | no | `null` |
+| `commit` | `str \| null` | no | `null` |
+| `token` | `str \| null` | no | `null` |
+| `auth` | `object \| null` | no | `null` |
+| `embedding_provider` | `str \| null` | no | `null` |
+| `embedding_model` | `str \| null` | no | `null` |
 
 Notas para repos privados:
 
@@ -204,12 +211,12 @@ Notas para repos privados:
 Contrato del bloque `auth`:
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
-| `deployment` | `"auto" | "cloud" | "server" | "data_center"` | no | `"auto"` |
-| `transport` | `"auto" | "https" | "ssh"` | no | `"auto"` |
-| `method` | `"auto" | "ssh_key" | "http_basic" | "http_token"` | no | `"auto"` |
-| `username` | `str | null` | no | `null` |
-| `secret` | `str | null` | no | `null` |
+| --- | --- | --- | --- |
+| `deployment` | `"auto" \| "cloud" \| "server" \| "data_center"` | no | `"auto"` |
+| `transport` | `"auto" \| "https" \| "ssh"` | no | `"auto"` |
+| `method` | `"auto" \| "ssh_key" \| "http_basic" \| "http_token"` | no | `"auto"` |
+| `username` | `str \| null` | no | `null` |
+| `secret` | `str \| null` | no | `null` |
 
 Reglas iniciales:
 
@@ -221,13 +228,13 @@ Reglas iniciales:
 ### JobInfo
 
 | Field | Type | Requerido | Descripción |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `id` | `str` | sí | ID del job |
 | `status` | `JobStatus` | sí | Estado de ciclo de vida |
 | `progress` | `float` | sí | Rango `[0.0, 1.0]` |
 | `logs` | `list[str]` | sí | Líneas de log |
-| `repo_id` | `str | null` | sí | Se completa cuando aplica |
-| `error` | `str | null` | sí | Error si falla |
+| `repo_id` | `str \| null` | sí | Se completa cuando aplica |
+| `error` | `str \| null` | sí | Error si falla |
 | `diagnostics` | `dict[str, Any]` | sí | Diagnósticos estructurados de ingesta |
 | `created_at` | `datetime` | sí | Timestamp UTC |
 | `updated_at` | `datetime` | sí | Timestamp UTC |
@@ -269,33 +276,33 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 ### QueryRequest
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `repo_id` | `str` | sí | - |
 | `query` | `str` | sí | - |
 | `top_n` | `int` | no | `60` |
 | `top_k` | `int` | no | `15` |
-| `embedding_provider` | `str | null` | no | `null` |
-| `embedding_model` | `str | null` | no | `null` |
-| `llm_provider` | `str | null` | no | `null` |
-| `answer_model` | `str | null` | no | `null` |
-| `verifier_model` | `str | null` | no | `null` |
+| `embedding_provider` | `str \| null` | no | `null` |
+| `embedding_model` | `str \| null` | no | `null` |
+| `llm_provider` | `str \| null` | no | `null` |
+| `answer_model` | `str \| null` | no | `null` |
+| `verifier_model` | `str \| null` | no | `null` |
 
 ### RetrievalQueryRequest
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `repo_id` | `str` | sí | - |
 | `query` | `str` | sí | - |
 | `top_n` | `int` | no | `60` |
 | `top_k` | `int` | no | `15` |
-| `embedding_provider` | `str | null` | no | `null` |
-| `embedding_model` | `str | null` | no | `null` |
+| `embedding_provider` | `str \| null` | no | `null` |
+| `embedding_model` | `str \| null` | no | `null` |
 | `include_context` | `bool` | no | `false` |
 
 ### InventoryQueryRequest
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `repo_id` | `str` | sí | - |
 | `query` | `str` | sí | - |
 | `page` | `int` | no | `1` |
@@ -304,7 +311,7 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 ### Citation
 
 | Field | Type | Requerido |
-|---|---|---|
+| --- | --- | --- |
 | `path` | `str` | sí |
 | `start_line` | `int` | sí |
 | `end_line` | `int` | sí |
@@ -321,7 +328,7 @@ Valores frecuentes de `reason`:
 ### QueryResponse
 
 | Field | Type | Requerido |
-|---|---|---|
+| --- | --- | --- |
 | `answer` | `str` | sí |
 | `citations` | `list[Citation]` | sí |
 | `diagnostics` | `dict[str, Any]` | sí |
@@ -329,7 +336,7 @@ Valores frecuentes de `reason`:
 ### RetrievedChunk
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `id` | `str` | sí | - |
 | `text` | `str` | sí | - |
 | `score` | `float` | sí | - |
@@ -342,7 +349,7 @@ Valores frecuentes de `reason`:
 ### RetrievalStatistics
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `total_before_rerank` | `int` | no | `0` |
 | `total_after_rerank` | `int` | no | `0` |
 | `graph_nodes_count` | `int` | no | `0` |
@@ -350,19 +357,19 @@ Valores frecuentes de `reason`:
 ### RetrievalQueryResponse
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `mode` | `str` | no | `"retrieval_only"` |
 | `answer` | `str` | sí | - |
 | `chunks` | `list[RetrievedChunk]` | no | `[]` |
 | `citations` | `list[Citation]` | no | `[]` |
 | `statistics` | `RetrievalStatistics` | no | `{}` |
 | `diagnostics` | `dict[str, Any]` | no | `{}` |
-| `context` | `str | null` | no | `null` |
+| `context` | `str \| null` | no | `null` |
 
 ### InventoryItem
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `label` | `str` | sí | - |
 | `path` | `str` | sí | - |
 | `kind` | `str` | no | `"file"` |
@@ -372,10 +379,10 @@ Valores frecuentes de `reason`:
 ### InventoryQueryResponse
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `answer` | `str` | sí | - |
-| `target` | `str | null` | no | `null` |
-| `module_name` | `str | null` | no | `null` |
+| `target` | `str \| null` | no | `null` |
+| `module_name` | `str \| null` | no | `null` |
 | `total` | `int` | no | `0` |
 | `page` | `int` | no | `1` |
 | `page_size` | `int` | no | `80` |
@@ -401,18 +408,19 @@ Notas operativas de inventory/discovery:
 ### RepoCatalogResponse
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `repo_ids` | `list[str]` | no | `[]` |
+| `repositories` | `list[RepoCatalogEntry]` | no | `[]` |
 
 ### ProviderModelCatalogResponse
 
 | Field | Type | Requerido | Descripción |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `provider` | `str` | sí | Provider solicitado |
 | `kind` | `str` | sí | `embedding` o `llm` |
 | `models` | `list[str]` | no | Modelos disponibles o fallback |
 | `source` | `str` | sí | `remote`, `cache` o `fallback` |
-| `warning` | `str | null` | no | Warning opcional de fallback |
+| `warning` | `str \| null` | no | Warning opcional de fallback |
 
 ### RepoQueryStatusResponse
 
@@ -424,28 +432,32 @@ Notas de interpretación:
   verificar además que exista workspace local para el repositorio.
 
 | Field | Type | Requerido |
-|---|---|---|
+| --- | --- | --- |
 | `repo_id` | `str` | sí |
 | `listed_in_catalog` | `bool` | sí |
 | `workspace_available` | `bool` | sí |
 | `query_ready` | `bool` | sí |
-| `chroma_counts` | `dict[str, int | null]` | no |
-| `chroma_hnsw_space_configured` | `str | null` | no |
-| `chroma_hnsw_space_detected` | `dict[str, str | null]` | no |
-| `chroma_hnsw_space_compatible` | `bool | null` | no |
+| `chroma_counts` | `dict[str, int \| null]` | no |
+| `chroma_hnsw_space_configured` | `str \| null` | no |
+| `chroma_hnsw_space_detected` | `dict[str, str \| null]` | no |
+| `chroma_hnsw_space_compatible` | `bool \| null` | no |
 | `chroma_hnsw_space_mismatched_collections` | `list[str]` | no |
 | `bm25_loaded` | `bool` | sí |
-| `graph_available` | `bool | null` | no |
-| `last_embedding_provider` | `str | null` | no |
-| `last_embedding_model` | `str | null` | no |
-| `embedding_compatible` | `bool | null` | no |
-| `compatibility_reason` | `str | null` | no |
+| `graph_available` | `bool \| null` | no |
+| `last_embedding_provider` | `str \| null` | no |
+| `last_embedding_model` | `str \| null` | no |
+| `embedding_compatible` | `bool \| null` | no |
+| `compatibility_reason` | `str \| null` | no |
 | `warnings` | `list[str]` | no |
+
+Nota: `bm25_loaded` conserva un nombre historico por compatibilidad, pero en
+despliegues con `POSTGRES_URL` activo actua como señal de readiness de la capa
+lexica en Postgres.
 
 ### StorageHealthItem
 
 | Field | Type | Requerido |
-|---|---|---|
+| --- | --- | --- |
 | `name` | `str` | sí |
 | `ok` | `bool` | sí |
 | `critical` | `bool` | sí |
@@ -457,12 +469,12 @@ Notas de interpretación:
 ### StorageHealthResponse
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `ok` | `bool` | sí | - |
 | `strict` | `bool` | sí | - |
 | `checked_at` | `str` | sí | - |
 | `context` | `str` | sí | - |
-| `repo_id` | `str | null` | no | `null` |
+| `repo_id` | `str \| null` | no | `null` |
 | `cached` | `bool` | no | `false` |
 | `failed_components` | `list[str]` | no | `[]` |
 | `items` | `list[StorageHealthItem]` | no | `[]` |
@@ -470,7 +482,7 @@ Notas de interpretación:
 ### ResetResponse
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `message` | `str` | sí | - |
 | `cleared` | `list[str]` | no | `[]` |
 | `warnings` | `list[str]` | no | `[]` |
@@ -478,7 +490,7 @@ Notas de interpretación:
 ### RepoDeleteResponse
 
 | Field | Type | Requerido | Default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `message` | `str` | sí | - |
 | `repo_id` | `str` | sí | - |
 | `cleared` | `list[str]` | no | `[]` |
@@ -487,7 +499,7 @@ Notas de interpretación:
 
 ## Ejemplos JSON mínimos
 
-### POST /repos/ingest
+### Ejemplo POST /repos/ingest
 
 Request:
 
@@ -525,7 +537,7 @@ Response:
 }
 ```
 
-### POST /query/retrieval
+### Ejemplo POST /query/retrieval
 
 Request:
 

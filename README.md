@@ -6,10 +6,13 @@ de codigo con evidencia verificable (archivos y lineas).
 ## Que hace
 
 - Ingesta repositorios Git en segundo plano con seguimiento por job.
-- Construye indices complementarios: vectorial, lexico y grafo.
+- Construye indices complementarios: vectorial remoto, store lexico en
+  Postgres y grafo en Neo4j.
 - Permite habilitar grafo semantico Python (CALLS, IMPORTS, EXTENDS) con
   flag de entorno y fallback seguro.
 - Permite habilitar grafo semantico Java fase 1 (IMPORTS,
+  EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
+- Permite habilitar grafo semantico JavaScript fase 1 (IMPORTS,
   EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
 - Permite habilitar grafo semantico TypeScript fase 1 (IMPORTS,
   EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
@@ -32,6 +35,7 @@ Nota Windows: si `pip install -r requirements.txt` falla al compilar
 (`Microsoft.VisualStudio.Workload.VCTools`).
 
 ## Quick Start
+
 1. Instala dependencias y crea entorno.
 
 ```powershell
@@ -56,13 +60,17 @@ EMBEDDING_PROVIDER=vertex
 VERTEX_AI_AUTH_MODE=service_account
 VERTEX_SERVICE_ACCOUNT_JSON_B64=<base64_json_sa>
 VERTEX_API_BASE_URL=https://us-central1-aiplatform.googleapis.com
+CHROMA_MODE=remote
+CHROMA_HOST=<chroma-host>
+CHROMA_PORT=8000
+POSTGRES_URL=<postgres-connection-string>
 ```
 
 `project_id` se deriva del JSON Base64 del service account y `location` se deriva
 del host configurado en `VERTEX_API_BASE_URL`. `VERTEX_AI_PROJECT_ID` y
 `VERTEX_AI_LOCATION` quedan solo como fallback legacy.
 
-2. Levanta stack local con Docker Compose (API + Neo4j).
+1. Levanta stack local simplificado con Docker Compose.
 
 ```powershell
 ./scripts/start_compose.ps1
@@ -81,6 +89,15 @@ $env:INGESTION_EXECUTION_MODE = 'rq'
 ./scripts/start_compose.ps1 -WithRedis
 ```
 
+Notas operativas del arranque local:
+
+- `start_compose.ps1` simplifica hoy el arranque de `api + neo4j`, o
+  `api + neo4j + redis + worker` con `-WithRedis`.
+- `docker-compose.yml` tambien define un perfil `remote` con servicios
+  `chroma` y `postgres` para reproducir en local la topologia remota completa.
+- La arquitectura operativa principal del proyecto usa Chroma remoto y
+  Postgres; el helper de arranque no activa hoy ese perfil por defecto.
+
 Alternativa para desarrollo local (API/UI fuera de contenedor):
 
 ```powershell
@@ -94,7 +111,7 @@ $env:PYTHONPATH = 'src'
 .\.venv\Scripts\python -m main --host 127.0.0.1 --port 8000
 ```
 
-3. Inicia una ingesta.
+1. Inicia una ingesta.
 
 ```powershell
 $body = @{
@@ -142,7 +159,7 @@ GIT_SSH_KNOWN_HOSTS_CONTENT_B64=<base64_known_hosts>
 GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
 ```
 
-4. Consulta estado del job.
+1. Consulta estado del job.
 
 ```powershell
 Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/jobs/<job_id>?logs_tail=200"
@@ -165,6 +182,9 @@ kubectl apply -k k8s/overlays/cloud-with-redis
 Nota: actualiza la imagen en `k8s/overlays/cloud/patch-api-deployment.yaml`
 con tu registry/tag antes de aplicar en entornos gestionados.
 
+Nota operativa: en entornos cloud, valida ademas como se resolveran Chroma y
+Postgres para la topologia remota recomendada del proyecto.
+
 ## Customer Journeys
 
 ```mermaid
@@ -182,7 +202,7 @@ flowchart LR
 ```
 
 | Journey | Entrada | Salida | Referencia |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Ingesta | POST /repos/ingest | Job con estado y logs | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Query con LLM | POST /query | Answer con citas + diagnostics | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) |
 | Query retrieval-only | POST /query/retrieval | Chunks + citations + stats | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) |

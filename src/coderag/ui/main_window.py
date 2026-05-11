@@ -415,8 +415,8 @@ class MainWindow(QMainWindow):
             self,
             "Confirmar eliminación",
             (
-                "Se eliminará el repositorio seleccionado de Chroma, BM25, "
-                "Neo4j, workspace y metadata SQLite.\n\n"
+                "Se eliminará el repositorio seleccionado de Chroma, capa "
+                "léxica, Neo4j, workspace y metadata operativa.\n\n"
                 f"Repositorio: {repo_id}\n"
                 "Esta acción no se puede deshacer."
             ),

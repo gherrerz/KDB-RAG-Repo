@@ -494,7 +494,12 @@ class RepoQueryStatusResponse(BaseModel):
         default_factory=list,
         description="Colecciones Chroma desalineadas respecto al espacio configurado.",
     )
-    bm25_loaded: bool = Field(description="Indica si BM25 está cargado en memoria para el repo.")
+    bm25_loaded: bool = Field(
+        description=(
+            "Nombre histórico del indicador de readiness léxico del repo; "
+            "puede representar BM25 local o corpus léxico en Postgres."
+        )
+    )
     graph_available: bool | None = Field(default=None, description="Disponibilidad de grafo para el repo (si pudo evaluarse).")
     last_embedding_provider: str | None = Field(
         default=None,

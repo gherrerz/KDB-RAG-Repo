@@ -51,7 +51,7 @@ app = FastAPI(
     version="0.1.0",
     description=(
         "API para ingesta y consulta sobre repositorios de código usando "
-        "retrieval híbrido (vector + BM25 + grafo).\n\n"
+        "retrieval híbrido (vector + capa léxica + grafo).\n\n"
         "Incluye endpoints de operacion (ingesta, query, inventario), "
         "readiness por repositorio y salud de storage."
     ),
@@ -213,7 +213,7 @@ def get_job(
                                 "bm25_loaded": False,
                                 "graph_available": None,
                                 "warnings": [
-                                    "No hay indice BM25 en memoria para repo 'mall'."
+                                    "No hay corpus léxico listo para repo 'mall'."
                                 ],
                             },
                         }
@@ -477,7 +477,7 @@ def list_provider_models(
     summary="Estado de readiness por repositorio",
     description=(
         "Evalúa si un repo está listo para /query, incluyendo conteos en "
-        "Chroma, carga BM25 y disponibilidad de grafo."
+        "Chroma, capa léxica y disponibilidad de grafo."
     ),
 )
 def repo_status(
@@ -557,8 +557,8 @@ def reset_all_data() -> ResetResponse:
     tags=["Admin"],
     summary="Eliminar repositorio por ID",
     description=(
-        "Elimina un repositorio de Chroma, BM25, Neo4j, workspace y "
-        "metadata SQLite. Rechaza la acción si hay jobs activos del mismo repo."
+        "Elimina un repositorio de Chroma, capa léxica, Neo4j, workspace y "
+        "metadata operativa. Rechaza la acción si hay jobs activos del mismo repo."
     ),
     responses={
         404: {

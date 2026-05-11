@@ -2,20 +2,22 @@
 
 Guia de configuracion de entorno y providers.
 
-Esta guia esta alineada con los defaults de `src/coderag/core/settings.py`.
-En `docker-compose.yml`, algunos valores pueden sobreescribirse para el
-escenario contenedorizado.
+Esta guia distingue entre defaults reales del codigo, setup local versionado y
+overrides de despliegue. La fuente de verdad de runtime sigue siendo
+`src/coderag/core/settings.py`; `docker-compose.yml` y `.env.example`
+representan escenarios operativos especificos que pueden diferir del backend
+principal recomendado.
 
 ## Variables clave
 
 ### LLM y proveedores
 
 - `LLM_PROVIDER`: proveedor principal de LLM para answer/verify (`openai`, `gemini`, `vertex`). Default: `vertex`.
-- `LLM_ANSWER_MODEL`: override del modelo de respuesta multi-provider. Default: vacio (se resuelve por provider).
-- `LLM_VERIFIER_MODEL`: override del modelo de verificacion multi-provider. Default: vacio (se resuelve por provider).
-- `LLM_VERIFY_ENABLED`: habilita la verificacion semantica de respuesta. Default: `true`.
+- `LLM_ANSWER_MODEL`: override del modelo de respuesta multi-provider. Default: `gemini-2.5-flash`.
+- `LLM_VERIFIER_MODEL`: override del modelo de verificacion multi-provider. Default: `gemini-2.5-flash`.
+- `LLM_VERIFY_ENABLED`: habilita la verificacion semantica de respuesta. Default: `false`.
 - `OPENAI_API_KEY`: credencial OpenAI. Default: vacio.
-- `OPENAI_TIMEOUT_SECONDS`: timeout de llamadas OpenAI. Default: `20`.
+- `OPENAI_TIMEOUT_SECONDS`: timeout de llamadas OpenAI. Default: `60`.
 - `GEMINI_API_KEY`: credencial Gemini. Default: vacio.
 - `VERTEX_AI_AUTH_MODE`: metadato legacy del modo de autenticacion Vertex. Default: `service_account`.
 - `VERTEX_SERVICE_ACCOUNT_JSON_B64`: JSON de Service Account codificado en Base64. Es la credencial canónica de Vertex. Default: vacio.
@@ -26,17 +28,17 @@ escenario contenedorizado.
 - `VERTEX_MODELS_PATH_TEMPLATE`: template del path de `publisher models`. Default: `/projects/{project}/locations/{location}/publishers/google/models`.
 - `VERTEX_AUTH_TOKEN_URL`: URL de token OAuth para Vertex auth. Default: `https://oauth2.googleapis.com/token`.
 - `VERTEX_AI_PROJECT_ID`: fallback legacy si no puede derivarse `project_id` desde el service account. Default: vacio.
-- `VERTEX_AI_LOCATION`: fallback legacy si no puede derivarse `location` desde `VERTEX_API_BASE_URL`. Default: vacio.
+- `VERTEX_AI_LOCATION`: fallback legacy si no puede derivarse `location` desde `VERTEX_API_BASE_URL`. Default: `us-central1`.
 - `VERTEX_AI_LABELS_ENABLED`: habilita labels de request en llamadas Vertex AI. Default: `true`.
-- `VERTEX_AI_LABEL_SERVICE`: nombre de servicio para labels Vertex. Default: `kdb-rag`.
-- `VERTEX_AI_LABEL_SERVICE_ACCOUNT`: override opcional del label `service_account` (si está vacío usa el email del Service Account autenticado). Default: vacio.
-- `VERTEX_AI_LABEL_USE_CASE_ID`: use case base para labels Vertex. Default: `rag_query`.
+- `VERTEX_AI_LABEL_SERVICE`: nombre de servicio para labels Vertex. Default: `webspec-coipo`.
+- `VERTEX_AI_LABEL_SERVICE_ACCOUNT`: override opcional del label `service_account`. Default: `qa-anthos`.
+- `VERTEX_AI_LABEL_USE_CASE_ID`: use case base para labels Vertex. Default: `tbd`.
 - `VERTEX_AI_CORRELATION_ID_ENABLED`: agrega `x-correlation-id` por request Vertex. Default: `true`.
 
 ### Embeddings
 
 - `EMBEDDING_PROVIDER`: proveedor de embeddings (`openai`, `gemini`, `vertex`). Default: `vertex`.
-- `EMBEDDING_MODEL`: override del modelo de embedding. Default: vacio (aplica fallback por provider).
+- `EMBEDDING_MODEL`: override del modelo de embedding. Default: `text-embedding-005`.
 
 Compatibilidad temporal de naming:
 
@@ -45,21 +47,38 @@ Compatibilidad temporal de naming:
 
 ### Retrieval y limites de consulta
 
-- `CHROMA_PATH`: ruta fisica del indice vectorial. Default: `./storage/chroma`.
+- `CHROMA_MODE`: modo de acceso a Chroma (`remote`, `embedded`). Default del codigo: `remote`.
+- `CHROMA_HOST`: host del servicio Chroma remoto. Default: `localhost`.
+- `CHROMA_PORT`: puerto del servicio Chroma remoto. Default: `8000`.
+- `CHROMA_TOKEN`: bearer token opcional para Chroma remoto. Default: vacio.
+- `CHROMA_PATH`: ruta fisica del indice vectorial solo relevante en `CHROMA_MODE=embedded`. Default: `/app/storage/chroma`.
 - `CHROMA_HNSW_SPACE`: metrica del indice HNSW (`cosine` o `l2`). Default: `cosine`.
 - `MAX_CONTEXT_TOKENS`: limite superior de tokens de contexto armado para LLM. Default: `8000`.
 - `GRAPH_HOPS`: profundidad de expansion de grafo estructural. Default: `2`.
 - `QUERY_MAX_SECONDS`: limite global de latencia para query API. Default: `55`.
 - `UI_REQUEST_TIMEOUT_SECONDS`: timeout de request desde UI a API. Default: `90`.
 
-### Storage, metadata y workspace
+### Storage, metadata, lexical y workspace
 
-- `WORKSPACE_PATH`: ruta de clones temporales y archivos operativos. Default: `./storage/workspace`.
-- `RETAIN_WORKSPACE_AFTER_INGEST`: conserva el clone local tras la ingesta. Si se configura en `false`, el worker elimina el workspace del repo al finalizar y `literal` queda no disponible para ese repo. Default del código: `true`. Default activado en Compose/Kubernetes de este repo: `false`.
+- `POSTGRES_URL`: backend operativo primario para metadata y store lexico. Cuando esta configurado, el runtime usa Postgres en lugar de SQLite/BM25 local. Default: vacio.
+- `POSTGRES_DB`: nombre de base para despliegues locales o Compose que levanten Postgres gestionado por este repo. Default: `coderag`.
+- `POSTGRES_USER`: usuario de Postgres para despliegues locales o Compose. Default: `coderag`.
+- `POSTGRES_PASSWORD`: password de Postgres para despliegues locales o Compose. Default: `coderag`.
+- `POSTGRES_POOL_SIZE`: tamano de pool para conexiones Postgres. Default: `5`.
+- `POSTGRES_POOL_TIMEOUT`: timeout de pool Postgres. Default: `30`.
+- `LEXICAL_FTS_LANGUAGE`: lenguaje de FTS para Postgres lexical. Default: `english`.
+- `WORKSPACE_PATH`: ruta de clones temporales y archivos operativos. Default: `/app/storage/workspace`.
+- `RETAIN_WORKSPACE_AFTER_INGEST`: conserva el clone local tras la ingesta. Si se configura en `false`, el worker elimina el workspace del repo al finalizar y `literal` queda no disponible para ese repo. Default del codigo: `false`.
 - `NEO4J_URI`: URI de conexion de grafo. Default: `bolt://localhost:7687`.
 - `NEO4J_USER`: usuario de Neo4j. Default: `neo4j`.
 - `NEO4J_PASSWORD`: password de Neo4j. Default: `password`.
 - `REDIS_URL`: URL de Redis para cola RQ. Default: `redis://localhost:6379/0`.
+
+Notas operativas de storage:
+
+- Arquitectura operativa principal: Chroma remoto + Postgres + Neo4j.
+- Si `POSTGRES_URL` esta vacio, el codigo aun puede caer en compatibilidad legacy con SQLite para metadata y BM25 local para lexical.
+- Si `CHROMA_MODE=embedded`, `CHROMA_PATH` vuelve a ser relevante, pero ese modo no es el default del runtime.
 
 ### Ingesta asincrona distribuida
 
@@ -120,10 +139,10 @@ Recomendacion practica:
 
 ### Escaneo de ingesta
 
-- `SCAN_MAX_FILE_SIZE_BYTES`: limite de bytes por archivo escaneable. Default en settings: `None`; default en compose: `200000`.
-- `SCAN_EXCLUDED_DIRS`: carpetas excluidas del escaneo. Default en settings: vacio; compose inyecta una lista recomendada.
-- `SCAN_EXCLUDED_EXTENSIONS`: extensiones binarias/no-texto excluidas. Default en settings: vacio; compose inyecta lista extensa.
-- `SCAN_EXCLUDED_FILES`: nombres de archivo excluidos puntualmente. Default en settings: vacio; compose: `.gitignore,.env`.
+- `SCAN_MAX_FILE_SIZE_BYTES`: limite de bytes por archivo escaneable. Default en settings: `2000000`. `.env.example` local de este repo lo baja a `200000`.
+- `SCAN_EXCLUDED_DIRS`: carpetas excluidas del escaneo. Default en settings: lista recomendada de directorios comunes de build/cache.
+- `SCAN_EXCLUDED_EXTENSIONS`: extensiones binarias/no-texto excluidas. Default en settings: lista extensa de binarios y artefactos.
+- `SCAN_EXCLUDED_FILES`: nombres de archivo excluidos puntualmente. Default en settings: `.gitignore,.env`.
 
 Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 
@@ -150,7 +169,7 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 - `HEALTH_CHECK_STRICT`: falla startup si un check critico no pasa. Default: `true`.
 - `HEALTH_CHECK_TIMEOUT_SECONDS`: timeout por check de preflight. Default: `5`.
 - `HEALTH_CHECK_TTL_SECONDS`: cache de resultados de preflight en segundos. Default: `10`.
-- `HEALTH_CHECK_OPENAI`: incluye check de conectividad/model list OpenAI. Default en settings: `true`; en compose: `false`.
+- `HEALTH_CHECK_OPENAI`: incluye check de conectividad/model list OpenAI. Default en settings: `false`.
 - `HEALTH_CHECK_REDIS`: incluye check de Redis en preflight. Default: `false`.
 - Neo4j se evalua como no critico solo en `startup` (lifespan), pero se mantiene critico para contextos de operacion como `query` e `ingest`.
 - `MODEL_DISCOVERY_TIMEOUT_SECONDS`: timeout de discovery de catalogo de modelos. Default: `8`.
@@ -174,22 +193,30 @@ EMBEDDING_PROVIDER=vertex
 VERTEX_AI_AUTH_MODE=service_account
 VERTEX_SERVICE_ACCOUNT_JSON_B64=<base64_json_sa>
 VERTEX_API_BASE_URL=https://us-central1-aiplatform.googleapis.com
+CHROMA_MODE=remote
+CHROMA_HOST=<chroma-host>
+CHROMA_PORT=8000
+POSTGRES_URL=<postgres-connection-string>
 VERTEX_AI_LABELS_ENABLED=true
-VERTEX_AI_LABEL_SERVICE=kdb-rag
-VERTEX_AI_LABEL_SERVICE_ACCOUNT=
-VERTEX_AI_LABEL_USE_CASE_ID=rag_query
+VERTEX_AI_LABEL_SERVICE=webspec-coipo
+VERTEX_AI_LABEL_SERVICE_ACCOUNT=qa-anthos
+VERTEX_AI_LABEL_USE_CASE_ID=tbd
 VERTEX_AI_CORRELATION_ID_ENABLED=true
 HEALTH_CHECK_OPENAI=false
 NEO4J_URI=bolt://127.0.0.1:17687
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=neo4jpassword
-SCAN_MAX_FILE_SIZE_BYTES=200000
+NEO4J_PASSWORD=password
+SCAN_MAX_FILE_SIZE_BYTES=2000000
 SCAN_EXCLUDED_DIRS=.git,node_modules,dist,build,.venv,__pycache__
 SCAN_EXCLUDED_EXTENSIONS=.png,.jpg,.jpeg,.gif,.webp,.ico,.mp3,.mp4,.wav,.ogg,.pdf,.zip,.tar,.gz,.7z,.rar,.jar,.war,.ear,.class,.dll,.exe,.so,.dylib,.o,.a,.bin,.sqlite,.db
 GIT_SSH_KEY_CONTENT_B64=<base64_private_key_openssh>
 GIT_SSH_KNOWN_HOSTS_CONTENT_B64=<base64_known_hosts>
 GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
 ```
+
+Si prefieres reproducir el setup local heredado versionado en `.env.example`,
+puedes usar `CHROMA_MODE=embedded` y omitir `POSTGRES_URL`, pero ese camino no
+representa la arquitectura operativa principal.
 
 ## Notas operativas
 
@@ -218,13 +245,18 @@ GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
 
 ## Despliegue con Docker Compose completo
 
-- `docker-compose.yml` define API + Neo4j y perfil opcional `redis`.
+- `docker-compose.yml` define API + Neo4j como base, perfil `redis` para cola y
+  worker, y perfil `remote` para Chroma y Postgres gestionados por Compose.
 - Al activar perfil `redis`, tambien se levanta `worker` para ejecutar
   ingestas por cola Redis/RQ.
+- Al activar perfil `remote`, tambien se levantan `chroma` y `postgres` para
+  probar la topologia remota completa dentro del entorno local.
 - API se conecta a Neo4j por DNS interno (`bolt://neo4j:7687`).
 - Storage persistente de API se monta en `/app/storage`.
 - Redis se activa con perfil `redis` y puede hacerse visible en preflight con
   `HEALTH_CHECK_REDIS=true`.
+- El helper `scripts/start_compose.ps1` no activa hoy el perfil `remote` por
+  defecto; esa diferencia debe tenerse en cuenta al seguir guias de arranque.
 
 Variables relevantes en Compose:
 

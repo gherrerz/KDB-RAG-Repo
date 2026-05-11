@@ -12,6 +12,8 @@ Incidencias frecuentes y acciones sugeridas.
 
 - Consulta GET /repos/{repo_id}/status.
 - Revisa query_ready, chroma_counts y bm25_loaded.
+- `bm25_loaded` conserva un nombre historico; con `POSTGRES_URL` activo se usa
+  como señal de readiness de la capa lexica en Postgres.
 - Si embedding_compatible es false, reingesta con provider/modelo compatible.
 
 ## Fallback en query con LLM
@@ -35,12 +37,12 @@ Síntoma típico:
 Causa:
 
 - Se cambió el provider/modelo de embeddings y las colecciones Chroma existentes
-	quedaron con una dimensionalidad anterior.
+  quedaron con una dimensionalidad anterior.
 
 Acción recomendada:
 
 - Ejecuta limpieza total (`POST /admin/reset` o `scripts/reset_cold.ps1`) y luego
-	reingesta el repositorio.
+  reingesta el repositorio.
 
 ## Error al instalar dependencias en Windows
 

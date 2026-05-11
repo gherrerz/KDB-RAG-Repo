@@ -101,7 +101,9 @@ en texto plano, puedes seguir mapeandolos a `GIT_SSH_KEY_CONTENT` y
 
 ## Deploy en entorno dev
 
-Escenario dev de cluster (API + Neo4j, sin Redis):
+Escenario dev de cluster del repo (API + Neo4j, sin Redis; Chroma remoto y
+Postgres deben existir fuera de estos manifests o resolverse por configuracion
+del entorno):
 
 ```bash
 kubectl apply -k k8s/overlays/cloud
@@ -122,7 +124,9 @@ Notas:
 
 ## Deploy en entorno prod
 
-Escenario recomendado para carga (API + Neo4j + Redis + worker RQ):
+Escenario recomendado para carga del repo (API + Neo4j + Redis + worker RQ;
+Chroma remoto y Postgres siguen siendo dependencias a resolver segun el
+entorno):
 
 ```bash
 kubectl apply -k k8s/overlays/cloud-with-redis
@@ -134,6 +138,8 @@ Este overlay hace:
 - Activa `INGESTION_EXECUTION_MODE=rq` (`patch-api-configmap-redis.yaml`).
 - Despliega `coderag-worker` dedicado.
 - Añade Redis con StatefulSet y servicios.
+- Mantiene la necesidad de configurar conectividad hacia Chroma remoto y
+  Postgres como parte del entorno objetivo.
 
 ## Probes y endpoints
 
@@ -216,14 +222,14 @@ kubectl get pods -n coderag
 kubectl get deploy,statefulset -n coderag
 ```
 
-2. Revisar probes/eventos si hay fallas:
+1. Revisar probes/eventos si hay fallas:
 
 ```bash
 kubectl describe pod <pod-name> -n coderag
 kubectl logs deploy/coderag-api -n coderag --tail=200
 ```
 
-3. Smoke HTTP:
+1. Smoke HTTP:
 
 ```bash
 kubectl port-forward svc/coderag-api 8000:8000 -n coderag
@@ -236,7 +242,7 @@ curl -sS http://127.0.0.1:8000/health
 curl -sS http://127.0.0.1:8000/docs
 ```
 
-4. Smoke de flujo de negocio (minimo):
+1. Smoke de flujo de negocio (minimo):
 
 - Ejecutar un `POST /repos/ingest` con un repo pequeno.
 - Monitorear `GET /jobs/{job_id}` hasta estado final.

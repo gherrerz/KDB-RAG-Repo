@@ -13,10 +13,11 @@ precondiciones de storage y ejecuta rutas de consulta con o sin LLM.
 
 La interaccion entre servicios se divide en dos grandes rutas: ingesta y query.
 En ingesta, el JobManager coordina clonacion, escaneo, extraccion de simbolos,
-indexacion vectorial en Chroma, indexacion lexical en BM25 y construccion de
-grafo en Neo4j. En query, la API enruta consultas al pipeline de retrieval,
-combina evidencia de Chroma/BM25/Neo4j, arma contexto y decide entre sintesis
-LLM o salida retrieval-only segun endpoint y condiciones operativas.
+indexacion vectorial en Chroma remoto, indexacion lexical y persistencia
+operativa en Postgres, y construccion de grafo en Neo4j. En query, la API
+enruta consultas al pipeline de retrieval, combina evidencia de
+Chroma/Postgres/Neo4j, arma contexto y decide entre sintesis LLM o salida
+retrieval-only segun endpoint y condiciones operativas.
 
 ## Descripción general del sistema
 
@@ -26,18 +27,21 @@ LLM o salida retrieval-only segun endpoint y condiciones operativas.
 - Retrieval: busqueda hibrida, reranking, expansion de grafo y ensamblado de
   contexto.
 - Capa LLM: clientes multi-provider para answer/verify.
-- Persistencia: Chroma, BM25, Neo4j, SQLite y workspace local opcional
-    post-ingesta.
+- Persistencia: Chroma remoto, Postgres para metadata y corpus lexico,
+    Neo4j y workspace local opcional post-ingesta.
 
 Notas operativas:
 
 - Query semántico, retrieval-only e inventario pueden operar sin workspace si
-    los índices persistidos y SQLite están listos.
+    Chroma, Postgres y Neo4j estan listos.
 - Modo literal sigue dependiendo de workspace local porque devuelve contenido
     vivo del archivo y no usa snapshots persistidos.
 - Neo4j persiste metadata adicional por archivo, incluyendo módulo y
     `purpose_summary`, para soportar discovery e inventory explain sin leer
     archivos locales.
+- SQLite, BM25 local y Chroma embedded siguen existiendo como compatibilidad
+    legacy en algunas rutas del codigo, pero no representan la arquitectura
+    operativa principal documentada aqui.
 
 ## Topología de despliegue
 
@@ -46,6 +50,8 @@ Notas operativas:
 ```mermaid
 flowchart LR
     UI[UI Desktop local] --> API[API container :8000]
+    API --> CHR[Chroma remoto :8001]
+    API --> PG[Postgres :5432]
     API --> NEO[Neo4j container :17687]
     API -. opcional .-> REDIS[Redis container 16379->6379]
     API --> ST[(storage volume)]
@@ -57,6 +63,8 @@ flowchart LR
 flowchart LR
     UI[UI Desktop local] --> ING[Ingress]
     ING --> API[Deployment coderag-api]
+    API --> CHR[Servicio Chroma remoto]
+    API --> PG[Servicio Postgres]
     API --> NEO[StatefulSet neo4j]
     API -. opcional .-> REDIS[StatefulSet redis]
     API --> APIPVC[(PVC api storage)]
@@ -107,15 +115,15 @@ flowchart TB
         subgraph L5L[Retrieval Data Plane]
             direction TB
             IDX[(Retrieval Stores)]
-            CH[(ChromaDB)]
-            BM[(BM25 in-memory)]
+            CH[(Chroma Remote)]
+            PGLEX[(Postgres FTS)]
             NEO[(Neo4j)]
         end
 
         subgraph L5R[Operational Data Plane]
             direction TB
             OPS[(Operational Stores)]
-            META[(SQLite<br/>metadata.db)]
+            META[(Postgres<br/>metadata)]
             WS[(Workspace<br/>local clones)]
         end
     end
@@ -138,7 +146,7 @@ flowchart TB
     JM --> OPS
 
     IDX --> CH
-    IDX --> BM
+    IDX --> PGLEX
     IDX --> NEO
     OPS --> META
     OPS --> WS
@@ -147,12 +155,12 @@ flowchart TB
 ### Notas sobre las capas
 
 | Layer | Tecnologías de las capas en este proyecto | Responsabilidad principal |
-|---|---|---|
+| --- | --- | --- |
 | Layer 1 - Experience | PySide6 | Interaccion con usuario para ingesta, consulta y visualizacion de evidencias. |
 | Layer 2 - API and Application | FastAPI, Pydantic models, endpoints HTTP | Exponer contratos API, validar entradas y enrutar casos de uso. |
 | Layer 3 - Domain and Orchestration | JobManager, pipeline de ingesta, pipeline de retrieval, chequeos de storage | Ejecutar logica de negocio y coordinar flujos asincronos/sincronos. |
 | Layer 4 - AI and Model Integration | Clientes LLM multi-provider, clientes de embeddings | Generar respuestas/verificacion y convertir consultas/chunks a embeddings. |
-| Layer 5 - Data and Infrastructure | ChromaDB, BM25, Neo4j, SQLite, workspace local opcional | Persistir indices, metadata operativa y los datos requeridos por query/retrieval; el workspace queda reservado para modo literal y operaciones live-file. |
+| Layer 5 - Data and Infrastructure | Chroma remoto, Postgres, Neo4j, workspace local opcional | Persistir indices vectoriales, corpus lexico, metadata operativa y los datos requeridos por query/retrieval; el workspace queda reservado para modo literal y operaciones live-file. |
 
 ## Vista ejecutiva de journeys
 
@@ -173,7 +181,7 @@ flowchart LR
 
 ## Journey 1: Ingesta
 
-### Flujo
+### Flujo de ingesta
 
 ```mermaid
 flowchart TB
@@ -182,10 +190,10 @@ flowchart TB
     C --> D[Clone repo]
     D --> E[Scan files]
     E --> F[Extract symbols]
-    F --> G[Index Chroma]
-    F --> H[Index BM25]
+    F --> G[Index Chroma remoto]
+    F --> H[Index lexical Postgres]
     F --> I[Build graph Neo4j]
-    G --> J[Persist metadata]
+    G --> J[Persist metadata operativa]
     H --> J
     I --> J
     J --> K{Readiness}
@@ -194,7 +202,7 @@ flowchart TB
     C -->|exception| N[failed]
 ```
 
-### Secuencia
+### Secuencia de ingesta
 
 ```mermaid
 sequenceDiagram
@@ -218,7 +226,7 @@ sequenceDiagram
     end
 
     JobManager->>Pipeline: run ingest pipeline
-    Pipeline->>Storage: write Chroma/BM25/Neo4j/metadata
+    Pipeline->>Storage: write Chroma/Postgres/Neo4j/metadata operativa
     Pipeline-->>JobManager: completed|partial|failed
     JobManager-->>API: final state
     API-->>UI: final job info
@@ -228,14 +236,14 @@ sequenceDiagram
 Notas operativas de identidad de repositorio:
 
 - `repo_id` se construye como `organizacion-repo-rama` y actúa como clave
-    transversal en workspace, SQLite, Chroma, BM25 y Neo4j.
-- `organization` se persiste en SQLite al finalizar la ingesta; para URLs con
-    jerarquías anidadas, se conserva solo el último segmento padre antes del
+    transversal en workspace, Postgres, Chroma y Neo4j.
+- `organization` se persiste en Postgres al finalizar la ingesta; para URLs
+    con jerarquías anidadas, se conserva solo el último segmento padre antes del
     nombre del repositorio.
 
 ## Journey 2: Query con LLM
 
-### Flujo
+### Flujo de query con LLM
 
 ```mermaid
 flowchart TB
@@ -254,7 +262,7 @@ flowchart TB
     L --> I
 ```
 
-### Secuencia
+### Secuencia de query con LLM
 
 ```mermaid
 sequenceDiagram
@@ -287,7 +295,7 @@ sequenceDiagram
 
 ## Journey 3: Query retrieval-only
 
-### Flujo
+### Flujo de query retrieval-only
 
 ```mermaid
 flowchart TB
@@ -303,7 +311,7 @@ flowchart TB
     I --> J[Return chunks and citations]
 ```
 
-### Secuencia
+### Secuencia de query retrieval-only
 
 ```mermaid
 sequenceDiagram
@@ -329,9 +337,10 @@ sequenceDiagram
 - UI PySide6: captura inputs de ingesta/consulta y presenta evidencias.
 - API FastAPI: valida precondiciones y expone contratos HTTP.
 - JobManager: orquesta estados de ingesta y persistencia de logs.
-- Retrieval pipeline: fusion vectorial + BM25 + expansion de grafo.
+- Retrieval pipeline: fusion vectorial + store lexico en Postgres + expansion
+    de grafo.
 - LLM clients: answer y verify en proveedores soportados.
-- Storage: Chroma, BM25, Neo4j, SQLite metadata y workspace local.
+- Storage: Chroma remoto, Postgres, Neo4j y workspace local.
 
 ## Referencias
 

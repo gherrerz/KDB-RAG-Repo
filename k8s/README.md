@@ -15,6 +15,10 @@ This folder provides native Kubernetes manifests for deploying:
 - Neo4j (StatefulSet)
 - Redis (optional addon)
 
+Chroma remoto y Postgres no forman parte de estos manifests base; deben estar
+disponibles como servicios externos o provisionarse por separado segun el
+entorno.
+
 ## Structure
 
 - `base/`: API + Neo4j core resources
@@ -30,7 +34,8 @@ This folder provides native Kubernetes manifests for deploying:
 
 ## Quick Start
 
-Deploy cloud base (API + Neo4j):
+Deploy cloud base (API + Neo4j; requires Chroma remoto y Postgres ya
+resueltos por el entorno):
 
 ```bash
 kubectl apply -k k8s/overlays/cloud
@@ -45,14 +50,16 @@ kubectl apply -k k8s/overlays/cloud-with-redis
 ## Required Adjustments Before Production
 
 1. Update API image in `k8s/overlays/cloud/patch-api-deployment.yaml`.
-2. If using `cloud-with-redis`, also update worker image in
+1. If using `cloud-with-redis`, also update worker image in
   `k8s/overlays/cloud-with-redis/worker-deployment.yaml`.
-3. Replace placeholder secret values in:
+1. Replace placeholder secret values in:
+
    - `k8s/base/api-secret.yaml`
    - `k8s/base/neo4j-secret.yaml`
-  - Define `VERTEX_SERVICE_ACCOUNT_JSON_B64` in `k8s/base/api-secret.yaml` for Vertex AI.
-4. Update ingress host/TLS in `k8s/overlays/cloud/ingress.yaml`.
-5. Tune CPU/memory requests/limits and PVC sizes to your workload.
+   - Define `VERTEX_SERVICE_ACCOUNT_JSON_B64` in `k8s/base/api-secret.yaml` for Vertex AI.
+
+1. Update ingress host/TLS in `k8s/overlays/cloud/ingress.yaml`.
+1. Tune CPU/memory requests/limits and PVC sizes to your workload.
 
 ## Verification
 
@@ -74,3 +81,5 @@ Health endpoint (through ingress or service):
   ejecuta por cola en worker dedicado (modo `rq`).
 - If you enable Redis and set `HEALTH_CHECK_REDIS=true`, Redis becomes part of
   storage preflight checks.
+- The recommended runtime architecture still assumes Chroma remoto and
+  Postgres as external operational dependencies.

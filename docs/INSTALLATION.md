@@ -12,7 +12,7 @@ Guia de instalacion y arranque local.
 Requisito adicional en Windows (solo si falla instalacion de dependencias nativas):
 
 - Microsoft Visual Studio 2022 Build Tools con workload C++
-	(`Microsoft.VisualStudio.Workload.VCTools`)
+  (`Microsoft.VisualStudio.Workload.VCTools`)
 
 ## Setup rapido
 
@@ -34,13 +34,13 @@ Perfiles de dependencias:
 - `requirements-desktop.txt`: agrega PySide6 para UI local.
 - `requirements-full.txt`: agrega UI y tests para desarrollo completo.
 
-2. Crear archivo de entorno.
+1. Crear archivo de entorno.
 
 ```powershell
 copy .env.example .env
 ```
 
-3. Levantar stack local con Docker Compose (API + Neo4j).
+1. Levantar stack local simplificado con Docker Compose.
 
 ```powershell
 ./scripts/start_compose.ps1
@@ -59,7 +59,15 @@ $env:INGESTION_EXECUTION_MODE = "rq"
 ./scripts/start_compose.ps1 -WithRedis
 ```
 
-4. Levantar UI (opcional, desktop local).
+Notas operativas del compose local:
+
+- `start_compose.ps1` levanta por defecto `api + neo4j`.
+- Con `-WithRedis`, agrega `redis + worker` para ejecucion distribuida.
+- `docker-compose.yml` tambien define un perfil `remote` con `chroma` y
+  `postgres` para probar localmente la topologia remota completa.
+- El helper actual no activa ese perfil `remote` por defecto.
+
+1. Levantar UI (opcional, desktop local).
 
 Si instalaste solo `requirements.txt`, agrega primero soporte UI:
 
@@ -71,7 +79,7 @@ Si instalaste solo `requirements.txt`, agrega primero soporte UI:
 .\.venv\Scripts\python -m coderag.ui.main_window
 ```
 
-5. Detener stack compose cuando termines.
+1. Detener stack compose cuando termines.
 
 ```powershell
 ./scripts/stop_compose.ps1
@@ -100,7 +108,8 @@ $env:PYTHONPATH = 'src'
 
 ## Kubernetes (manifests nativos)
 
-- Base cloud (API + Neo4j):
+- Base cloud del repo (API + Neo4j; requiere resolver Chroma remoto y
+  Postgres segun el entorno):
 
 ```powershell
 kubectl apply -k k8s/overlays/cloud
@@ -117,10 +126,14 @@ El overlay `cloud-with-redis` habilita modo `rq` y despliega worker dedicado.
 Antes de aplicar en cloud, ajusta la imagen en
 `k8s/overlays/cloud/patch-api-deployment.yaml`.
 
+Si tu despliegue cloud sigue la arquitectura operativa principal, define
+ademas como se resolveran Chroma remoto y Postgres en ese entorno.
+
 ## Verificacion
 
-- OpenAPI: http://127.0.0.1:8000/docs
+- OpenAPI: <http://127.0.0.1:8000/docs>
 - Health storage: GET /health
+- Readiness por repositorio: GET /repos/{repo_id}/status
 
 ## Siguientes pasos
 
