@@ -13,12 +13,17 @@ def _fake_settings() -> SimpleNamespace:
     """Construye configuración mínima para pruebas de preflight."""
     return SimpleNamespace(
         workspace_path=Path("./storage/workspace"),
+        chroma_mode="remote",
+        chroma_host="localhost",
+        chroma_port=8001,
         health_check_strict=True,
         health_check_timeout_seconds=2.0,
         health_check_ttl_seconds=60.0,
         health_check_openai=True,
         health_check_redis=False,
         resolve_chroma_hnsw_space=lambda: "cosine",
+        resolve_embedding_provider=lambda provider=None: provider or "vertex",
+        resolve_embedding_model=lambda provider=None, model=None: model or "text-embedding-005",
     )
 
 
@@ -302,6 +307,8 @@ def test_get_repo_query_status_refreshes_chroma_when_counts_start_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reintenta conteos Chroma tras reset cuando el repo ya parece persistido."""
+    monkeypatch.setattr(storage_health, "get_settings", _fake_settings)
+
     calls = {"count": 0, "reset": 0}
 
     def fake_count(*, repo_id: str, collection_name: str, page_size: int = 500) -> int:
@@ -349,7 +356,10 @@ def test_check_chroma_raises_on_hnsw_space_mismatch(
     """Falla preflight cuando el espacio HNSW de colecciones no coincide."""
 
     class _FakeIndex:
-        client = SimpleNamespace(list_collections=lambda: ["code_symbols"])
+        client = SimpleNamespace(
+            heartbeat=lambda: None,
+            list_collections=lambda: ["code_symbols"],
+        )
         collections = {"code_symbols": object()}
 
         def collection_hnsw_spaces(self) -> dict[str, str]:

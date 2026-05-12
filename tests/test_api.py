@@ -520,7 +520,8 @@ def test_api_end_to_end_ingest_cleanup_then_status_and_query(
     status_payload = status_response.json()
     assert status_payload["workspace_available"] is False
     assert status_payload["query_ready"] is True
-    assert status_payload["last_embedding_provider"] is None
+    assert status_payload["last_embedding_provider"] == "vertex"
+    assert status_payload["last_embedding_model"] == "text-embedding-005"
 
     query_response = client.post(
         "/query",
@@ -1115,8 +1116,8 @@ def test_query_endpoint_returns_422_when_repo_is_not_ready(monkeypatch) -> None:
         assert repo_id == "mall"
         assert listed_in_catalog is True
         assert runtime_payload is None
-        assert requested_embedding_provider is None
-        assert requested_embedding_model is None
+        assert requested_embedding_provider == "vertex"
+        assert requested_embedding_model == "text-embedding-005"
         return {
             "repo_id": "mall",
             "listed_in_catalog": True,

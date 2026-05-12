@@ -1,5 +1,7 @@
 """Pruebas básicas para componentes de ingestión y recuperación."""
 
+from types import SimpleNamespace
+
 from coderag.core.models import RetrievalChunk, ScannedFile
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.index_bm25 import BM25Index, tokenize
@@ -396,6 +398,11 @@ def test_hybrid_search_boosts_exact_config_key_over_test_chunks(
 
     monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
     monkeypatch.setattr(
+        hybrid_search_module,
+        "get_settings",
+        lambda: SimpleNamespace(postgres_host=""),
+    )
+    monkeypatch.setattr(
         hybrid_search_module.GLOBAL_BM25,
         "ensure_repo_loaded",
         lambda repo_id: True,
@@ -477,6 +484,11 @@ def test_hybrid_search_boosts_exact_code_symbol_over_generic_chunks(
 
     monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
     monkeypatch.setattr(
+        hybrid_search_module,
+        "get_settings",
+        lambda: SimpleNamespace(postgres_host=""),
+    )
+    monkeypatch.setattr(
         hybrid_search_module.GLOBAL_BM25,
         "ensure_repo_loaded",
         lambda repo_id: True,
@@ -539,6 +551,11 @@ def test_hybrid_search_boosts_identifier_inside_natural_query(
     ]
 
     monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "get_settings",
+        lambda: SimpleNamespace(postgres_host=""),
+    )
     monkeypatch.setattr(
         hybrid_search_module.GLOBAL_BM25,
         "ensure_repo_loaded",

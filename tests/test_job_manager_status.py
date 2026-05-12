@@ -172,8 +172,8 @@ def test_job_manager_marks_completed_when_repo_query_ready(
 
     runtime = manager.get_repo_runtime("repo-ready")
     assert runtime is not None
-    assert runtime["last_embedding_provider"] is None
-    assert runtime["last_embedding_model"] is None
+    assert runtime["last_embedding_provider"] == "vertex"
+    assert runtime["last_embedding_model"] == "text-embedding-005"
 
     catalog = manager.list_repo_catalog()
     assert catalog == [

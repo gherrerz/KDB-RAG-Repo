@@ -180,7 +180,7 @@ class JobInfo(BaseModel):
         description="Eventos y mensajes operativos del proceso.",
     )
     repo_id: str | None = Field(
-        default="gherrerz-kdb-rag-repo-main",
+        default=None,
         description="Identificador de repo resultante al completar ingesta.",
     )
     error: str | None = Field(
