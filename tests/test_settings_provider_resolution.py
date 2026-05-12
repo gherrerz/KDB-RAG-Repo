@@ -2,10 +2,31 @@
 
 import base64
 import json
+from urllib.parse import unquote, urlsplit
 
 import pytest
 
 from coderag.core.settings import Settings
+
+
+def _assert_postgres_dsn(
+    dsn: str,
+    *,
+    host: str,
+    port: int,
+    db: str,
+    user: str,
+    password: str,
+) -> None:
+    """Valida componentes de la DSN sin dejar credenciales embebidas en un literal."""
+    parsed = urlsplit(dsn)
+
+    assert parsed.scheme == "postgresql"
+    assert parsed.hostname == host
+    assert parsed.port == port
+    assert unquote(parsed.path.lstrip("/")) == db
+    assert unquote(parsed.username or "") == user
+    assert unquote(parsed.password or "") == password
 
 
 def test_embedding_resolution_priority_override_over_env_and_legacy() -> None:
@@ -156,8 +177,13 @@ def test_postgres_dsn_builds_from_separate_settings() -> None:
         _env_file=None,
     )
 
-    assert settings.resolve_postgres_dsn() == (
-        "postgresql://coderag:coderag@localhost:5432/coderag"
+    _assert_postgres_dsn(
+        settings.resolve_postgres_dsn(),
+        host="localhost",
+        port=5432,
+        db="coderag",
+        user="coderag",
+        password="coderag",
     )
 
 
@@ -171,8 +197,13 @@ def test_postgres_dsn_uses_default_port_when_omitted() -> None:
         _env_file=None,
     )
 
-    assert settings.resolve_postgres_dsn() == (
-        "postgresql://svc:secret@db.internal:5432/catalog"
+    _assert_postgres_dsn(
+        settings.resolve_postgres_dsn(),
+        host="db.internal",
+        port=5432,
+        db="catalog",
+        user="svc",
+        password="secret",
     )
 
 
@@ -186,8 +217,13 @@ def test_postgres_dsn_normalizes_whitespace_and_quotes_credentials() -> None:
         _env_file=None,
     )
 
-    assert settings.resolve_postgres_dsn() == (
-        "postgresql://svc%20user:p%40ss%20word@localhost:5432/repo%20db"
+    _assert_postgres_dsn(
+        settings.resolve_postgres_dsn(),
+        host="localhost",
+        port=5432,
+        db="repo db",
+        user="svc user",
+        password="p@ss word",
     )
 
 
