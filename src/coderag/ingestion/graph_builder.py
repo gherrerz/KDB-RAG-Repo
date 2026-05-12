@@ -377,7 +377,7 @@ class GraphBuilder:
             f"{relation.target_ref}|{relation.path}|{relation.line}|"
             f"{relation.language}"
         )
-        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+        return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     def has_repo_data(self, repo_id: str) -> bool:
         """Indica si existen nodos asociados al repositorio en Neo4j."""

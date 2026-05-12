@@ -4,9 +4,12 @@ import base64
 import binascii
 from functools import lru_cache
 import json
+import logging
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
+
+_settings_log = logging.getLogger(__name__)
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -346,6 +349,24 @@ class Settings(BaseSettings):
             raise ValueError(
                 "CHROMA_USERNAME es obligatorio cuando CHROMA_PASSWORD está configurado."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _warn_weak_default_credentials(self) -> "Settings":
+        """Emite advertencia cuando se detectan contraseñas débiles por defecto (CWE-798)."""
+        weak_defaults = {
+            "NEO4J_PASSWORD": (self.neo4j_password, "password"),
+            "POSTGRES_PASSWORD": (self.postgres_password, "coderag"),
+        }
+        for env_var, (current, default_val) in weak_defaults.items():
+            if current == default_val:
+                _settings_log.warning(
+                    "SECURITY: %s usa la contraseña por defecto '%s'. "
+                    "Defina la variable de entorno con un valor seguro antes de "
+                    "desplegar en producción.",
+                    env_var,
+                    default_val,
+                )
         return self
 
     @model_validator(mode="after")

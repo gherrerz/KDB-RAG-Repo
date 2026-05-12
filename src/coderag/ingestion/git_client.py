@@ -58,7 +58,7 @@ def build_repo_id(repo_url: str, branch: str) -> str:
 
     normalized = repo_url.strip()
     if not normalized:
-        digest = hashlib.sha1(repo_url.encode("utf-8")).hexdigest()
+        digest = hashlib.sha1(repo_url.encode("utf-8"), usedforsecurity=False).hexdigest()
         return digest[:16]
 
     candidate = ""
@@ -81,7 +81,7 @@ def build_repo_id(repo_url: str, branch: str) -> str:
     if sanitized:
         return sanitized
 
-    digest = hashlib.sha1(repo_url.encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(repo_url.encode("utf-8"), usedforsecurity=False).hexdigest()
     return digest[:16]
 
 

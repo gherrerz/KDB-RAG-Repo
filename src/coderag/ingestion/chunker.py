@@ -12,7 +12,7 @@ from coderag.ingestion.extractors import DEFAULT_LANGUAGE_EXTRACTOR_REGISTRY
 def _chunk_id(repo_id: str, path: str, name: str, start_line: int) -> str:
     """Cree una ID de fragmento determinista para fragmentos de símbolos."""
     value = f"{repo_id}:{path}:{name}:{start_line}".encode("utf-8")
-    return hashlib.sha1(value).hexdigest()
+    return hashlib.sha1(value, usedforsecurity=False).hexdigest()
 
 
 def _slice_snippet(lines: list[str], start_line: int, end_line: int) -> str:
