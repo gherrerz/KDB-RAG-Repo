@@ -4,7 +4,11 @@ Uso:
     python scripts/migrate_bm25_to_lexical.py
 
 Variables de entorno requeridas:
-    POSTGRES_URL  — DSN de PostgreSQL destino
+    POSTGRES_HOST      — host de PostgreSQL destino
+    POSTGRES_PORT      — puerto de PostgreSQL destino
+    POSTGRES_DB        — base de datos destino
+    POSTGRES_USER      — usuario de PostgreSQL destino
+    POSTGRES_PASSWORD  — password de PostgreSQL destino
     BM25_DIR      — directorio raíz de snapshots BM25 (default: ./storage/bm25)
 
 El script es idempotente: re-ejecutarlo actualiza los documentos existentes
@@ -17,19 +21,32 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def main() -> None:
-    postgres_url = os.environ.get("POSTGRES_URL", "").strip()
-    if not postgres_url:
-        print("ERROR: La variable POSTGRES_URL es obligatoria.", file=sys.stderr)
-        sys.exit(1)
-
     # Añadir src/ al path para importar módulos del proyecto
     repo_root = Path(__file__).resolve().parent.parent
     sys.path.insert(0, str(repo_root / "src"))
 
+    from coderag.core.settings import resolve_postgres_dsn
     from coderag.storage.lexical_store import LexicalStore
+
+    postgres_dsn = resolve_postgres_dsn(
+        SimpleNamespace(
+            postgres_host=os.environ.get("POSTGRES_HOST", ""),
+            postgres_port=os.environ.get("POSTGRES_PORT", 5432),
+            postgres_db=os.environ.get("POSTGRES_DB", "coderag"),
+            postgres_user=os.environ.get("POSTGRES_USER", "coderag"),
+            postgres_password=os.environ.get("POSTGRES_PASSWORD", "coderag"),
+        )
+    )
+    if not postgres_dsn:
+        print(
+            "ERROR: POSTGRES_HOST es obligatoria para construir la conexión PostgreSQL.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     bm25_dir_env = os.environ.get("BM25_DIR", "").strip()
     if bm25_dir_env:
@@ -42,7 +59,7 @@ def main() -> None:
         sys.exit(1)
 
     fts_language = os.environ.get("LEXICAL_FTS_LANGUAGE", "english").strip()
-    store = LexicalStore(postgres_url, fts_language)
+    store = LexicalStore(postgres_dsn, fts_language)
 
     snapshots = sorted(bm25_dir.glob("*.json"))
     if not snapshots:

@@ -12,7 +12,7 @@ from neo4j import GraphDatabase
 from openai import OpenAI
 from redis import Redis
 
-from coderag.core.settings import get_settings
+from coderag.core.settings import get_settings, resolve_postgres_dsn
 from coderag.ingestion.embedding import MODEL_DIMENSIONS
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import ChromaIndex
@@ -189,10 +189,10 @@ def _check_metadata_sqlite(db_path: Path) -> dict[str, Any]:
     return {"db_path": str(db_path), "repo_count": len(repo_ids)}
 
 
-def _check_metadata_postgres(postgres_url: str) -> dict[str, Any]:
+def _check_metadata_postgres(postgres_dsn: str) -> dict[str, Any]:
     """Valida conectividad básica a Postgres y acceso a tablas de metadatos."""
     from coderag.storage.postgres_metadata_store import PostgresMetadataStore
-    store = PostgresMetadataStore(postgres_url)
+    store = PostgresMetadataStore(postgres_dsn)
     repo_ids = store.list_repo_ids()
     return {"backend": "postgres", "repo_count": len(repo_ids)}
 
@@ -269,11 +269,11 @@ def _check_bm25(context: str, repo_id: str | None) -> dict[str, Any]:
     return {"indexed_repos": GLOBAL_BM25.repo_count()}
 
 
-def _check_lexical_store(context: str, repo_id: str | None, postgres_url: str) -> dict[str, Any]:
-    """Valida estado del LexicalStore en Postgres (reemplaza BM25 cuando POSTGRES_URL configurado)."""
+def _check_lexical_store(context: str, repo_id: str | None, postgres_dsn: str) -> dict[str, Any]:
+    """Valida estado del LexicalStore en Postgres cuando el backend está activo."""
     from coderag.storage.lexical_store import LexicalStore
     settings = get_settings()
-    store = LexicalStore(postgres_url, settings.lexical_fts_language)
+    store = LexicalStore(postgres_dsn, settings.lexical_fts_language)
     if context in {"query", "inventory_query"}:
         if not repo_id:
             raise RuntimeError(
@@ -339,7 +339,7 @@ def run_storage_preflight(
 
     workspace_path = settings.workspace_path
     metadata_path = settings.workspace_path.parent / "metadata.db"
-    postgres_url = (settings.postgres_url or "").strip()
+    postgres_dsn = resolve_postgres_dsn(settings)
 
     workspace_critical = context not in {
         "query",
@@ -356,11 +356,11 @@ def run_storage_preflight(
         },
         {
             "type": "check",
-            "name": "metadata_sqlite" if not postgres_url else "metadata_postgres",
+            "name": "metadata_sqlite" if not postgres_dsn else "metadata_postgres",
             "critical": True,
             "check_fn": (
-                (lambda: _check_metadata_postgres(postgres_url))
-                if postgres_url
+                (lambda: _check_metadata_postgres(postgres_dsn))
+                if postgres_dsn
                 else (lambda: _check_metadata_sqlite(metadata_path))
             ),
         },
@@ -378,12 +378,12 @@ def run_storage_preflight(
         },
         {
             "type": "check",
-            "name": "lexical" if postgres_url else "bm25",
+            "name": "lexical" if postgres_dsn else "bm25",
             # No crítico, solo advertencia si falta
             "critical": False,
             "check_fn": (
-                (lambda: _check_lexical_store(context=context, repo_id=repo_id, postgres_url=postgres_url))
-                if postgres_url
+                (lambda: _check_lexical_store(context=context, repo_id=repo_id, postgres_dsn=postgres_dsn))
+                if postgres_dsn
                 else (lambda: _check_bm25(context=context, repo_id=repo_id))
             ),
         },
@@ -578,10 +578,10 @@ def get_repo_query_status(
     chroma_spaces: dict[str, str | None] = {}
     chroma_space_mismatched_collections: list[str] = []
 
-    postgres_url = (settings.postgres_url or "").strip()
-    if postgres_url:
+    postgres_dsn = resolve_postgres_dsn(settings)
+    if postgres_dsn:
         from coderag.storage.lexical_store import LexicalStore
-        bm25_loaded = LexicalStore(postgres_url, settings.lexical_fts_language).has_corpus(repo_id)
+        bm25_loaded = LexicalStore(postgres_dsn, settings.lexical_fts_language).has_corpus(repo_id)
         if not bm25_loaded:
             warnings.append(f"No hay corpus léxico en Postgres para repo '{repo_id}'.")
     else:

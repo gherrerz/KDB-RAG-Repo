@@ -16,9 +16,9 @@ from coderag.storage.postgres_table_names import (
 class LexicalStore:
     """Indexación y búsqueda léxica de corpus de código usando PostgreSQL FTS."""
 
-    def __init__(self, postgres_url: str, fts_language: str = "english") -> None:
+    def __init__(self, postgres_dsn: str, fts_language: str = "english") -> None:
         """Inicializa el store y garantiza que el esquema existe."""
-        self._url = postgres_url
+        self._url = postgres_dsn
         self._lang = fts_language
         self._init_schema()
 

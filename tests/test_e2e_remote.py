@@ -4,7 +4,11 @@ Estas pruebas requieren infraestructura real levantada. Se omiten
 automáticamente si las variables de entorno no están configuradas.
 
 Requisitos para ejecutar:
-    POSTGRES_URL=postgresql://coderag:coderag@localhost:5432/coderag
+    POSTGRES_HOST=localhost
+    POSTGRES_PORT=5432
+    POSTGRES_DB=coderag
+    POSTGRES_USER=coderag
+    POSTGRES_PASSWORD=coderag
     CHROMA_MODE=remote
     CHROMA_HOST=localhost
     CHROMA_PORT=8001          (puerto host del contenedor Chroma)
@@ -26,26 +30,29 @@ from unittest.mock import patch
 
 import pytest
 
+from coderag.core.settings import Settings
+
 # ---------------------------------------------------------------------------
 # Marcadores de skip — se evalúan una sola vez al cargar el módulo
 # ---------------------------------------------------------------------------
 
-_POSTGRES_URL = os.environ.get("POSTGRES_URL", "").strip()
+_POSTGRES_SETTINGS = Settings(_env_file=None)
+_POSTGRES_DSN = _POSTGRES_SETTINGS.resolve_postgres_dsn()
 _CHROMA_MODE = os.environ.get("CHROMA_MODE", "embedded").strip()
 _CHROMA_HOST = os.environ.get("CHROMA_HOST", "localhost").strip()
 _CHROMA_PORT = int(os.environ.get("CHROMA_PORT", "8001"))
 
 _skip_no_postgres = pytest.mark.skipif(
-    not _POSTGRES_URL,
-    reason="POSTGRES_URL no configurada — se omite el test E2E de Postgres",
+    not _POSTGRES_DSN,
+    reason="Postgres no configurado — se omite el test E2E de Postgres",
 )
 _skip_no_chroma_remote = pytest.mark.skipif(
     _CHROMA_MODE != "remote",
     reason="CHROMA_MODE != remote — se omite el test E2E de Chroma remoto",
 )
 _skip_e2e = pytest.mark.skipif(
-    not _POSTGRES_URL or _CHROMA_MODE != "remote",
-    reason="Se requieren POSTGRES_URL y CHROMA_MODE=remote para el E2E completo",
+    not _POSTGRES_DSN or _CHROMA_MODE != "remote",
+    reason="Se requieren Postgres configurado y CHROMA_MODE=remote para el E2E completo",
 )
 
 
@@ -122,8 +129,8 @@ class TestLexicalStoreE2E:
         """_init_schema puede llamarse múltiples veces sin error."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store1 = LexicalStore(_POSTGRES_URL)
-        store2 = LexicalStore(_POSTGRES_URL)
+        store1 = LexicalStore(_POSTGRES_DSN)
+        store2 = LexicalStore(_POSTGRES_DSN)
         # Si llegamos aquí sin excepción, la idempotencia está garantizada.
         assert store1._lang == store2._lang
 
@@ -132,7 +139,7 @@ class TestLexicalStoreE2E:
         """Un repo nunca indexado retorna has_corpus=False."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store = LexicalStore(_POSTGRES_URL)
+        store = LexicalStore(_POSTGRES_DSN)
         repo_id = _unique_repo()
         assert store.has_corpus(repo_id) is False
 
@@ -141,7 +148,7 @@ class TestLexicalStoreE2E:
         """Después de indexar, has_corpus devuelve True."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store = LexicalStore(_POSTGRES_URL)
+        store = LexicalStore(_POSTGRES_DSN)
         repo_id = _unique_repo()
         docs, metas = _sample_docs_and_metas(repo_id)
 
@@ -156,7 +163,7 @@ class TestLexicalStoreE2E:
         """query devuelve documentos pertinentes para la consulta."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store = LexicalStore(_POSTGRES_URL)
+        store = LexicalStore(_POSTGRES_DSN)
         repo_id = _unique_repo()
         docs, metas = _sample_docs_and_metas(repo_id)
 
@@ -179,7 +186,7 @@ class TestLexicalStoreE2E:
         """El shape de resultado es idéntico al de GLOBAL_BM25.query()."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store = LexicalStore(_POSTGRES_URL)
+        store = LexicalStore(_POSTGRES_DSN)
         repo_id = _unique_repo()
         docs, metas = _sample_docs_and_metas(repo_id)
 
@@ -204,7 +211,7 @@ class TestLexicalStoreE2E:
         """query con texto vacío retorna [] inmediatamente."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store = LexicalStore(_POSTGRES_URL)
+        store = LexicalStore(_POSTGRES_DSN)
         repo_id = _unique_repo()
         docs, metas = _sample_docs_and_metas(repo_id)
         store.index_documents(repo_id=repo_id, docs=docs, metadatas=metas)
@@ -219,7 +226,7 @@ class TestLexicalStoreE2E:
         """Reindexar el mismo corpus no crea duplicados."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store = LexicalStore(_POSTGRES_URL)
+        store = LexicalStore(_POSTGRES_DSN)
         repo_id = _unique_repo()
         docs, metas = _sample_docs_and_metas(repo_id)
 
@@ -238,7 +245,7 @@ class TestLexicalStoreE2E:
         """delete_repo limpia todos los documentos del repositorio."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store = LexicalStore(_POSTGRES_URL)
+        store = LexicalStore(_POSTGRES_DSN)
         repo_id = _unique_repo()
         docs, metas = _sample_docs_and_metas(repo_id)
 
@@ -254,7 +261,7 @@ class TestLexicalStoreE2E:
         """delete_repo en repo inexistente retorna docs_removed=0 sin error."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store = LexicalStore(_POSTGRES_URL)
+        store = LexicalStore(_POSTGRES_DSN)
         result = store.delete_repo(_unique_repo())
         assert result["docs_removed"] == 0
 
@@ -263,7 +270,7 @@ class TestLexicalStoreE2E:
         """delete_all borra todos los repos del corpus léxico."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store = LexicalStore(_POSTGRES_URL)
+        store = LexicalStore(_POSTGRES_DSN)
         repo_a = _unique_repo()
         repo_b = _unique_repo()
         docs, metas_a = _sample_docs_and_metas(repo_a)
@@ -288,7 +295,7 @@ class TestLexicalStoreE2E:
         """query no devuelve más de top_n resultados."""
         from coderag.storage.lexical_store import LexicalStore
 
-        store = LexicalStore(_POSTGRES_URL)
+        store = LexicalStore(_POSTGRES_DSN)
         repo_id = _unique_repo()
         docs, metas = _sample_docs_and_metas(repo_id)
 
@@ -314,7 +321,7 @@ class TestPostgresMetadataStoreE2E:
         from coderag.core.models import JobInfo, JobStatus
         from coderag.storage.postgres_metadata_store import PostgresMetadataStore
 
-        store = PostgresMetadataStore(_POSTGRES_URL)
+        store = PostgresMetadataStore(_POSTGRES_DSN)
         job_id = f"job-{uuid.uuid4().hex[:8]}"
         job = JobInfo(
             id=job_id,
@@ -346,7 +353,7 @@ class TestPostgresMetadataStoreE2E:
         """get_job devuelve None para un id no registrado."""
         from coderag.storage.postgres_metadata_store import PostgresMetadataStore
 
-        store = PostgresMetadataStore(_POSTGRES_URL)
+        store = PostgresMetadataStore(_POSTGRES_DSN)
         assert store.get_job(f"no-existe-{uuid.uuid4().hex}") is None
 
     @_skip_no_postgres
@@ -355,7 +362,7 @@ class TestPostgresMetadataStoreE2E:
         from coderag.core.models import JobInfo, JobStatus
         from coderag.storage.postgres_metadata_store import PostgresMetadataStore
 
-        store = PostgresMetadataStore(_POSTGRES_URL)
+        store = PostgresMetadataStore(_POSTGRES_DSN)
         job_id = f"job-{uuid.uuid4().hex[:8]}"
         job = JobInfo(
             id=job_id,
@@ -382,7 +389,7 @@ class TestPostgresMetadataStoreE2E:
         """upsert_repo_runtime persiste metadata que get_repo_runtime recupera."""
         from coderag.storage.postgres_metadata_store import PostgresMetadataStore
 
-        store = PostgresMetadataStore(_POSTGRES_URL)
+        store = PostgresMetadataStore(_POSTGRES_DSN)
         repo_id = f"e2e-repo-{uuid.uuid4().hex[:8]}"
 
         try:
@@ -408,7 +415,7 @@ class TestPostgresMetadataStoreE2E:
         """list_repo_ids incluye repos persistidos en la tabla repos."""
         from coderag.storage.postgres_metadata_store import PostgresMetadataStore
 
-        store = PostgresMetadataStore(_POSTGRES_URL)
+        store = PostgresMetadataStore(_POSTGRES_DSN)
         repo_id = f"e2e-list-{uuid.uuid4().hex[:8]}"
 
         try:
@@ -432,7 +439,7 @@ class TestPostgresMetadataStoreE2E:
         from coderag.core.models import JobInfo, JobStatus
         from coderag.storage.postgres_metadata_store import PostgresMetadataStore
 
-        store = PostgresMetadataStore(_POSTGRES_URL)
+        store = PostgresMetadataStore(_POSTGRES_DSN)
         repo_id = f"e2e-del-{uuid.uuid4().hex[:8]}"
 
         job = JobInfo(id=f"j-{uuid.uuid4().hex[:6]}", status=JobStatus.completed,
@@ -593,12 +600,12 @@ class TestHybridSearchE2E:
             chroma_port=_CHROMA_PORT,
             chroma_token="",
             chroma_path=None,
-            postgres_url=_POSTGRES_URL,
+            resolve_postgres_dsn=lambda: _POSTGRES_DSN,
             lexical_fts_language="english",
             resolve_chroma_hnsw_space=lambda: "cosine",
         )
 
-        lexical_store = LexicalStore(_POSTGRES_URL)
+        lexical_store = LexicalStore(_POSTGRES_DSN)
 
         try:
             # --- Indexar en LexicalStore ---
@@ -676,12 +683,12 @@ class TestHybridSearchE2E:
             chroma_port=_CHROMA_PORT,
             chroma_token="",
             chroma_path=None,
-            postgres_url=_POSTGRES_URL,
+            resolve_postgres_dsn=lambda: _POSTGRES_DSN,
             lexical_fts_language="english",
             resolve_chroma_hnsw_space=lambda: "cosine",
         )
 
-        lexical_store = LexicalStore(_POSTGRES_URL)
+        lexical_store = LexicalStore(_POSTGRES_DSN)
 
         try:
             lexical_store.index_documents(

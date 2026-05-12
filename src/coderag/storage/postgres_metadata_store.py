@@ -20,9 +20,9 @@ from coderag.storage.postgres_table_names import (
 class PostgresMetadataStore(BaseMetadataStore):
     """Implementación de BaseMetadataStore usando PostgreSQL vía psycopg3."""
 
-    def __init__(self, postgres_url: str) -> None:
+    def __init__(self, postgres_dsn: str) -> None:
         """Crea la instancia y garantiza que el esquema existe."""
-        self._url = postgres_url
+        self._url = postgres_dsn
         self._init_schema()
 
     def _connect(self) -> psycopg.Connection[dict[str, Any]]:

@@ -62,7 +62,8 @@ Compatibilidad temporal de naming:
 
 ### Storage, metadata, lexical y workspace
 
-- `POSTGRES_URL`: backend operativo primario para metadata y store lexico. Cuando esta configurado, el runtime usa Postgres en lugar de SQLite/BM25 local. Default: vacio.
+- `POSTGRES_HOST`: host del backend operativo de Postgres para metadata y store lexico. Cuando esta configurado, el runtime usa Postgres en lugar de SQLite/BM25 local. Default: vacio.
+- `POSTGRES_PORT`: puerto TCP de Postgres. Default: `5432`.
 - `POSTGRES_DB`: nombre de base para despliegues locales o Compose que levanten Postgres gestionado por este repo. Default: `coderag`.
 - `POSTGRES_USER`: usuario de Postgres para despliegues locales o Compose. Default: `coderag`.
 - `POSTGRES_PASSWORD`: password de Postgres para despliegues locales o Compose. Default: `coderag`.
@@ -79,8 +80,8 @@ Compatibilidad temporal de naming:
 Notas operativas de storage:
 
 - Arquitectura operativa principal: Chroma remoto + Postgres + Neo4j.
-- Si `POSTGRES_URL` esta vacio, el codigo aun puede caer en compatibilidad legacy con SQLite para metadata y BM25 local para lexical.
-- Si `POSTGRES_URL` esta activo, el runtime crea y usa las tablas Postgres
+- Si `POSTGRES_HOST` esta vacio, el codigo aun puede caer en compatibilidad legacy con SQLite para metadata y BM25 local para lexical.
+- Si `POSTGRES_HOST` esta configurado, el runtime crea y usa las tablas Postgres
   `tbl_repository_jobs`, `tbl_repository_repos` y
   `tbl_repository_lexical_corpus`; una base existente con tablas legacy
   `jobs`, `repos` y `lexical_corpus` requiere limpieza o recreacion si no se
@@ -209,7 +210,11 @@ CHROMA_TOKEN=<chroma-bearer-token>
 # Opcion B: Basic auth (mutuamente excluyente con CHROMA_TOKEN)
 # CHROMA_USERNAME=<chroma-username>
 # CHROMA_PASSWORD=<chroma-password>
-POSTGRES_URL=<postgres-connection-string>
+POSTGRES_HOST=<postgres-host>
+POSTGRES_PORT=5432
+POSTGRES_DB=<postgres-db>
+POSTGRES_USER=<postgres-user>
+POSTGRES_PASSWORD=<postgres-password>
 VERTEX_AI_LABELS_ENABLED=true
 VERTEX_AI_LABEL_SERVICE=webspec-coipo
 VERTEX_AI_LABEL_SERVICE_ACCOUNT=qa-anthos
@@ -228,7 +233,7 @@ GIT_SSH_STRICT_HOST_KEY_CHECKING=yes
 ```
 
 Si prefieres reproducir el setup local heredado versionado en `.env.example`,
-puedes usar `CHROMA_MODE=embedded` y omitir `POSTGRES_URL`, pero ese camino no
+puedes usar `CHROMA_MODE=embedded` y omitir `POSTGRES_HOST`, pero ese camino no
 representa la arquitectura operativa principal.
 
 Cuando uses Chroma remoto autenticado, el mismo mecanismo se aplica a ingesta,

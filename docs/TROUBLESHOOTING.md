@@ -12,7 +12,7 @@ Incidencias frecuentes y acciones sugeridas.
 
 - Consulta GET /repos/{repo_id}/status.
 - Revisa query_ready, chroma_counts y bm25_loaded.
-- `bm25_loaded` conserva un nombre historico; con `POSTGRES_URL` activo se usa
+- `bm25_loaded` conserva un nombre historico; con Postgres activo se usa
   como señal de readiness de la capa lexica en Postgres.
 - Si embedding_compatible es false, reingesta con provider/modelo compatible.
 

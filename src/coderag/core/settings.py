@@ -6,6 +6,7 @@ from functools import lru_cache
 import json
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -116,7 +117,8 @@ class Settings(BaseSettings):
     chroma_token: str = Field(default="", alias="CHROMA_TOKEN")
     chroma_username: str = Field(default="", alias="CHROMA_USERNAME")
     chroma_password: str = Field(default="", alias="CHROMA_PASSWORD")
-    postgres_url: str = Field(default="", alias="POSTGRES_URL")
+    postgres_host: str = Field(default="", alias="POSTGRES_HOST")
+    postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
     postgres_db: str = Field(default="coderag", alias="POSTGRES_DB")
     postgres_user: str = Field(default="coderag", alias="POSTGRES_USER")
     postgres_password: str = Field(default="coderag", alias="POSTGRES_PASSWORD")
@@ -345,6 +347,39 @@ class Settings(BaseSettings):
                 "CHROMA_USERNAME es obligatorio cuando CHROMA_PASSWORD está configurado."
             )
         return self
+
+    @model_validator(mode="after")
+    def _normalize_postgres_settings(self) -> "Settings":
+        """Normaliza el contrato de PostgreSQL basado en host/puerto."""
+        self.postgres_host = (self.postgres_host or "").strip()
+        self.postgres_db = (self.postgres_db or "").strip()
+        self.postgres_user = (self.postgres_user or "").strip()
+        self.postgres_password = (self.postgres_password or "").strip()
+
+        if self.postgres_port <= 0:
+            raise ValueError("POSTGRES_PORT debe ser un entero positivo.")
+        return self
+
+    def resolve_postgres_dsn(self) -> str:
+        """Construye la DSN efectiva de PostgreSQL desde variables separadas."""
+        host = (self.postgres_host or "").strip()
+        if not host:
+            return ""
+
+        database = (self.postgres_db or "coderag").strip() or "coderag"
+        user = quote((self.postgres_user or "coderag").strip() or "coderag", safe="")
+        password = quote(
+            (self.postgres_password or "coderag").strip() or "coderag",
+            safe="",
+        )
+        host_part = host
+        if ":" in host and not host.startswith("["):
+            host_part = f"[{host}]"
+        db_part = quote(database, safe="")
+        return (
+            f"postgresql://{user}:{password}@{host_part}:"
+            f"{self.postgres_port}/{db_part}"
+        )
 
     def resolve_embedding_provider(self, override: str | None = None) -> ProviderName:
         """Resuelve el proveedor de embeddings con prioridad override > env."""
@@ -654,6 +689,39 @@ class Settings(BaseSettings):
     def is_verify_enabled(self) -> bool:
         """Devuelve si la verificación LLM está habilitada."""
         return bool(self.llm_verify_enabled)
+
+
+def resolve_postgres_dsn(settings: object) -> str:
+    """Resuelve la DSN de Postgres desde Settings reales o doubles de prueba."""
+    resolver = getattr(settings, "resolve_postgres_dsn", None)
+    if callable(resolver):
+        return str(resolver() or "").strip()
+
+    host = str(getattr(settings, "postgres_host", "") or "").strip()
+    if not host:
+        return ""
+
+    port = int(getattr(settings, "postgres_port", 5432) or 5432)
+    if port <= 0:
+        raise ValueError("POSTGRES_PORT debe ser un entero positivo.")
+
+    database = str(getattr(settings, "postgres_db", "coderag") or "coderag").strip()
+    database = database or "coderag"
+    user = str(getattr(settings, "postgres_user", "coderag") or "coderag").strip()
+    user = user or "coderag"
+    password = str(
+        getattr(settings, "postgres_password", "coderag") or "coderag"
+    ).strip()
+    password = password or "coderag"
+
+    host_part = host
+    if ":" in host and not host.startswith("["):
+        host_part = f"[{host}]"
+
+    return (
+        f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@"
+        f"{host_part}:{port}/{quote(database, safe='')}"
+    )
 
 
 @lru_cache(maxsize=1)

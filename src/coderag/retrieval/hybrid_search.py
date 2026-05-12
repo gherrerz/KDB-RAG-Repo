@@ -7,7 +7,7 @@ import re
 import unicodedata
 
 from coderag.core.models import RetrievalChunk
-from coderag.core.settings import get_settings
+from coderag.core.settings import get_settings, resolve_postgres_dsn
 from coderag.ingestion.embedding import EmbeddingClient
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import ChromaIndex
@@ -328,12 +328,12 @@ def hybrid_search(
             )
 
     settings = get_settings()
-    postgres_url = (settings.postgres_url or "").strip()
+    postgres_dsn = resolve_postgres_dsn(settings)
 
-    if postgres_url:
+    if postgres_dsn:
         from coderag.storage.lexical_store import LexicalStore
         lexical_results = LexicalStore(
-            postgres_url, settings.lexical_fts_language
+            postgres_dsn, settings.lexical_fts_language
         ).query(repo_id=repo_id, text=normalized_query, top_n=candidate_top_n)
     else:
         GLOBAL_BM25.ensure_repo_loaded(repo_id)

@@ -68,7 +68,11 @@ CHROMA_TOKEN=<chroma-bearer-token>
 # Opcion B: Basic auth (mutuamente excluyente con CHROMA_TOKEN)
 # CHROMA_USERNAME=<chroma-username>
 # CHROMA_PASSWORD=<chroma-password>
-POSTGRES_URL=<postgres-connection-string>
+POSTGRES_HOST=<postgres-host>
+POSTGRES_PORT=5432
+POSTGRES_DB=<postgres-db>
+POSTGRES_USER=<postgres-user>
+POSTGRES_PASSWORD=<postgres-password>
 ```
 
 `project_id` se deriva del JSON Base64 del service account y `location` se deriva

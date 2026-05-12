@@ -12,7 +12,7 @@ from coderag.core.models import (
     SemanticRelation,
     SymbolChunk,
 )
-from coderag.core.settings import get_settings
+from coderag.core.settings import get_settings, resolve_postgres_dsn
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.embedding import EmbeddingClient
 from coderag.ingestion.git_client import clone_repository
@@ -137,10 +137,10 @@ def _repo_has_existing_index_data(repo_id: str, logger: LoggerFn) -> bool:
         )
 
     settings = get_settings()
-    postgres_url = (settings.postgres_url or "").strip()
-    if postgres_url:
+    postgres_dsn = resolve_postgres_dsn(settings)
+    if postgres_dsn:
         from coderag.storage.lexical_store import LexicalStore
-        lexical_exists = LexicalStore(postgres_url, settings.lexical_fts_language).has_corpus(repo_id)
+        lexical_exists = LexicalStore(postgres_dsn, settings.lexical_fts_language).has_corpus(repo_id)
     else:
         lexical_exists = GLOBAL_BM25.has_repo(repo_id) or GLOBAL_BM25.has_repo_snapshot(repo_id)
 
@@ -165,10 +165,10 @@ def _purge_repo_indices(repo_id: str, logger: LoggerFn) -> None:
     chroma_deleted = chroma.delete_by_repo_id(repo_id=repo_id)
 
     settings = get_settings()
-    postgres_url = (settings.postgres_url or "").strip()
-    if postgres_url:
+    postgres_dsn = resolve_postgres_dsn(settings)
+    if postgres_dsn:
         from coderag.storage.lexical_store import LexicalStore
-        lexical_deleted = LexicalStore(postgres_url, settings.lexical_fts_language).delete_repo(repo_id)
+        lexical_deleted = LexicalStore(postgres_dsn, settings.lexical_fts_language).delete_repo(repo_id)
         lexical_msg = f"lexical_docs={lexical_deleted['docs_removed']}"
     else:
         bm25_deleted = GLOBAL_BM25.delete_repo(repo_id)
@@ -479,10 +479,10 @@ def _index_bm25(
     GLOBAL_BM25.persist_repo(repo_id)
 
     settings = get_settings()
-    postgres_url = (settings.postgres_url or "").strip()
-    if postgres_url:
+    postgres_dsn = resolve_postgres_dsn(settings)
+    if postgres_dsn:
         from coderag.storage.lexical_store import LexicalStore
-        LexicalStore(postgres_url, settings.lexical_fts_language).index_documents(
+        LexicalStore(postgres_dsn, settings.lexical_fts_language).index_documents(
             repo_id=repo_id, docs=docs, metadatas=metadatas
         )
 

@@ -10,7 +10,7 @@ from pathlib import Path
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
-from coderag.core.settings import get_settings
+from coderag.core.settings import get_settings, resolve_postgres_dsn
 from coderag.ingestion.graph_builder import GraphBuilder
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import (
@@ -53,7 +53,7 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
     settings = get_settings()
     cleared: list[str] = []
     warnings: list[str] = []
-    postgres_url = (settings.postgres_url or "").strip()
+    postgres_dsn = resolve_postgres_dsn(settings)
 
     ChromaIndex.reset_shared_state()
 
@@ -71,10 +71,10 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
             f"{exc}"
         )
 
-    if postgres_url:
+    if postgres_dsn:
         try:
             from coderag.storage.lexical_store import LexicalStore
-            LexicalStore(postgres_url).delete_all()
+            LexicalStore(postgres_dsn).delete_all()
             cleared.append("LexicalStore Postgres")
         except Exception as exc:
             warnings.append(f"No se pudo limpiar LexicalStore Postgres: {exc}")
@@ -137,10 +137,10 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
     settings.workspace_path.mkdir(parents=True, exist_ok=True)
     cleared.append(f"Workspace ({settings.workspace_path})")
 
-    if postgres_url:
+    if postgres_dsn:
         try:
             from coderag.storage.postgres_metadata_store import PostgresMetadataStore
-            pg_store = PostgresMetadataStore(postgres_url)
+            pg_store = PostgresMetadataStore(postgres_dsn)
             pg_store.reset_all()
             cleared.append("Metadata Postgres")
         except Exception as exc:
@@ -215,11 +215,11 @@ def delete_repo_storage(
     except Exception as exc:
         warnings.append(f"No se pudo limpiar BM25 para '{normalized_repo_id}': {exc}")
 
-    postgres_url_del = (settings.postgres_url or "").strip()
-    if postgres_url_del:
+    postgres_dsn = resolve_postgres_dsn(settings)
+    if postgres_dsn:
         try:
             from coderag.storage.lexical_store import LexicalStore
-            lex_deleted = LexicalStore(postgres_url_del, settings.lexical_fts_language).delete_repo(normalized_repo_id)
+            lex_deleted = LexicalStore(postgres_dsn, settings.lexical_fts_language).delete_repo(normalized_repo_id)
             deleted_counts["lexical_docs"] = int(lex_deleted.get("docs_removed", 0) or 0)
             cleared.append("LexicalStore")
         except Exception as exc:
@@ -260,7 +260,7 @@ def delete_repo_storage(
         deleted_counts["metadata_total"] = int(
             metadata_deleted.get("total", 0) or 0
         )
-        cleared.append("Metadata SQLite" if not (settings.postgres_url or "").strip() else "Metadata Postgres")
+        cleared.append("Metadata SQLite" if not resolve_postgres_dsn(settings) else "Metadata Postgres")
     except Exception as exc:
         warnings.append(
             "No se pudo limpiar metadata para "
@@ -272,8 +272,8 @@ def delete_repo_storage(
 
 def _build_metadata_store(settings):
     """Devuelve el store de metadatos apropiado según la configuración."""
-    postgres_url = (settings.postgres_url or "").strip()
-    if postgres_url:
+    postgres_dsn = resolve_postgres_dsn(settings)
+    if postgres_dsn:
         from coderag.storage.postgres_metadata_store import PostgresMetadataStore
-        return PostgresMetadataStore(postgres_url)
+        return PostgresMetadataStore(postgres_dsn)
     return MetadataStore(settings.workspace_path.parent / "metadata.db")

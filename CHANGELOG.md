@@ -27,6 +27,9 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- Se elimina la variable monolitica legacy de conexion Postgres del contrato de configuracion; el runtime, Compose,
+  Kubernetes y scripts pasan a usar `POSTGRES_HOST`, `POSTGRES_PORT`,
+  `POSTGRES_DB`, `POSTGRES_USER` y `POSTGRES_PASSWORD`.
 - El backend Postgres ahora crea y consulta las tablas
     `tbl_repository_jobs`, `tbl_repository_repos` y
     `tbl_repository_lexical_corpus`; despliegues existentes con tablas legacy

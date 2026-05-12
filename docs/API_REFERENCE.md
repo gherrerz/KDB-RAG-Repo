@@ -179,7 +179,7 @@ Notas operativas de storage:
 
 - Arquitectura operativa principal: Chroma remoto + Postgres + Neo4j.
 - SQLite y BM25 local pueden seguir apareciendo como compatibilidad legacy en
-  algunas rutas cuando `POSTGRES_URL` no esta configurado, pero no son el
+  algunas rutas cuando Postgres no esta configurado, pero no son el
   backend principal documentado aqui.
 
 ### Enum: JobStatus
@@ -451,7 +451,7 @@ Notas de interpretación:
 | `warnings` | `list[str]` | no |
 
 Nota: `bm25_loaded` conserva un nombre historico por compatibilidad, pero en
-despliegues con `POSTGRES_URL` activo actua como señal de readiness de la capa
+despliegues con Postgres activo actua como señal de readiness de la capa
 lexica en Postgres.
 
 ### StorageHealthItem

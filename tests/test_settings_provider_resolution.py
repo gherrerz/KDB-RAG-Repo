@@ -138,6 +138,65 @@ def test_chroma_remote_auth_rejects_password_without_username() -> None:
         Settings(CHROMA_PASSWORD="svc-pass", _env_file=None)
 
 
+def test_postgres_dsn_is_empty_without_host() -> None:
+    """Deshabilita Postgres cuando no hay host configurado."""
+    settings = Settings(_env_file=None)
+
+    assert settings.resolve_postgres_dsn() == ""
+
+
+def test_postgres_dsn_builds_from_separate_settings() -> None:
+    """Compone la DSN Postgres desde host, puerto, db y credenciales."""
+    settings = Settings(
+        POSTGRES_HOST="localhost",
+        POSTGRES_PORT=5432,
+        POSTGRES_DB="coderag",
+        POSTGRES_USER="coderag",
+        POSTGRES_PASSWORD="coderag",
+        _env_file=None,
+    )
+
+    assert settings.resolve_postgres_dsn() == (
+        "postgresql://coderag:coderag@localhost:5432/coderag"
+    )
+
+
+def test_postgres_dsn_uses_default_port_when_omitted() -> None:
+    """Usa el puerto default de Postgres cuando no se configura override."""
+    settings = Settings(
+        POSTGRES_HOST="db.internal",
+        POSTGRES_DB="catalog",
+        POSTGRES_USER="svc",
+        POSTGRES_PASSWORD="secret",
+        _env_file=None,
+    )
+
+    assert settings.resolve_postgres_dsn() == (
+        "postgresql://svc:secret@db.internal:5432/catalog"
+    )
+
+
+def test_postgres_dsn_normalizes_whitespace_and_quotes_credentials() -> None:
+    """Recorta espacios y escapa caracteres especiales en la DSN."""
+    settings = Settings(
+        POSTGRES_HOST=" localhost ",
+        POSTGRES_DB=" repo db ",
+        POSTGRES_USER=" svc user ",
+        POSTGRES_PASSWORD=" p@ss word ",
+        _env_file=None,
+    )
+
+    assert settings.resolve_postgres_dsn() == (
+        "postgresql://svc%20user:p%40ss%20word@localhost:5432/repo%20db"
+    )
+
+
+def test_postgres_port_rejects_non_positive_values() -> None:
+    """Valida que el puerto de Postgres sea positivo."""
+    with pytest.raises(ValueError, match="POSTGRES_PORT"):
+        Settings(POSTGRES_HOST="localhost", POSTGRES_PORT=0, _env_file=None)
+
+
 def test_semantic_graph_java_flag_defaults_to_true() -> None:
     """Mantiene habilitada la extracción semántica Java por defecto."""
     settings = Settings(_env_file=None)

@@ -12,7 +12,7 @@ import time
 from uuid import uuid4
 
 from coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
-from coderag.core.settings import get_settings
+from coderag.core.settings import get_settings, resolve_postgres_dsn
 from coderag.ingestion.git_client import build_repo_id, extract_repo_organization
 from coderag.storage.metadata_store import MetadataStore
 from coderag.storage.base_metadata_store import BaseMetadataStore
@@ -207,10 +207,10 @@ def _execute_ingest_job(
 def _build_metadata_store() -> BaseMetadataStore:
     """Crea el store de metadatos apropiado según la configuración activa."""
     settings = get_settings()
-    postgres_url = (settings.postgres_url or "").strip()
-    if postgres_url:
+    postgres_dsn = resolve_postgres_dsn(settings)
+    if postgres_dsn:
         from coderag.storage.postgres_metadata_store import PostgresMetadataStore
-        return PostgresMetadataStore(postgres_url)
+        return PostgresMetadataStore(postgres_dsn)
     metadata_path = settings.workspace_path.parent / "metadata.db"
     return MetadataStore(metadata_path)
 
