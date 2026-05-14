@@ -75,6 +75,37 @@ def test_ensure_storage_ready_raises_when_strict_and_unhealthy(monkeypatch) -> N
         storage_health.ensure_storage_ready(context="query", repo_id="mall")
 
 
+def test_storage_preflight_error_incluye_detalles_de_componentes() -> None:
+    """Expone mensajes detallados cuando existen componentes críticos fallidos."""
+    report = {
+        "ok": False,
+        "strict": True,
+        "checked_at": "2026-01-01T00:00:00+00:00",
+        "context": "startup",
+        "repo_id": None,
+        "failed_components": ["metadata_postgres"],
+        "items": [
+            {
+                "name": "metadata_postgres",
+                "ok": False,
+                "critical": True,
+                "code": "metadata_postgres_failed",
+                "message": "No se pudo resolver postgres:5432/coderag",
+                "latency_ms": 1.0,
+                "details": {},
+            }
+        ],
+        "cached": False,
+    }
+
+    error = StoragePreflightError(report)
+
+    assert (
+        str(error) == "Preflight de storage falló: metadata_postgres: "
+        "No se pudo resolver postgres:5432/coderag"
+    )
+
+
 def test_run_storage_preflight_collects_failed_components(monkeypatch) -> None:
     """Incluye en failed_components los checks críticos que fallan."""
     storage_health._CACHE.clear()

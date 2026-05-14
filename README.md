@@ -109,6 +109,9 @@ Notas operativas del arranque local:
   `chroma` y `postgres` para reproducir en local la topologia remota completa.
 - La arquitectura operativa principal del proyecto usa Chroma remoto y
   Postgres; el helper de arranque no activa hoy ese perfil por defecto.
+- Si no activas el perfil `remote`, deja `POSTGRES_HOST` vacio; el host
+  `postgres` solo existe dentro de la red interna de Compose. Usa `localhost`
+  solo para ejecucion local fuera de contenedor contra un Postgres expuesto.
 
 Alternativa para desarrollo local (API/UI fuera de contenedor):
 

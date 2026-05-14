@@ -34,6 +34,18 @@ class StoragePreflightError(RuntimeError):
     def __init__(self, report: dict[str, Any]) -> None:
         """Inicializa el error con el reporte consolidado de salud."""
         self.report = report
+        failed_items = [
+            item
+            for item in report.get("items", [])
+            if item.get("critical") and not item.get("ok")
+        ]
+        if failed_items:
+            details = "; ".join(
+                f"{item.get('name')}: {item.get('message')}"
+                for item in failed_items
+            )
+            super().__init__(f"Preflight de storage falló: {details}")
+            return
         failed = ", ".join(report.get("failed_components", []))
         super().__init__(f"Preflight de storage falló: {failed}")
 

@@ -21,6 +21,7 @@ if "psycopg" not in sys.modules:
     _psycopg_stub = MagicMock()
     _psycopg_rows_stub = MagicMock()
     _psycopg_rows_stub.dict_row = MagicMock()
+    _psycopg_stub.OperationalError = RuntimeError
     _psycopg_stub.rows = _psycopg_rows_stub
     sys.modules["psycopg"] = _psycopg_stub
     sys.modules["psycopg.rows"] = _psycopg_rows_stub
@@ -105,6 +106,24 @@ class TestInitSchema:
             f"CREATE TABLE IF NOT EXISTS {POSTGRES_REPOS_TABLE}" in s
             for s in calls_sql
         )
+
+    def test_sanitiza_error_de_conexion_postgres(self):
+        """El error de conexión expone destino sin filtrar credenciales."""
+        import coderag.storage.postgres_metadata_store as store_module
+
+        dsn = "postgresql://coderag:secret@postgres:5432/coderag"
+        connect_error = store_module.psycopg.OperationalError(
+            "[Errno -2] Name or service not known"
+        )
+
+        with patch(_PATCH_CONNECT, side_effect=connect_error):
+            with pytest.raises(RuntimeError) as exc_info:
+                store_module.PostgresMetadataStore(dsn)
+
+        message = str(exc_info.value)
+        assert "postgres:5432/coderag" in message
+        assert "perfil 'remote'" in message
+        assert "secret" not in message
 
 
 # ===========================================================================

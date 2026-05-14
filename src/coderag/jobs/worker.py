@@ -235,10 +235,27 @@ class JobManager:
             True,
         )
         self._ingestion_mode = getattr(settings, "ingestion_execution_mode", "thread")
-        self.store = _build_metadata_store()
-        self.store.recover_interrupted_jobs()
+        self._store: BaseMetadataStore | None = None
         self._jobs: dict[str, JobInfo] = {}
+        self._store_lock = Lock()
         self._create_job_lock = Lock()
+
+    @property
+    def store(self) -> BaseMetadataStore:
+        """Construye el backend de metadata solo cuando se necesita."""
+        if self._store is None:
+            with self._store_lock:
+                if self._store is None:
+                    store = _build_metadata_store()
+                    store.recover_interrupted_jobs()
+                    self._store = store
+        assert self._store is not None
+        return self._store
+
+    @store.setter
+    def store(self, value: BaseMetadataStore) -> None:
+        """Permite reemplazar el backend activo tras resets o pruebas."""
+        self._store = value
 
     def list_repo_ids(self) -> list[str]:
         """Devuelve identificadores de repositorio conocidos desde metadatos persistidos."""

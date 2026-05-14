@@ -236,6 +236,12 @@ Si prefieres reproducir el setup local heredado versionado en `.env.example`,
 puedes usar `CHROMA_MODE=embedded` y omitir `POSTGRES_HOST`, pero ese camino no
 representa la arquitectura operativa principal.
 
+Si ejecutas la API dentro de Docker Compose con el perfil `remote`, usa
+`POSTGRES_HOST=postgres` para resolver el servicio por DNS interno. Si arrancas
+sin ese perfil, deja `POSTGRES_HOST` vacío para no forzar un backend operativo
+que no existe. Usa `localhost` solo cuando la API corra fuera de contenedor y
+tu Postgres esté expuesto en la máquina host.
+
 Cuando uses Chroma remoto autenticado, el mismo mecanismo se aplica a ingesta,
 query, health y reset, porque el runtime comparte el mismo cliente HTTP.
 
