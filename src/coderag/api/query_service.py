@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import re
 from time import monotonic
-from typing import Any
 
 from coderag.core.models import (
     Citation,
@@ -24,6 +23,8 @@ from coderag.api import internal_importers as internal_importers_service
 from coderag.api import inventory_graph_first as inventory_graph_first_service
 from coderag.api import inventory_helpers as inventory_helpers_service
 from coderag.api import inventory_purpose as inventory_purpose_service
+from coderag.api import query_answer_resolution as query_answer_resolution_service
+from coderag.api import query_hybrid_pipeline as query_hybrid_pipeline_service
 from coderag.api import query_signals as query_signals_service
 from coderag.api import inventory_query_flow as inventory_query_flow_service
 from coderag.api import literal_mode as literal_mode_service
@@ -42,9 +43,7 @@ from coderag.retrieval.hybrid_search import hybrid_search
 from coderag.retrieval.reranker import rerank
 
 
-def _fallback_header(fallback_reason: str) -> str:
-    """Devuelve un mensaje de encabezado alternativo según la causa raíz."""
-    return citation_presentation_service.fallback_header(fallback_reason)
+_fallback_header = citation_presentation_service.fallback_header
 
 
 def _build_extractive_fallback(
@@ -66,9 +65,7 @@ def _build_extractive_fallback(
     )
 
 
-def _is_module_query(query: str) -> bool:
-    """Devuelve si el usuario pregunta sobre los módulos/servicios del repositorio."""
-    return query_signals_service.is_module_query(query)
+_is_module_query = query_signals_service.is_module_query
 
 
 def _discover_repo_modules(repo_id: str) -> list[str]:
@@ -105,34 +102,20 @@ def _discover_repo_modules(repo_id: str) -> list[str]:
     ]
 
 
-def _is_inventory_query(query: str) -> bool:
-    """Devuelve si la consulta pide inventario de forma explícita."""
-    return query_signals_service.is_inventory_query(query)
+_is_inventory_query = query_signals_service.is_inventory_query
+_is_external_import_query = query_signals_service.is_external_import_query
+_normalize_query_signal_text = query_signals_service.normalize_query_signal_text
+_extract_file_reference_candidates = (
+    query_signals_service.extract_file_reference_candidates
+)
+_is_reverse_file_import_query = (
+    query_signals_service.is_reverse_file_import_query
+)
 
 
-def _is_external_import_query(query: str) -> bool:
-    """Detecta consultas sobre imports/dependencias externas."""
-    return query_signals_service.is_external_import_query(query)
-
-
-def _normalize_query_signal_text(query: str) -> str:
-    """Normaliza texto de query para detectar intenciones con o sin tildes."""
-    return query_signals_service.normalize_query_signal_text(query)
-
-
-def _extract_file_reference_candidates(query: str) -> tuple[str, ...]:
-    """Extrae referencias tipo archivo/path desde la query del usuario."""
-    return query_signals_service.extract_file_reference_candidates(query)
-
-
-def _is_reverse_file_import_query(query: str) -> bool:
-    """Detecta preguntas sobre qué archivos importan o usan un archivo dado."""
-    return query_signals_service.is_reverse_file_import_query(query)
-
-
-def _extract_external_import_candidates(query: str) -> tuple[str, ...]:
-    """Extrae refs candidatas para resolver imports externos desde la query."""
-    return external_imports_service.extract_external_import_candidates(query)
+_extract_external_import_candidates = (
+    external_imports_service.extract_external_import_candidates
+)
 
 
 def _resolve_external_import_source_paths(repo_id: str, query: str) -> dict[str, int]:
@@ -240,15 +223,9 @@ def _internal_importer_hooks(
     )
 
 
-def _build_reverse_file_import_answer(
-    target_paths: list[str],
-    items: list[InventoryItem],
-) -> str:
-    """Construye respuesta extractiva para importadores directos de un archivo."""
-    return inventory_graph_first_service.build_reverse_file_import_answer(
-        target_paths,
-        items,
-    )
+_build_reverse_file_import_answer = (
+    inventory_graph_first_service.build_reverse_file_import_answer
+)
 
 
 def _run_reverse_file_import_query(
@@ -292,19 +269,11 @@ def _literal_mode_hooks() -> literal_mode_service.LiteralModeHooks:
     )
 
 
-def _is_literal_code_query(query: str) -> bool:
-    """Detecta solicitudes para devolver código literal de archivo completo."""
-    return literal_mode_service.is_literal_code_query(query)
-
-
-def _extract_literal_file_candidates(query: str) -> list[str]:
-    """Extrae candidatos de ruta/archivo potenciales para modo literal."""
-    return literal_mode_service.extract_literal_file_candidates(query)
-
-
-def _extract_literal_symbol_candidates(query: str) -> list[str]:
-    """Extrae candidatos de símbolo potenciales para modo literal."""
-    return literal_mode_service.extract_literal_symbol_candidates(query)
+_is_literal_code_query = literal_mode_service.is_literal_code_query
+_extract_literal_file_candidates = literal_mode_service.extract_literal_file_candidates
+_extract_literal_symbol_candidates = (
+    literal_mode_service.extract_literal_symbol_candidates
+)
 
 
 def _resolve_repo_root(repo_id: str) -> Path | None:
@@ -327,19 +296,9 @@ def _resolve_literal_file_match(
     )
 
 
-def _python_symbol_spans(content: str, symbol: str) -> list[tuple[int, int]]:
-    """Obtiene spans exactos para símbolos Python usando AST."""
-    return literal_mode_service.python_symbol_spans(content, symbol)
-
-
-def _brace_block_end(lines: list[str], start_index: int) -> int:
-    """Resuelve fin de bloque por llaves a partir de una línea inicial."""
-    return literal_mode_service.brace_block_end(lines, start_index)
-
-
-def _generic_symbol_spans(content: str, symbol: str) -> list[tuple[int, int]]:
-    """Obtiene spans aproximados para símbolos en lenguajes no Python."""
-    return literal_mode_service.generic_symbol_spans(content, symbol)
+_python_symbol_spans = literal_mode_service.python_symbol_spans
+_brace_block_end = literal_mode_service.brace_block_end
+_generic_symbol_spans = literal_mode_service.generic_symbol_spans
 
 
 def _resolve_literal_symbol_match(
@@ -354,9 +313,7 @@ def _resolve_literal_symbol_match(
     )
 
 
-def _slice_lines(content: str, start_line: int, end_line: int) -> str:
-    """Extrae un rango de líneas inclusivo desde contenido de archivo."""
-    return literal_mode_service.slice_lines(content, start_line, end_line)
+_slice_lines = literal_mode_service.slice_lines
 
 
 def _build_literal_code_response(repo_id: str, query: str) -> QueryResponse:
@@ -382,49 +339,17 @@ def _build_literal_retrieval_response(
     )
 
 
-def _extract_module_name(query: str) -> str | None:
-    """Extraiga el token del módulo o del paquete de una consulta en lenguaje natural."""
-    return inventory_helpers_service.extract_module_name(query)
-
-
-def _normalize_inventory_token(token: str) -> str:
-    """Normalice el token de inventario poniendo minúsculas y eliminando acentos/puntuación."""
-    return inventory_helpers_service.normalize_inventory_token(token)
-
-
-def _inventory_base_forms(token: str) -> set[str]:
-    """Cree formularios base candidatos a partir de variantes plurales/singulares."""
-    return inventory_helpers_service.inventory_base_forms(token)
-
-
-def _canonical_inventory_term(token: str) -> str:
-    """Devuelve el término de inventario canónico desde los formularios base disponibles."""
-    return inventory_helpers_service.canonical_inventory_term(token)
-
-
-def _plural_variants(token: str) -> set[str]:
-    """Genere variantes plurales/superficiales para un término de inventario normalizado."""
-    return inventory_helpers_service.plural_variants(token)
-
-
-def _deduplicate_citations(citations: list[Citation]) -> list[Citation]:
-    """Deduplicar citas manteniendo el orden de primera aparición."""
-    return citation_presentation_service.deduplicate_citations(citations)
-
-
-def _deduplicate_citations_by_path(citations: list[Citation]) -> list[Citation]:
-    """Deduplica citas por ruta manteniendo el orden de primera aparición."""
-    return citation_presentation_service.deduplicate_citations_by_path(citations)
-
-
-def _extract_inventory_target(query: str) -> str | None:
-    """Extraiga el token de la entidad de destino de consultas en lenguaje natural estilo inventario."""
-    return inventory_helpers_service.extract_inventory_target(query)
-
-
-def _is_inventory_explain_query(query: str) -> bool:
-    """Devuelve si la consulta solicita explicar el rol/función por componente listado."""
-    return inventory_helpers_service.is_inventory_explain_query(query)
+_extract_module_name = inventory_helpers_service.extract_module_name
+_normalize_inventory_token = inventory_helpers_service.normalize_inventory_token
+_inventory_base_forms = inventory_helpers_service.inventory_base_forms
+_canonical_inventory_term = inventory_helpers_service.canonical_inventory_term
+_plural_variants = inventory_helpers_service.plural_variants
+_deduplicate_citations = citation_presentation_service.deduplicate_citations
+_deduplicate_citations_by_path = (
+    citation_presentation_service.deduplicate_citations_by_path
+)
+_extract_inventory_target = inventory_helpers_service.extract_inventory_target
+_is_inventory_explain_query = inventory_helpers_service.is_inventory_explain_query
 
 
 def _resolve_repo_file_path(repo_id: str, relative_path: str) -> Path | None:
@@ -485,9 +410,7 @@ def _describe_inventory_components(
     )
 
 
-def _inventory_term_aliases(target_term: str) -> list[str]:
-    """Amplíe el objetivo del inventario con alias en plural y en varios idiomas."""
-    return inventory_helpers_service.inventory_term_aliases(target_term)
+_inventory_term_aliases = inventory_helpers_service.inventory_term_aliases
 
 
 def _query_inventory_entities(
@@ -557,9 +480,7 @@ def _elapsed_milliseconds(started_at: float) -> float:
     return round((monotonic() - started_at) * 1000, 2)
 
 
-def _citation_priority(citation: Citation) -> tuple[int, float]:
-    """Asigne prioridad de clasificación utilizando señales genéricas de calidad de ruta."""
-    return citation_presentation_service.citation_priority(citation)
+_citation_priority = citation_presentation_service.citation_priority
 
 
 def _graph_context_paths(graph_records: list[dict]) -> tuple[set[str], set[str]]:
@@ -794,50 +715,12 @@ def _build_retrieval_inventory_response(
     )
 
 
-@dataclass
-class _HybridGraphSeedInput:
-    """Agrupa el estado compartido antes de la expansión del grafo."""
-
-    initial: list[RetrievalChunk]
-    reranked: list[RetrievalChunk]
-    graph_seed_input: list[RetrievalChunk]
-    stage_timings: dict[str, float]
-    reverse_import_seed_boosted_count: int
-    reverse_import_seed_chunks_added_count: int
-    reverse_import_target_paths: list[str]
-    external_import_seed_boosted_count: int
-    external_import_seed_chunks_added_count: int
-
-
 @dataclass(frozen=True)
 class _ResolvedEmbeddingRuntime:
     """Representa el runtime efectivo de embeddings para diagnostics."""
 
     provider: str
     model: str
-
-
-@dataclass
-class _GraphEnrichmentResult:
-    """Agrupa los resultados compartidos tras enriquecer con el grafo."""
-
-    reranked: list[RetrievalChunk]
-    semantic_expand_diagnostics: dict[str, object]
-    raw_citations: list[Citation]
-    filtered_citations: list[Citation]
-    citations: list[Citation]
-
-
-@dataclass(frozen=True)
-class _QueryAnswerResolution:
-    """Representa la resolución final entre síntesis LLM y fallback."""
-
-    answer: str
-    context_sufficient: bool
-    fallback_reason: str | None
-    verify_valid: bool | None
-    verify_skipped: bool
-    llm_error: str | None
 
 
 def _resolve_embedding_runtime(
@@ -857,6 +740,45 @@ def _resolve_embedding_runtime(
         else (embedding_model or "text-embedding-005")
     )
     return _ResolvedEmbeddingRuntime(provider=provider, model=model)
+
+
+def _hybrid_seed_preparation_hooks(
+) -> query_hybrid_pipeline_service.HybridSeedPreparationHooks:
+    """Build hybrid seed preparation hooks from current query_service symbols."""
+    return query_hybrid_pipeline_service.HybridSeedPreparationHooks(
+        hybrid_search=hybrid_search,
+        elapsed_milliseconds=_elapsed_milliseconds,
+        apply_internal_file_importer_seed_boost=(
+            _apply_internal_file_importer_seed_boost
+        ),
+        apply_external_import_seed_boost=_apply_external_import_seed_boost,
+        rerank=rerank,
+        build_internal_file_importer_seed_chunks=(
+            _build_internal_file_importer_seed_chunks
+        ),
+        build_external_import_seed_chunks=_build_external_import_seed_chunks,
+    )
+
+
+def _graph_enrichment_hooks(
+) -> query_hybrid_pipeline_service.GraphEnrichmentHooks:
+    """Build graph enrichment hooks from current query_service symbols."""
+    return query_hybrid_pipeline_service.GraphEnrichmentHooks(
+        apply_graph_context_chunk_boost=_apply_graph_context_chunk_boost,
+        build_graph_context_citations=_build_graph_context_citations,
+        citation_priority=_citation_priority,
+    )
+
+
+def _query_answer_resolution_hooks(
+) -> query_answer_resolution_service.QueryAnswerResolutionHooks:
+    """Build query answer resolution hooks from current query_service symbols."""
+    return query_answer_resolution_service.QueryAnswerResolutionHooks(
+        is_context_sufficient=_is_context_sufficient,
+        build_extractive_fallback=_build_extractive_fallback,
+        remaining_budget_seconds=_remaining_budget_seconds,
+        elapsed_milliseconds=_elapsed_milliseconds,
+    )
 
 
 def _build_common_hybrid_diagnostics_args(
@@ -896,8 +818,8 @@ def _build_common_hybrid_diagnostics_args(
 
 def _resolve_query_answer(
     *,
-    client: Any,
-    settings: Any,
+    client: query_answer_resolution_service.QueryAnswerClient,
+    settings: query_answer_resolution_service.QueryAnswerSettings,
     query: str,
     citations: list[Citation],
     context: str,
@@ -906,154 +828,21 @@ def _resolve_query_answer(
     pipeline_started_at: float,
     budget_seconds: float,
     stage_timings: dict[str, float],
-) -> _QueryAnswerResolution:
+) -> query_answer_resolution_service.QueryAnswerResolution:
     """Resuelve la respuesta final para query entre LLM y fallback extractivo."""
-    context_sufficient = _is_context_sufficient(
+    return query_answer_resolution_service.resolve_query_answer(
+        client=client,
+        settings=settings,
+        query=query,
+        citations=citations,
         context=context,
         reranked_count=reranked_count,
+        verify_enabled=verify_enabled,
+        pipeline_started_at=pipeline_started_at,
+        budget_seconds=budget_seconds,
+        stage_timings=stage_timings,
+        hooks=_query_answer_resolution_hooks(),
     )
-    if not context_sufficient:
-        fallback_reason = "insufficient_context"
-        return _QueryAnswerResolution(
-            answer=_build_extractive_fallback(
-                citations,
-                query=query,
-                fallback_reason=fallback_reason,
-            ),
-            context_sufficient=False,
-            fallback_reason=fallback_reason,
-            verify_valid=None,
-            verify_skipped=False,
-            llm_error=None,
-        )
-
-    if not client.enabled:
-        fallback_reason = "not_configured"
-        return _QueryAnswerResolution(
-            answer=_build_extractive_fallback(
-                citations,
-                query=query,
-                fallback_reason=fallback_reason,
-            ),
-            context_sufficient=True,
-            fallback_reason=fallback_reason,
-            verify_valid=None,
-            verify_skipped=False,
-            llm_error=None,
-        )
-
-    if _remaining_budget_seconds(pipeline_started_at, budget_seconds) <= 0:
-        fallback_reason = "time_budget_exhausted"
-        return _QueryAnswerResolution(
-            answer=_build_extractive_fallback(
-                citations,
-                query=query,
-                fallback_reason=fallback_reason,
-            ),
-            context_sufficient=True,
-            fallback_reason=fallback_reason,
-            verify_valid=None,
-            verify_skipped=False,
-            llm_error=None,
-        )
-
-    try:
-        answer_started_at = monotonic()
-        answer_timeout = min(
-            float(settings.openai_timeout_seconds),
-            _remaining_budget_seconds(pipeline_started_at, budget_seconds),
-        )
-        if answer_timeout <= 0:
-            fallback_reason = "time_budget_exhausted"
-            return _QueryAnswerResolution(
-                answer=_build_extractive_fallback(
-                    citations,
-                    query=query,
-                    fallback_reason=fallback_reason,
-                ),
-                context_sufficient=True,
-                fallback_reason=fallback_reason,
-                verify_valid=None,
-                verify_skipped=False,
-                llm_error=None,
-            )
-
-        answer = client.answer(
-            query=query,
-            context=context,
-            timeout_seconds=answer_timeout,
-        )
-        stage_timings["llm_answer_ms"] = _elapsed_milliseconds(answer_started_at)
-
-        if not verify_enabled:
-            return _QueryAnswerResolution(
-                answer=answer,
-                context_sufficient=True,
-                fallback_reason=None,
-                verify_valid=None,
-                verify_skipped=True,
-                llm_error=None,
-            )
-
-        verify_timeout = min(
-            float(settings.openai_timeout_seconds),
-            _remaining_budget_seconds(pipeline_started_at, budget_seconds),
-        )
-        if verify_timeout <= 0:
-            return _QueryAnswerResolution(
-                answer=answer,
-                context_sufficient=True,
-                fallback_reason=None,
-                verify_valid=None,
-                verify_skipped=True,
-                llm_error=None,
-            )
-
-        verify_started_at = monotonic()
-        verify_valid = client.verify(
-            answer=answer,
-            context=context,
-            timeout_seconds=verify_timeout,
-        )
-        stage_timings["llm_verify_ms"] = _elapsed_milliseconds(verify_started_at)
-        if not verify_valid:
-            fallback_reason = "verification_failed"
-            answer = _build_extractive_fallback(
-                citations,
-                query=query,
-                fallback_reason=fallback_reason,
-            )
-            return _QueryAnswerResolution(
-                answer=answer,
-                context_sufficient=True,
-                fallback_reason=fallback_reason,
-                verify_valid=False,
-                verify_skipped=False,
-                llm_error=None,
-            )
-
-        return _QueryAnswerResolution(
-            answer=answer,
-            context_sufficient=True,
-            fallback_reason=None,
-            verify_valid=True,
-            verify_skipped=False,
-            llm_error=None,
-        )
-    except Exception as exc:
-        fallback_reason = "generation_error"
-        return _QueryAnswerResolution(
-            answer=_build_extractive_fallback(
-                citations,
-                query=query,
-                fallback_reason=fallback_reason,
-            ),
-            context_sufficient=True,
-            fallback_reason=fallback_reason,
-            verify_valid=None,
-            verify_skipped=False,
-            llm_error=str(exc),
-        )
 
 
 def _prepare_hybrid_graph_seed_input(
@@ -1063,87 +852,16 @@ def _prepare_hybrid_graph_seed_input(
     top_k: int,
     embedding_provider: str | None,
     embedding_model: str | None,
-) -> _HybridGraphSeedInput:
+) -> query_hybrid_pipeline_service.HybridGraphSeedInput:
     """Ejecuta la preparación híbrida común hasta el input de expansión."""
-    stage_timings: dict[str, float] = {}
-
-    retrieval_started_at = monotonic()
-    initial = hybrid_search(
+    return query_hybrid_pipeline_service.prepare_hybrid_graph_seed_input(
         repo_id=repo_id,
         query=query,
         top_n=top_n,
+        top_k=top_k,
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,
-    )
-    stage_timings["hybrid_search_ms"] = _elapsed_milliseconds(
-        retrieval_started_at
-    )
-
-    internal_seed_started_at = monotonic()
-    (
-        initial,
-        reverse_import_seed_boosted_count,
-        reverse_import_matched_paths,
-        reverse_import_target_paths,
-    ) = _apply_internal_file_importer_seed_boost(
-        repo_id=repo_id,
-        query=query,
-        chunks=initial,
-    )
-    stage_timings["reverse_import_seed_boost_ms"] = _elapsed_milliseconds(
-        internal_seed_started_at
-    )
-
-    external_seed_started_at = monotonic()
-    (
-        initial,
-        external_import_seed_boosted_count,
-        external_import_matched_paths,
-    ) = _apply_external_import_seed_boost(
-        repo_id=repo_id,
-        query=query,
-        chunks=initial,
-    )
-    stage_timings["external_import_seed_boost_ms"] = _elapsed_milliseconds(
-        external_seed_started_at
-    )
-
-    rerank_started_at = monotonic()
-    reranked = rerank(query=query, chunks=initial, top_k=top_k)
-    stage_timings["rerank_ms"] = _elapsed_milliseconds(rerank_started_at)
-
-    (
-        reverse_graph_seed_chunks,
-        reverse_import_seed_chunks_added_count,
-    ) = _build_internal_file_importer_seed_chunks(
-        repo_id=repo_id,
-        matched_paths=reverse_import_matched_paths,
-        chunks=reranked,
-    )
-    (
-        graph_seed_chunks,
-        external_import_seed_chunks_added_count,
-    ) = _build_external_import_seed_chunks(
-        repo_id=repo_id,
-        matched_paths=external_import_matched_paths,
-        chunks=reranked,
-    )
-    graph_seed_input = reranked + reverse_graph_seed_chunks + graph_seed_chunks
-
-    return _HybridGraphSeedInput(
-        initial=initial,
-        reranked=reranked,
-        graph_seed_input=graph_seed_input,
-        stage_timings=stage_timings,
-        reverse_import_seed_boosted_count=reverse_import_seed_boosted_count,
-        reverse_import_seed_chunks_added_count=(
-            reverse_import_seed_chunks_added_count
-        ),
-        reverse_import_target_paths=reverse_import_target_paths,
-        external_import_seed_boosted_count=external_import_seed_boosted_count,
-        external_import_seed_chunks_added_count=(
-            external_import_seed_chunks_added_count
-        ),
+        hooks=_hybrid_seed_preparation_hooks(),
     )
 
 
@@ -1156,58 +874,18 @@ def _finalize_graph_enrichment(
     reverse_import_target_paths: list[str],
     external_import_seed_boosted_count: int,
     external_import_seed_chunks_added_count: int,
-) -> _GraphEnrichmentResult:
+) -> query_hybrid_pipeline_service.GraphEnrichmentResult:
     """Aplica enriquecimiento final común de grafo, citas y diagnostics."""
-    reranked, graph_chunk_boosted_count = _apply_graph_context_chunk_boost(
+    return query_hybrid_pipeline_service.finalize_graph_enrichment(
         reranked,
         graph_context,
-    )
-    semantic_expand_diagnostics = dict(semantic_expand_diagnostics)
-    semantic_expand_diagnostics["reverse_import_seed_boosted_count"] = (
-        reverse_import_seed_boosted_count
-    )
-    semantic_expand_diagnostics["reverse_import_seed_chunks_added_count"] = (
-        reverse_import_seed_chunks_added_count
-    )
-    semantic_expand_diagnostics["reverse_import_target_paths"] = (
-        reverse_import_target_paths
-    )
-    semantic_expand_diagnostics["external_import_seed_boosted_count"] = (
-        external_import_seed_boosted_count
-    )
-    semantic_expand_diagnostics["external_import_seed_chunks_added_count"] = (
-        external_import_seed_chunks_added_count
-    )
-    semantic_expand_diagnostics["semantic_graph_chunk_boosted_count"] = (
-        graph_chunk_boosted_count
-    )
-
-    graph_citations = _build_graph_context_citations(graph_context)
-    semantic_expand_diagnostics["semantic_graph_citations_count"] = len(
-        graph_citations
-    )
-    raw_citations = [
-        Citation(
-            path=item.metadata.get("path", "unknown"),
-            start_line=int(item.metadata.get("start_line", 0)),
-            end_line=int(item.metadata.get("end_line", 0)),
-            score=float(item.score),
-            reason="hybrid_rag_match",
-        )
-        for item in reranked
-    ] + graph_citations
-    filtered_citations = [
-        item for item in raw_citations if not is_noisy_path(item.path)
-    ]
-    citations_source = filtered_citations or raw_citations
-    citations = sorted(citations_source, key=_citation_priority)
-
-    return _GraphEnrichmentResult(
-        reranked=reranked,
-        semantic_expand_diagnostics=semantic_expand_diagnostics,
-        raw_citations=raw_citations,
-        filtered_citations=filtered_citations,
-        citations=citations,
+        semantic_expand_diagnostics,
+        reverse_import_seed_boosted_count,
+        reverse_import_seed_chunks_added_count,
+        reverse_import_target_paths,
+        external_import_seed_boosted_count,
+        external_import_seed_chunks_added_count,
+        hooks=_graph_enrichment_hooks(),
     )
 
 

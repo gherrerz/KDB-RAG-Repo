@@ -1,5 +1,6 @@
 """Gestión de trabajos para ingesta con backend thread o Redis/RQ."""
 
+from collections.abc import Callable
 import datetime
 from contextlib import contextmanager
 import inspect
@@ -9,6 +10,7 @@ import shutil
 import stat
 from threading import Lock, Thread
 import time
+from types import TracebackType
 from uuid import uuid4
 
 from coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
@@ -26,7 +28,15 @@ class IngestionConflictError(RuntimeError):
     """Error de conflicto cuando ya existe ingesta activa para el repositorio."""
 
 
-def _on_remove_error(func, path: str, exc_info) -> None:
+def _on_remove_error(
+    func: Callable[[str], object],
+    path: str,
+    exc_info: tuple[
+        type[BaseException],
+        BaseException,
+        TracebackType | None,
+    ],
+) -> None:
     """Permite borrar archivos readonly durante cleanup del workspace en Windows."""
     del exc_info
     os.chmod(path, stat.S_IWRITE)
@@ -67,7 +77,11 @@ def _invoke_execute_ingest_job(
     }
     if "retain_workspace_after_ingest" in execute_params:
         kwargs["retain_workspace_after_ingest"] = retain_workspace_after_ingest
-    return _execute_ingest_job(**kwargs)
+    final_job = _execute_ingest_job(**kwargs)
+    # Mantiene la persistencia final incluso cuando tests legacy reemplazan
+    # `_execute_ingest_job` por dobles que no hacen upsert al store.
+    store.upsert_job(final_job)
+    return final_job
 
 
 def _execute_ingest_job(

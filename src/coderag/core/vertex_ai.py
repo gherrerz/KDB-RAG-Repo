@@ -32,7 +32,9 @@ class VertexAuthContext:
 
 
 @lru_cache(maxsize=4)
-def _load_service_account_credentials_from_info(serialized_info: str):
+def _load_service_account_credentials_from_info(
+    serialized_info: str,
+) -> service_account.Credentials:
     """Carga y cachea credenciales de Service Account desde JSON serializado."""
     info = json.loads(serialized_info)
     return service_account.Credentials.from_service_account_info(

@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import FastAPI, HTTPException, Query
 
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     if hasattr(settings, "decode_vertex_service_account_b64"):
         settings.decode_vertex_service_account_b64()
+    app.state.job_manager = jobs
     report = ensure_storage_ready(context="startup", force=True)
     app.state.storage_health = report
     yield
@@ -68,6 +70,14 @@ app = FastAPI(
 jobs = JobManager()
 
 
+def get_job_manager() -> JobManager:
+    """Resuelve el gestor de jobs activo con soporte para overrides en app.state."""
+    override = getattr(app.state, "job_manager_override", None)
+    if override is not None:
+        return cast(JobManager, override)
+    return cast(JobManager, jobs)
+
+
 def _normalize_repo_query_status_payload(
     status_payload: dict[str, object],
 ) -> dict[str, object]:
@@ -85,6 +95,58 @@ def _normalize_repo_query_status_payload(
         normalized["bm25_loaded"] = lexical_loaded
 
     return normalized
+
+
+def _build_repo_query_readiness(
+    *,
+    job_manager: JobManager,
+    repo_id: str,
+    requested_embedding_provider: str | None,
+    requested_embedding_model: str | None,
+) -> dict[str, object]:
+    """Construye el payload normalizado de readiness para un repositorio."""
+    listed_repo_ids = job_manager.list_repo_ids()
+    runtime_payload = job_manager.get_repo_runtime(repo_id)
+    readiness = get_repo_query_status(
+        repo_id=repo_id,
+        listed_in_catalog=repo_id in listed_repo_ids,
+        runtime_payload=runtime_payload,
+        requested_embedding_provider=requested_embedding_provider,
+        requested_embedding_model=requested_embedding_model,
+    )
+    if runtime_payload:
+        readiness.update(runtime_payload)
+    return _normalize_repo_query_status_payload(readiness)
+
+
+def _ensure_repo_query_ready(readiness: dict[str, object]) -> None:
+    """Valida compatibilidad y readiness para endpoints de consulta."""
+    if readiness.get("embedding_compatible") is False:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "El embedding seleccionado para consulta no es compatible "
+                    "con la última ingesta del repositorio. Reingesta con el "
+                    "mismo modelo/provider o limpia índices antes de consultar."
+                ),
+                "code": "embedding_incompatible",
+                "repo_status": readiness,
+            },
+        )
+
+    if not bool(readiness["query_ready"]):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "El repositorio no está listo para consultas. "
+                    "Reingesta el repositorio o revisa el estado de índices."
+                ),
+                "code": "repo_not_ready",
+                "repo_status": readiness,
+            },
+        )
 
 
 @app.post(
@@ -117,6 +179,7 @@ def _normalize_repo_query_status_payload(
 )
 def ingest_repo(request: RepoIngestRequest) -> JobInfo:
     """Cree un trabajo de ingesta y devuelva el estado inicial del trabajo."""
+    job_manager = get_job_manager()
     try:
         ensure_storage_ready(context="ingest", repo_id=None)
     except StoragePreflightError as exc:
@@ -128,7 +191,7 @@ def ingest_repo(request: RepoIngestRequest) -> JobInfo:
             },
         ) from exc
     try:
-        return jobs.create_ingest_job(request)
+        return job_manager.create_ingest_job(request)
     except IngestionConflictError as exc:
         raise HTTPException(
             status_code=409,
@@ -177,7 +240,7 @@ def get_job(
     ),
 ) -> JobInfo:
     """Devuelve el estado actual del trabajo de ingesta con cola de logs acotada."""
-    job = jobs.get_job(job_id)
+    job = get_job_manager().get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job no encontrado")
 
@@ -250,6 +313,7 @@ def query_repo(request: QueryRequest) -> QueryResponse:
     """Ejecute una canalización de consultas híbrida para un repositorio indexado."""
     from coderag.api.query_service import run_query
 
+    job_manager = get_job_manager()
     try:
         ensure_storage_ready(context="query", repo_id=request.repo_id)
     except StoragePreflightError as exc:
@@ -261,46 +325,13 @@ def query_repo(request: QueryRequest) -> QueryResponse:
             },
         ) from exc
 
-    listed_repo_ids = jobs.list_repo_ids()
-    listed_in_catalog = request.repo_id in listed_repo_ids
-    runtime_payload = jobs.get_repo_runtime(request.repo_id)
-    readiness = get_repo_query_status(
+    readiness = _build_repo_query_readiness(
+        job_manager=job_manager,
         repo_id=request.repo_id,
-        listed_in_catalog=listed_in_catalog,
-        runtime_payload=runtime_payload,
         requested_embedding_provider=request.embedding_provider,
         requested_embedding_model=request.embedding_model,
     )
-    if runtime_payload:
-        readiness.update(runtime_payload)
-    readiness = _normalize_repo_query_status_payload(readiness)
-
-    if readiness.get("embedding_compatible") is False:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": (
-                    "El embedding seleccionado para consulta no es compatible "
-                    "con la última ingesta del repositorio. Reingesta con el "
-                    "mismo modelo/provider o limpia índices antes de consultar."
-                ),
-                "code": "embedding_incompatible",
-                "repo_status": readiness,
-            },
-        )
-
-    if not readiness["query_ready"]:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": (
-                    "El repositorio no está listo para consultas. "
-                    "Reingesta el repositorio o revisa el estado de índices."
-                ),
-                "code": "repo_not_ready",
-                "repo_status": readiness,
-            },
-        )
+    _ensure_repo_query_ready(readiness)
 
     return run_query(
         repo_id=request.repo_id,
@@ -375,6 +406,7 @@ def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
     """Ejecuta consulta retrieval-only y devuelve evidencia sin sintetizar con LLM."""
     from coderag.api.query_service import run_retrieval_query
 
+    job_manager = get_job_manager()
     try:
         ensure_storage_ready(context="retrieval_query", repo_id=request.repo_id)
     except StoragePreflightError as exc:
@@ -386,46 +418,13 @@ def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
             },
         ) from exc
 
-    listed_repo_ids = jobs.list_repo_ids()
-    listed_in_catalog = request.repo_id in listed_repo_ids
-    runtime_payload = jobs.get_repo_runtime(request.repo_id)
-    readiness = get_repo_query_status(
+    readiness = _build_repo_query_readiness(
+        job_manager=job_manager,
         repo_id=request.repo_id,
-        listed_in_catalog=listed_in_catalog,
-        runtime_payload=runtime_payload,
         requested_embedding_provider=request.embedding_provider,
         requested_embedding_model=request.embedding_model,
     )
-    if runtime_payload:
-        readiness.update(runtime_payload)
-    readiness = _normalize_repo_query_status_payload(readiness)
-
-    if readiness.get("embedding_compatible") is False:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": (
-                    "El embedding seleccionado para consulta no es compatible "
-                    "con la última ingesta del repositorio. Reingesta con el "
-                    "mismo modelo/provider o limpia índices antes de consultar."
-                ),
-                "code": "embedding_incompatible",
-                "repo_status": readiness,
-            },
-        )
-
-    if not readiness["query_ready"]:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": (
-                    "El repositorio no está listo para consultas. "
-                    "Reingesta el repositorio o revisa el estado de índices."
-                ),
-                "code": "repo_not_ready",
-                "repo_status": readiness,
-            },
-        )
+    _ensure_repo_query_ready(readiness)
 
     return run_retrieval_query(
         repo_id=request.repo_id,
@@ -447,6 +446,7 @@ def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
 )
 def list_repos() -> RepoCatalogResponse:
     """Devuelve ids y metadata básica de repositorios disponibles para consultas."""
+    job_manager = get_job_manager()
     repositories = [
         RepoCatalogEntry(
             repo_id=str(item["repo_id"]),
@@ -454,7 +454,7 @@ def list_repos() -> RepoCatalogResponse:
             url=item.get("url"),
             branch=item.get("branch"),
         )
-        for item in jobs.list_repo_catalog()
+        for item in job_manager.list_repo_catalog()
     ]
     return RepoCatalogResponse(
         repo_ids=[item.repo_id for item in repositories],
@@ -508,18 +508,13 @@ def repo_status(
     requested_embedding_model: str | None = None,
 ) -> RepoQueryStatusResponse:
     """Devuelve estado de disponibilidad de consulta para un repositorio."""
-    listed_repo_ids = jobs.list_repo_ids()
-    runtime_payload = jobs.get_repo_runtime(repo_id)
-    status_payload = get_repo_query_status(
+    job_manager = get_job_manager()
+    status_payload = _build_repo_query_readiness(
+        job_manager=job_manager,
         repo_id=repo_id,
-        listed_in_catalog=repo_id in listed_repo_ids,
-        runtime_payload=runtime_payload,
         requested_embedding_provider=requested_embedding_provider,
         requested_embedding_model=requested_embedding_model,
     )
-    if runtime_payload:
-        status_payload.update(runtime_payload)
-    status_payload = _normalize_repo_query_status_payload(status_payload)
     return RepoQueryStatusResponse(**status_payload)
 
 
@@ -560,8 +555,9 @@ def storage_health() -> StorageHealthResponse:
 )
 def reset_all_data() -> ResetResponse:
     """Restablezca todos los almacenes de datos indexados y el espacio de trabajo de ingesta local."""
+    job_manager = get_job_manager()
     try:
-        cleared, warnings = jobs.reset_all_data()
+        cleared, warnings = job_manager.reset_all_data()
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
@@ -601,8 +597,9 @@ def delete_repo(repo_id: str) -> RepoDeleteResponse:
     if not normalized_repo_id:
         raise HTTPException(status_code=422, detail="repo_id no puede estar vacío")
 
+    job_manager = get_job_manager()
     try:
-        cleared, warnings, deleted_counts = jobs.delete_repo(normalized_repo_id)
+        cleared, warnings, deleted_counts = job_manager.delete_repo(normalized_repo_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:

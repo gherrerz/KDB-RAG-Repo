@@ -117,6 +117,35 @@ def test_get_missing_job_returns_404() -> None:
     assert response.status_code == 404
 
 
+def test_get_job_uses_state_job_manager_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Permite resolver el gestor desde app.state para facilitar overrides en tests."""
+
+    class FakeJobManager:
+        def get_job(self, _job_id: str) -> JobInfo | None:
+            return JobInfo(
+                id="job-from-state",
+                status=JobStatus.completed,
+                progress=1.0,
+                logs=["override"],
+            )
+
+    monkeypatch.setattr(
+        server.app.state,
+        "job_manager_override",
+        FakeJobManager(),
+        raising=False,
+    )
+    client = TestClient(app)
+
+    response = client.get("/jobs/job-from-state")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "job-from-state"
+    assert payload["logs"] == ["override"]
+
+
 def test_get_job_supports_logs_tail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Permite acotar logs devueltos para reducir latencia de polling."""
 
