@@ -244,7 +244,7 @@ Referencia completa por journeys y contratos:
 Si recibes errores durante ingesta o consulta:
 
 - Revisa guia de troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-- Revisa matriz de accion recomendada: [docs/API_REFERENCE.md#matriz-de-accion-recomendada](docs/API_REFERENCE.md#matriz-de-accion-recomendada)
+- Revisa formas de error comunes: [docs/API_REFERENCE.md#formas-de-error-comunes](docs/API_REFERENCE.md#formas-de-error-comunes)
 
 Atajo de diagnostico:
 

@@ -11,9 +11,9 @@ Incidencias frecuentes y acciones sugeridas.
 ## Repo no listo para consultas (422)
 
 - Consulta GET /repos/{repo_id}/status.
-- Revisa query_ready, chroma_counts y bm25_loaded.
-- `bm25_loaded` conserva un nombre historico; con Postgres activo se usa
-  como señal de readiness de la capa lexica en Postgres.
+- Revisa query_ready, lexical_loaded, chroma_counts y embedding_compatible.
+- `lexical_loaded` es la señal canonica de readiness de la capa lexica.
+- `bm25_loaded` se mantiene como alias legacy por compatibilidad.
 - Si embedding_compatible es false, reingesta con provider/modelo compatible.
 
 ## Fallback en query con LLM
@@ -28,11 +28,11 @@ Incidencias frecuentes y acciones sugeridas.
 - Usa modo estable sin autoreload para ingestas largas.
 - Revisa logs del job con GET /jobs/{job_id}?logs_tail=400.
 
-## Error de dimensión en Chroma durante ingesta
+## Error de dimensión en Chroma durante ingesta o query
 
 Síntoma típico:
 
-- `Collection expecting embedding with dimension of 3072, got 768`
+- `Collection expecting embedding with dimension of X, got Y`
 
 Causa:
 
@@ -42,7 +42,7 @@ Causa:
 Acción recomendada:
 
 - Ejecuta limpieza total (`POST /admin/reset` o `scripts/reset_cold.ps1`) y luego
-  reingesta el repositorio.
+  reingesta el repositorio con el mismo provider/modelo que usarás en query.
 
 ## Error al instalar dependencias en Windows
 
@@ -67,7 +67,7 @@ Si durante `pip install -r requirements.txt` aparece un error en
 
 Ver matriz completa de acciones:
 
-- docs/API_REFERENCE.md#matriz-de-accion-recomendada
+- docs/API_REFERENCE.md#formas-de-error-comunes
 
 ## Referencias
 

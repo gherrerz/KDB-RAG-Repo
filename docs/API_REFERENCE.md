@@ -202,8 +202,8 @@ Notas operativas de storage:
 | `commit` | `str \| null` | no | `null` |
 | `token` | `str \| null` | no | `null` |
 | `auth` | `object \| null` | no | `null` |
-| `embedding_provider` | `str \| null` | no | `null` |
-| `embedding_model` | `str \| null` | no | `null` |
+| `embedding_provider` | `str \| null` | no | `"vertex"` |
+| `embedding_model` | `str \| null` | no | `"text-embedding-005"` |
 
 Notas para repos privados:
 
@@ -282,12 +282,12 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 | `repo_id` | `str` | sí | - |
 | `query` | `str` | sí | - |
 | `top_n` | `int` | no | `60` |
-| `top_k` | `int` | no | `15` |
-| `embedding_provider` | `str \| null` | no | `null` |
-| `embedding_model` | `str \| null` | no | `null` |
-| `llm_provider` | `str \| null` | no | `null` |
-| `answer_model` | `str \| null` | no | `null` |
-| `verifier_model` | `str \| null` | no | `null` |
+| `top_k` | `int` | no | `20` |
+| `embedding_provider` | `str \| null` | no | `"vertex"` |
+| `embedding_model` | `str \| null` | no | `"text-embedding-005"` |
+| `llm_provider` | `str \| null` | no | `"vertex"` |
+| `answer_model` | `str \| null` | no | `"gemini-2.5-flash"` |
+| `verifier_model` | `str \| null` | no | `"gemini-2.5-flash"` |
 
 ### RetrievalQueryRequest
 
@@ -296,9 +296,9 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 | `repo_id` | `str` | sí | - |
 | `query` | `str` | sí | - |
 | `top_n` | `int` | no | `60` |
-| `top_k` | `int` | no | `15` |
-| `embedding_provider` | `str \| null` | no | `null` |
-| `embedding_model` | `str \| null` | no | `null` |
+| `top_k` | `int` | no | `20` |
+| `embedding_provider` | `str \| null` | no | `"vertex"` |
+| `embedding_model` | `str \| null` | no | `"text-embedding-005"` |
 | `include_context` | `bool` | no | `false` |
 
 ### InventoryQueryRequest
