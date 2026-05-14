@@ -5,6 +5,16 @@ from collections import defaultdict
 from time import perf_counter
 from typing import Callable
 
+from coderag.core.lexical_index import (
+    delete_active_repository_lexical_data,
+    repository_has_active_lexical_data,
+    repository_lexical_backend_label,
+)
+from coderag.core.vector_index import (
+    build_managed_vector_index,
+    count_repository_vector_documents,
+    delete_repository_vector_documents,
+)
 from coderag.core.models import (
     FileImportRelation,
     RepoAuthConfig,
@@ -128,21 +138,14 @@ def _read_scan_filters_from_settings(
 
 def _repo_has_existing_index_data(repo_id: str, logger: LoggerFn) -> bool:
     """Determina si existe data indexada previa para el repositorio."""
-    chroma = ChromaIndex()
-    chroma_total = 0
-    for collection_name in ("code_symbols", "code_files", "code_modules"):
-        chroma_total += chroma.count_by_repo_id(
-            collection_name=collection_name,
-            repo_id=repo_id,
-        )
+    chroma_total = count_repository_vector_documents(
+        build_managed_vector_index(),
+        repo_id=repo_id,
+        collection_names=("code_symbols", "code_files", "code_modules"),
+    )
 
     settings = get_settings()
-    postgres_dsn = resolve_postgres_dsn(settings)
-    if postgres_dsn:
-        from coderag.storage.lexical_store import LexicalStore
-        lexical_exists = LexicalStore(postgres_dsn, settings.lexical_fts_language).has_corpus(repo_id)
-    else:
-        lexical_exists = GLOBAL_BM25.has_repo(repo_id) or GLOBAL_BM25.has_repo_snapshot(repo_id)
+    lexical_exists = repository_has_active_lexical_data(settings, repo_id)
 
     graph_exists = False
     graph = GraphBuilder()
@@ -161,20 +164,19 @@ def _repo_has_existing_index_data(repo_id: str, logger: LoggerFn) -> bool:
 
 def _purge_repo_indices(repo_id: str, logger: LoggerFn) -> None:
     """Purga datos indexados previos por repo_id en Chroma, BM25/Lexical y Neo4j."""
-    chroma = ChromaIndex()
-    chroma_deleted = chroma.delete_by_repo_id(repo_id=repo_id)
+    chroma_deleted = delete_repository_vector_documents(
+        build_managed_vector_index(),
+        repo_id,
+    )
 
     settings = get_settings()
-    postgres_dsn = resolve_postgres_dsn(settings)
-    if postgres_dsn:
-        from coderag.storage.lexical_store import LexicalStore
-        lexical_deleted = LexicalStore(postgres_dsn, settings.lexical_fts_language).delete_repo(repo_id)
+    lexical_deleted = delete_active_repository_lexical_data(settings, repo_id)
+    if repository_lexical_backend_label(settings) == "lexical":
         lexical_msg = f"lexical_docs={lexical_deleted['docs_removed']}"
     else:
-        bm25_deleted = GLOBAL_BM25.delete_repo(repo_id)
         lexical_msg = (
-            f"bm25_docs={bm25_deleted['docs_removed']}, "
-            f"bm25_snapshot={bm25_deleted['snapshot_removed']}"
+            f"bm25_docs={lexical_deleted['docs_removed']}, "
+            f"bm25_snapshot={lexical_deleted['snapshot_removed']}"
         )
 
     graph = GraphBuilder()

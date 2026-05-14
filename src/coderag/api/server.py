@@ -68,6 +68,25 @@ app = FastAPI(
 jobs = JobManager()
 
 
+def _normalize_repo_query_status_payload(
+    status_payload: dict[str, object],
+) -> dict[str, object]:
+    """Completa indicadores léxicos nuevos y legacy para compatibilidad."""
+    normalized = dict(status_payload)
+
+    lexical_loaded = normalized.get("lexical_loaded")
+    bm25_loaded = normalized.get("bm25_loaded")
+
+    if lexical_loaded is None and bm25_loaded is not None:
+        lexical_loaded = bm25_loaded
+        normalized["lexical_loaded"] = lexical_loaded
+
+    if bm25_loaded is None and lexical_loaded is not None:
+        normalized["bm25_loaded"] = lexical_loaded
+
+    return normalized
+
+
 @app.post(
     "/repos/ingest",
     response_model=JobInfo,
@@ -211,6 +230,7 @@ def get_job(
                                     "code_modules": 0,
                                 },
                                 "bm25_loaded": False,
+                                "lexical_loaded": False,
                                 "graph_available": None,
                                 "warnings": [
                                     "No hay corpus léxico listo para repo 'mall'."
@@ -253,6 +273,7 @@ def query_repo(request: QueryRequest) -> QueryResponse:
     )
     if runtime_payload:
         readiness.update(runtime_payload)
+    readiness = _normalize_repo_query_status_payload(readiness)
 
     if readiness.get("embedding_compatible") is False:
         raise HTTPException(
@@ -377,6 +398,7 @@ def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
     )
     if runtime_payload:
         readiness.update(runtime_payload)
+    readiness = _normalize_repo_query_status_payload(readiness)
 
     if readiness.get("embedding_compatible") is False:
         raise HTTPException(
@@ -497,6 +519,7 @@ def repo_status(
     )
     if runtime_payload:
         status_payload.update(runtime_payload)
+    status_payload = _normalize_repo_query_status_payload(status_payload)
     return RepoQueryStatusResponse(**status_payload)
 
 

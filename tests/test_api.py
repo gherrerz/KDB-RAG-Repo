@@ -464,6 +464,7 @@ def test_api_end_to_end_ingest_cleanup_then_status_and_query(
                 "code_modules": 1,
             },
             "bm25_loaded": True,
+            "lexical_loaded": True,
             "graph_available": True,
             "embedding_compatible": True,
             "compatibility_reason": "compatible",
@@ -604,7 +605,7 @@ def test_repo_status_endpoint_returns_structured_repo_readiness(monkeypatch) -> 
                 "code_files": 5,
                 "code_modules": 2,
             },
-            "bm25_loaded": True,
+            "lexical_loaded": True,
             "graph_available": True,
             "warnings": [],
         }
@@ -629,10 +630,46 @@ def test_repo_status_endpoint_returns_structured_repo_readiness(monkeypatch) -> 
     assert payload["listed_in_catalog"] is True
     assert payload["workspace_available"] is False
     assert payload["query_ready"] is True
+    assert payload["lexical_loaded"] is True
     assert payload["bm25_loaded"] is True
     assert payload["chroma_counts"]["code_symbols"] == 10
     assert payload["last_embedding_provider"] == "gemini"
     assert payload["last_embedding_model"] == "text-embedding-004"
+
+
+def test_repo_status_endpoint_backfills_legacy_bm25_field_from_lexical_loaded(
+    monkeypatch,
+) -> None:
+    """Mantiene bm25_loaded cuando un proveedor interno ya sólo expone lexical_loaded."""
+
+    monkeypatch.setattr(server.jobs, "list_repo_ids", lambda: ["mall"])
+    monkeypatch.setattr(server.jobs, "get_repo_runtime", lambda repo_id: None)
+    monkeypatch.setattr(
+        server,
+        "get_repo_query_status",
+        lambda **kwargs: {
+            "repo_id": "mall",
+            "listed_in_catalog": True,
+            "workspace_available": False,
+            "query_ready": True,
+            "chroma_counts": {
+                "code_symbols": 1,
+                "code_files": 1,
+                "code_modules": 1,
+            },
+            "lexical_loaded": True,
+            "graph_available": True,
+            "warnings": [],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/repos/mall/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["lexical_loaded"] is True
+    assert payload["bm25_loaded"] is True
 
 
 def test_inventory_query_endpoint_returns_paginated_payload(monkeypatch) -> None:
@@ -1127,7 +1164,7 @@ def test_query_endpoint_returns_422_when_repo_is_not_ready(monkeypatch) -> None:
                 "code_files": 0,
                 "code_modules": 0,
             },
-            "bm25_loaded": False,
+            "lexical_loaded": False,
             "graph_available": None,
             "warnings": ["No hay indice BM25 en memoria para repo 'mall'."],
         }
@@ -1149,6 +1186,8 @@ def test_query_endpoint_returns_422_when_repo_is_not_ready(monkeypatch) -> None:
     payload = response.json()
     assert payload["detail"]["code"] == "repo_not_ready"
     assert payload["detail"]["repo_status"]["query_ready"] is False
+    assert payload["detail"]["repo_status"]["lexical_loaded"] is False
+    assert payload["detail"]["repo_status"]["bm25_loaded"] is False
 
 
 def test_query_endpoint_returns_422_when_embedding_is_incompatible(monkeypatch) -> None:

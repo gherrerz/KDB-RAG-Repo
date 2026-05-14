@@ -1,24 +1,25 @@
 """Utilidades de reinicio del sistema para borrar datos indexados y persistentes."""
 
-import gc
 import os
 import shutil
 import stat
 import time
 from pathlib import Path
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
-
 from coderag.core.settings import get_settings, resolve_postgres_dsn
+from coderag.core.vector_index import (
+    build_managed_vector_index,
+    delete_repository_vector_documents,
+    reset_managed_vector_storage,
+)
 from coderag.ingestion.graph_builder import GraphBuilder
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
-from coderag.ingestion.index_chroma import (
-    COLLECTIONS,
-    ChromaIndex,
-    build_remote_chroma_client,
+from coderag.ingestion.index_chroma import COLLECTIONS
+from coderag.storage.base_metadata_store import BaseMetadataStore
+from coderag.storage.metadata_store_factory import (
+    build_metadata_store,
+    metadata_backend_label,
 )
-from coderag.storage.metadata_store import MetadataStore
 
 
 def _on_remove_error(func, path: str, exc_info) -> None:
@@ -48,14 +49,10 @@ def _remove_path(path: Path, retries: int = 3) -> None:
         raise RuntimeError(f"No se pudo eliminar {path}: {last_error}") from last_error
 
 
-def reset_all_storage() -> tuple[list[str], list[str]]:
-    """Persistencia clara de vectores, léxicos, gráficos, espacios de trabajo y metadatos."""
-    settings = get_settings()
+def _reset_bm25_storage(settings: object) -> tuple[list[str], list[str]]:
+    """Limpia BM25 en memoria y sus snapshots persistidos."""
     cleared: list[str] = []
     warnings: list[str] = []
-    postgres_dsn = resolve_postgres_dsn(settings)
-
-    ChromaIndex.reset_shared_state()
 
     GLOBAL_BM25.clear()
     cleared.append("BM25 en memoria")
@@ -71,65 +68,103 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
             f"{exc}"
         )
 
-    if postgres_dsn:
-        try:
-            from coderag.storage.lexical_store import LexicalStore
-            LexicalStore(postgres_dsn).delete_all()
-            cleared.append("LexicalStore Postgres")
-        except Exception as exc:
-            warnings.append(f"No se pudo limpiar LexicalStore Postgres: {exc}")
+    return cleared, warnings
 
-    chroma_reset_done = False
-    if settings.chroma_mode == "remote":
-        try:
-            client = build_remote_chroma_client(settings)
-            for collection_name in COLLECTIONS:
-                try:
-                    client.delete_collection(collection_name)
-                except Exception:
-                    continue
-            chroma_reset_done = True
-        except Exception as exc:
-            warnings.append(f"No se pudieron limpiar colecciones Chroma remoto: {exc}")
-        finally:
-            try:
-                del client
-            except Exception:
-                pass
-            gc.collect()
-    else:
-        try:
-            client = chromadb.PersistentClient(
-                path=str(settings.chroma_path),
-                settings=ChromaSettings(anonymized_telemetry=False),
-            )
-            for collection_name in COLLECTIONS:
-                try:
-                    client.delete_collection(collection_name)
-                except Exception:
-                    continue
-            chroma_reset_done = True
-        except Exception as exc:
-            warnings.append(f"No se pudieron limpiar colecciones Chroma por API: {exc}")
-        finally:
-            try:
-                del client
-            except Exception:
-                pass
-            gc.collect()
 
-        ChromaIndex.reset_shared_state()
+def _reset_postgres_lexical_storage(settings: object) -> tuple[list[str], list[str]]:
+    """Limpia el corpus léxico en Postgres cuando ese backend existe."""
+    cleared: list[str] = []
+    warnings: list[str] = []
+    postgres_dsn = resolve_postgres_dsn(settings)
+    if not postgres_dsn:
+        return cleared, warnings
 
-        try:
-            _remove_path(settings.chroma_path)
-        except RuntimeError as exc:
-            warnings.append(
-                "No se pudo vaciar carpeta Chroma por lock de archivos: "
-                f"{exc}"
-            )
-        settings.chroma_path.mkdir(parents=True, exist_ok=True)
+    try:
+        from coderag.storage.lexical_store import LexicalStore
 
-    ChromaIndex.reset_shared_state()
+        LexicalStore(
+            postgres_dsn,
+            getattr(settings, "lexical_fts_language", "english"),
+        ).delete_all()
+        cleared.append("LexicalStore Postgres")
+    except Exception as exc:
+        warnings.append(f"No se pudo limpiar LexicalStore Postgres: {exc}")
+
+    return cleared, warnings
+
+
+def _delete_repo_bm25_storage(
+    repo_id: str,
+) -> tuple[list[str], list[str], dict[str, int]]:
+    """Elimina los artefactos BM25 de un repositorio puntual."""
+    cleared: list[str] = []
+    warnings: list[str] = []
+    deleted_counts: dict[str, int] = {}
+
+    try:
+        bm25_deleted = GLOBAL_BM25.delete_repo(repo_id)
+        deleted_counts["bm25_docs"] = int(
+            bm25_deleted.get("docs_removed", 0) or 0
+        )
+        deleted_counts["bm25_snapshots"] = int(
+            bm25_deleted.get("snapshot_removed", 0) or 0
+        )
+        cleared.append("BM25")
+    except Exception as exc:
+        warnings.append(f"No se pudo limpiar BM25 para '{repo_id}': {exc}")
+
+    return cleared, warnings, deleted_counts
+
+
+def _delete_repo_postgres_lexical_storage(
+    settings: object,
+    repo_id: str,
+) -> tuple[list[str], list[str], dict[str, int]]:
+    """Elimina el corpus léxico en Postgres de un repositorio puntual."""
+    cleared: list[str] = []
+    warnings: list[str] = []
+    deleted_counts: dict[str, int] = {}
+    postgres_dsn = resolve_postgres_dsn(settings)
+    if not postgres_dsn:
+        return cleared, warnings, deleted_counts
+
+    try:
+        from coderag.storage.lexical_store import LexicalStore
+
+        lex_deleted = LexicalStore(
+            postgres_dsn,
+            getattr(settings, "lexical_fts_language", "english"),
+        ).delete_repo(repo_id)
+        deleted_counts["lexical_docs"] = int(
+            lex_deleted.get("docs_removed", 0) or 0
+        )
+        cleared.append("LexicalStore")
+    except Exception as exc:
+        warnings.append(f"No se pudo limpiar LexicalStore para '{repo_id}': {exc}")
+
+    return cleared, warnings, deleted_counts
+
+
+def reset_all_storage() -> tuple[list[str], list[str]]:
+    """Persistencia clara de vectores, léxicos, gráficos, espacios de trabajo y metadatos."""
+    settings = get_settings()
+    cleared: list[str] = []
+    warnings: list[str] = []
+    postgres_dsn = resolve_postgres_dsn(settings)
+
+    bm25_cleared, bm25_warnings = _reset_bm25_storage(settings)
+    cleared.extend(bm25_cleared)
+    warnings.extend(bm25_warnings)
+
+    lexical_cleared, lexical_warnings = _reset_postgres_lexical_storage(settings)
+    cleared.extend(lexical_cleared)
+    warnings.extend(lexical_warnings)
+
+    chroma_reset_done, chroma_warnings = reset_managed_vector_storage(
+        settings,
+        remove_path=_remove_path,
+    )
+    warnings.extend(chroma_warnings)
     if chroma_reset_done:
         cleared.append("Chroma")
 
@@ -193,8 +228,10 @@ def delete_repo_storage(
     deleted_counts: dict[str, int] = {}
 
     try:
-        chroma = ChromaIndex()
-        chroma_deleted = chroma.delete_by_repo_id(normalized_repo_id)
+        chroma_deleted = delete_repository_vector_documents(
+            build_managed_vector_index(),
+            normalized_repo_id,
+        )
         deleted_counts["chroma_total"] = int(chroma_deleted.get("total", 0) or 0)
         for collection_name in COLLECTIONS:
             value = int(chroma_deleted.get(collection_name, 0) or 0)
@@ -203,27 +240,19 @@ def delete_repo_storage(
     except Exception as exc:
         warnings.append(f"No se pudo limpiar Chroma para '{normalized_repo_id}': {exc}")
 
-    try:
-        bm25_deleted = GLOBAL_BM25.delete_repo(normalized_repo_id)
-        deleted_counts["bm25_docs"] = int(
-            bm25_deleted.get("docs_removed", 0) or 0
-        )
-        deleted_counts["bm25_snapshots"] = int(
-            bm25_deleted.get("snapshot_removed", 0) or 0
-        )
-        cleared.append("BM25")
-    except Exception as exc:
-        warnings.append(f"No se pudo limpiar BM25 para '{normalized_repo_id}': {exc}")
+    bm25_cleared, bm25_warnings, bm25_counts = _delete_repo_bm25_storage(
+        normalized_repo_id,
+    )
+    cleared.extend(bm25_cleared)
+    warnings.extend(bm25_warnings)
+    deleted_counts.update(bm25_counts)
 
-    postgres_dsn = resolve_postgres_dsn(settings)
-    if postgres_dsn:
-        try:
-            from coderag.storage.lexical_store import LexicalStore
-            lex_deleted = LexicalStore(postgres_dsn, settings.lexical_fts_language).delete_repo(normalized_repo_id)
-            deleted_counts["lexical_docs"] = int(lex_deleted.get("docs_removed", 0) or 0)
-            cleared.append("LexicalStore")
-        except Exception as exc:
-            warnings.append(f"No se pudo limpiar LexicalStore para '{normalized_repo_id}': {exc}")
+    lexical_cleared, lexical_warnings, lexical_counts = (
+        _delete_repo_postgres_lexical_storage(settings, normalized_repo_id)
+    )
+    cleared.extend(lexical_cleared)
+    warnings.extend(lexical_warnings)
+    deleted_counts.update(lexical_counts)
 
     graph = GraphBuilder()
     try:
@@ -260,7 +289,7 @@ def delete_repo_storage(
         deleted_counts["metadata_total"] = int(
             metadata_deleted.get("total", 0) or 0
         )
-        cleared.append("Metadata SQLite" if not resolve_postgres_dsn(settings) else "Metadata Postgres")
+        cleared.append(metadata_backend_label(settings))
     except Exception as exc:
         warnings.append(
             "No se pudo limpiar metadata para "
@@ -270,10 +299,6 @@ def delete_repo_storage(
     return cleared, warnings, deleted_counts
 
 
-def _build_metadata_store(settings):
+def _build_metadata_store(settings: object) -> BaseMetadataStore:
     """Devuelve el store de metadatos apropiado según la configuración."""
-    postgres_dsn = resolve_postgres_dsn(settings)
-    if postgres_dsn:
-        from coderag.storage.postgres_metadata_store import PostgresMetadataStore
-        return PostgresMetadataStore(postgres_dsn)
-    return MetadataStore(settings.workspace_path.parent / "metadata.db")
+    return build_metadata_store(settings)

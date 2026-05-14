@@ -103,6 +103,8 @@ Notas de comportamiento:
   estan disponibles.
 - `workspace_available=false` no bloquea query semántico, retrieval-only ni
   inventory query, pero sí implica que modo literal quedará rechazado.
+- El payload expone `lexical_loaded` como nombre neutral de readiness léxico y
+  mantiene `bm25_loaded` como alias legacy compatible.
 
 Notas de catálogo:
 
@@ -442,6 +444,7 @@ Notas de interpretación:
 | `chroma_hnsw_space_detected` | `dict[str, str \| null]` | no |
 | `chroma_hnsw_space_compatible` | `bool \| null` | no |
 | `chroma_hnsw_space_mismatched_collections` | `list[str]` | no |
+| `lexical_loaded` | `bool` | sí |
 | `bm25_loaded` | `bool` | sí |
 | `graph_available` | `bool \| null` | no |
 | `last_embedding_provider` | `str \| null` | no |
@@ -450,9 +453,13 @@ Notas de interpretación:
 | `compatibility_reason` | `str \| null` | no |
 | `warnings` | `list[str]` | no |
 
-Nota: `bm25_loaded` conserva un nombre historico por compatibilidad, pero en
-despliegues con Postgres activo actua como señal de readiness de la capa
-lexica en Postgres.
+Notas:
+
+- `lexical_loaded` es el campo recomendado para consumidores nuevos y refleja
+  readiness de la capa léxica activa, ya sea BM25 local o LexicalStore en
+  Postgres.
+- `bm25_loaded` conserva un nombre historico por compatibilidad y replica el
+  mismo valor de `lexical_loaded`.
 
 ### StorageHealthItem
 

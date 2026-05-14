@@ -627,6 +627,11 @@ def test_hybrid_search_refreshes_stale_chroma_results_once(
             }
 
     monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "build_managed_vector_index",
+        lambda: _FakeChroma(),
+    )
     monkeypatch.setattr(hybrid_search_module, "ChromaIndex", _FakeChroma)
     monkeypatch.setattr(
         hybrid_search_module.GLOBAL_BM25,

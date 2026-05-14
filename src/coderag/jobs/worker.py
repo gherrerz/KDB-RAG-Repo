@@ -12,60 +12,18 @@ import time
 from uuid import uuid4
 
 from coderag.core.models import JobInfo, JobStatus, RepoIngestRequest
-from coderag.core.settings import get_settings, resolve_postgres_dsn
+from coderag.core.settings import get_settings
 from coderag.ingestion.git_client import build_repo_id, extract_repo_organization
-from coderag.storage.metadata_store import MetadataStore
+from coderag.jobs.ingest_error_policy import (
+    is_retryable_ingest_error,
+    should_retry_failed_ingest_job,
+)
 from coderag.storage.base_metadata_store import BaseMetadataStore
+from coderag.storage.metadata_store_factory import build_metadata_store
 
 
 class IngestionConflictError(RuntimeError):
     """Error de conflicto cuando ya existe ingesta activa para el repositorio."""
-
-
-def _is_non_retryable_ingest_error(message: str) -> bool:
-    """Detecta errores permanentes donde reintentar no agrega valor."""
-    normalized = (message or "").lower()
-    non_retryable_markers = (
-        "authentication failed",
-        "permission denied",
-        "not found",
-        "repository not found",
-        "no se pudo clonar",
-        "commit solicitado no está disponible",
-        "invalid",
-        "forbidden",
-        "unauthorized",
-    )
-    return any(marker in normalized for marker in non_retryable_markers)
-
-
-def _is_transient_ingest_error(message: str) -> bool:
-    """Detecta errores transitorios típicos de red/infraestructura/locks."""
-    normalized = (message or "").lower()
-    transient_markers = (
-        "timeout",
-        "timed out",
-        "temporarily unavailable",
-        "temporary failure",
-        "connection refused",
-        "connection reset",
-        "service unavailable",
-        "name resolution",
-        "too many requests",
-        "rate limit",
-        "429",
-        "deadlock",
-        "database is locked",
-        "connection aborted",
-    )
-    return any(marker in normalized for marker in transient_markers)
-
-
-def _is_retryable_ingest_error(message: str) -> bool:
-    """Clasifica si un error de ingesta amerita reintento automático."""
-    if _is_non_retryable_ingest_error(message):
-        return False
-    return _is_transient_ingest_error(message)
 
 
 def _on_remove_error(func, path: str, exc_info) -> None:
@@ -95,7 +53,7 @@ def _invoke_execute_ingest_job(
     *,
     job: JobInfo,
     request: RepoIngestRequest,
-    store: MetadataStore,
+    store: BaseMetadataStore,
     workspace_path: Path,
     retain_workspace_after_ingest: bool,
 ) -> JobInfo:
@@ -116,7 +74,7 @@ def _execute_ingest_job(
     *,
     job: JobInfo,
     request: RepoIngestRequest,
-    store: MetadataStore,
+    store: BaseMetadataStore,
     workspace_path: Path,
     retain_workspace_after_ingest: bool,
 ) -> JobInfo:
@@ -194,7 +152,7 @@ def _execute_ingest_job(
     except Exception as exc:
         job.status = JobStatus.failed
         job.error = str(exc)
-        job.diagnostics["retryable_error"] = _is_retryable_ingest_error(job.error)
+        job.diagnostics["retryable_error"] = is_retryable_ingest_error(job.error)
         job.diagnostics["error_type"] = exc.__class__.__name__
         job.logs.append(f"Error: {exc}")
     finally:
@@ -206,13 +164,7 @@ def _execute_ingest_job(
 
 def _build_metadata_store() -> BaseMetadataStore:
     """Crea el store de metadatos apropiado según la configuración activa."""
-    settings = get_settings()
-    postgres_dsn = resolve_postgres_dsn(settings)
-    if postgres_dsn:
-        from coderag.storage.postgres_metadata_store import PostgresMetadataStore
-        return PostgresMetadataStore(postgres_dsn)
-    metadata_path = settings.workspace_path.parent / "metadata.db"
-    return MetadataStore(metadata_path)
+    return build_metadata_store(get_settings())
 
 
 def run_ingest_job_task(job_id: str, request_payload: dict[str, object]) -> str:
@@ -245,7 +197,10 @@ def run_ingest_job_task(job_id: str, request_payload: dict[str, object]) -> str:
             getattr(settings, "ingestion_retry_transient_only", True)
         )
 
-        should_retry = retryable_error or not retry_transient_only
+        should_retry = should_retry_failed_ingest_job(
+            retryable_error=retryable_error,
+            retry_transient_only=retry_transient_only,
+        )
         if should_retry:
             raise RuntimeError(final_job.error or "Ingesta falló en worker RQ")
 

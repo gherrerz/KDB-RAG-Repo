@@ -1277,6 +1277,91 @@ def test_run_query_retries_with_raw_citations_if_filtered_empty(
     assert result.diagnostics["raw_citations"] == 1
 
 
+def test_run_query_reports_resolved_embedding_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publica el runtime resuelto de embeddings en diagnostics de query."""
+
+    class _Settings:
+        query_max_seconds = 30.0
+        max_context_tokens = 512
+        openai_timeout_seconds = 20.0
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None) -> str:
+            return provider or "resolved-query-provider"
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, model: str | None) -> str:
+            assert provider == "resolved-query-provider"
+            return model or "resolved-query-model"
+
+        @staticmethod
+        def is_verify_enabled() -> bool:
+            return True
+
+    class _AnswerClient:
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+            self.provider = "openai"
+            self.answer_model = "gpt-test"
+            self.verifier_model = "gpt-test"
+
+        enabled = False
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "AnswerClient", _AnswerClient)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: [
+            RetrievalChunk(
+                id="c1",
+                text=(
+                    "AuthService configures external auth provider wiring with "
+                    "enough detail to keep context sufficient."
+                ),
+                score=0.95,
+                metadata={
+                    "path": "src/AuthService.java",
+                    "start_line": 10,
+                    "end_line": 24,
+                },
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_timed_module_discovery",
+        lambda repo_id, query: ([], 0.0),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_timed_graph_expand",
+        lambda chunks, query=None: ([], 0.0, {}),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "assemble_context",
+        lambda chunks, graph_records, max_tokens: "x" * 120,
+    )
+
+    result = query_service.run_query(
+        repo_id="repo1",
+        query="where is auth provider configured",
+        top_n=10,
+        top_k=5,
+    )
+
+    assert result.diagnostics["embedding_provider"] == "resolved-query-provider"
+    assert result.diagnostics["embedding_model"] == "resolved-query-model"
+
+
 def test_run_query_uses_insufficient_context_fallback_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1482,6 +1567,63 @@ def test_run_retrieval_query_includes_context_when_enabled(
     assert result.context is not None
     assert "PATH: src/a.py" in result.context
     assert "context_assembly_ms" in result.diagnostics["stage_timings_ms"]
+
+
+def test_run_retrieval_query_reports_resolved_embedding_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publica el runtime resuelto de embeddings en diagnostics retrieval-only."""
+
+    class _Settings:
+        query_max_seconds = 30.0
+        max_context_tokens = 256
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None) -> str:
+            return provider or "resolved-retrieval-provider"
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, model: str | None) -> str:
+            assert provider == "resolved-retrieval-provider"
+            return model or "resolved-retrieval-model"
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: [
+            RetrievalChunk(
+                id="c1",
+                text="class AuthService {}",
+                score=0.92,
+                metadata={
+                    "path": "src/AuthService.java",
+                    "start_line": 10,
+                    "end_line": 20,
+                },
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        query_service,
+        "rerank",
+        lambda query, chunks, top_k: chunks,
+    )
+    monkeypatch.setattr(
+        query_service,
+        "expand_with_graph_with_diagnostics",
+        lambda **kwargs: ([], {}),
+    )
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="auth service",
+        top_n=10,
+        top_k=5,
+    )
+
+    assert result.diagnostics["embedding_provider"] == "resolved-retrieval-provider"
+    assert result.diagnostics["embedding_model"] == "resolved-retrieval-model"
 
 
 def test_run_retrieval_query_smoke_includes_dependency_graph_context(

@@ -183,13 +183,19 @@ def test_get_repo_query_status_blocks_ready_on_embedding_mismatch(
     monkeypatch.setattr(storage_health.GLOBAL_BM25, "ensure_repo_loaded", lambda repo_id: True)
     monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
     monkeypatch.setattr(
-        storage_health.ChromaIndex,
-        "collection_hnsw_spaces",
-        lambda self: {
-            "code_symbols": "cosine",
-            "code_files": "cosine",
-            "code_modules": "cosine",
-        },
+        storage_health,
+        "build_managed_vector_index",
+        lambda: type(
+            "FakeVectorIndex",
+            (),
+            {
+                "collection_hnsw_spaces": lambda self: {
+                    "code_symbols": "cosine",
+                    "code_files": "cosine",
+                    "code_modules": "cosine",
+                }
+            },
+        )(),
     )
 
     status = storage_health.get_repo_query_status(
@@ -220,13 +226,19 @@ def test_get_repo_query_status_blocks_ready_on_hnsw_space_mismatch(
     monkeypatch.setattr(storage_health.GLOBAL_BM25, "ensure_repo_loaded", lambda repo_id: True)
     monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
     monkeypatch.setattr(
-        storage_health.ChromaIndex,
-        "collection_hnsw_spaces",
-        lambda self: {
-            "code_symbols": "l2",
-            "code_files": "l2",
-            "code_modules": "l2",
-        },
+        storage_health,
+        "build_managed_vector_index",
+        lambda: type(
+            "FakeVectorIndex",
+            (),
+            {
+                "collection_hnsw_spaces": lambda self: {
+                    "code_symbols": "l2",
+                    "code_files": "l2",
+                    "code_modules": "l2",
+                }
+            },
+        )(),
     )
 
     status = storage_health.get_repo_query_status(
@@ -279,13 +291,19 @@ def test_get_repo_query_status_reports_workspace_availability(
     )
     monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
     monkeypatch.setattr(
-        storage_health.ChromaIndex,
-        "collection_hnsw_spaces",
-        lambda self: {
-            "code_symbols": "cosine",
-            "code_files": "cosine",
-            "code_modules": "cosine",
-        },
+        storage_health,
+        "build_managed_vector_index",
+        lambda: type(
+            "FakeVectorIndex",
+            (),
+            {
+                "collection_hnsw_spaces": lambda self: {
+                    "code_symbols": "cosine",
+                    "code_files": "cosine",
+                    "code_modules": "cosine",
+                }
+            },
+        )(),
     )
 
     available_status = storage_health.get_repo_query_status(
@@ -331,13 +349,19 @@ def test_get_repo_query_status_refreshes_chroma_when_counts_start_empty(
         classmethod(lambda cls: calls.__setitem__("reset", calls["reset"] + 1)),
     )
     monkeypatch.setattr(
-        storage_health.ChromaIndex,
-        "collection_hnsw_spaces",
-        lambda self: {
-            "code_symbols": "cosine",
-            "code_files": "cosine",
-            "code_modules": "cosine",
-        },
+        storage_health,
+        "build_managed_vector_index",
+        lambda: type(
+            "FakeVectorIndex",
+            (),
+            {
+                "collection_hnsw_spaces": lambda self: {
+                    "code_symbols": "cosine",
+                    "code_files": "cosine",
+                    "code_modules": "cosine",
+                }
+            },
+        )(),
     )
 
     status = storage_health.get_repo_query_status(
@@ -365,7 +389,7 @@ def test_check_chroma_raises_on_hnsw_space_mismatch(
         def collection_hnsw_spaces(self) -> dict[str, str]:
             return {"code_symbols": "l2"}
 
-    monkeypatch.setattr(storage_health, "ChromaIndex", _FakeIndex)
+    monkeypatch.setattr(storage_health, "build_managed_vector_index", lambda: _FakeIndex())
     monkeypatch.setattr(storage_health, "get_settings", _fake_settings)
 
     with pytest.raises(RuntimeError, match="Espacio HNSW inconsistente"):
@@ -384,6 +408,126 @@ def test_check_bm25_raises_when_repo_not_loaded_in_query_context(
 
     with pytest.raises(RuntimeError, match="No hay índice BM25 cargado"):
         storage_health._check_bm25(context="query", repo_id="mall")
+
+
+def test_count_chroma_documents_for_repo_uses_managed_vector_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cuenta documentos a través del backend vectorial compartido."""
+
+    class FakeVectorIndex:
+        collections = {"code_symbols": object()}
+
+        def count_by_repo_id(
+            self,
+            collection_name: str,
+            repo_id: str,
+            page_size: int = 500,
+        ) -> int:
+            assert collection_name == "code_symbols"
+            assert repo_id == "mall"
+            assert page_size == 200
+            return 9
+
+    monkeypatch.setattr(
+        storage_health,
+        "build_managed_vector_index",
+        lambda: FakeVectorIndex(),
+    )
+
+    total = storage_health._count_chroma_documents_for_repo(
+        repo_id="mall",
+        collection_name="code_symbols",
+        page_size=200,
+    )
+
+    assert total == 9
+
+
+def test_build_lexical_check_uses_postgres_backend_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Selecciona el check lexical cuando Postgres está activo."""
+
+    settings = _fake_settings()
+    settings.resolve_postgres_dsn = lambda: "postgresql://fake/db"
+
+    monkeypatch.setattr(storage_health, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        storage_health,
+        "_check_lexical_store",
+        lambda context, repo_id, postgres_dsn: {
+            "context": context,
+            "repo_id": repo_id,
+            "postgres_dsn": postgres_dsn,
+        },
+    )
+
+    name, check_fn = storage_health._build_lexical_check(
+        settings,
+        context="query",
+        repo_id="mall",
+    )
+
+    assert name == "lexical"
+    assert check_fn() == {
+        "context": "query",
+        "repo_id": "mall",
+        "postgres_dsn": "postgresql://fake/db",
+    }
+
+
+def test_get_repo_query_status_warns_when_postgres_lexical_corpus_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reporta advertencia de corpus léxico cuando el backend activo es Postgres."""
+
+    settings = _fake_settings()
+    settings.resolve_postgres_dsn = lambda: "postgresql://fake/db"
+
+    monkeypatch.setattr(storage_health, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        storage_health,
+        "repository_has_query_ready_lexical_data",
+        lambda resolved_settings, repo_id: False,
+    )
+    monkeypatch.setattr(
+        storage_health,
+        "_count_chroma_documents_for_repo",
+        lambda **kwargs: 5,
+    )
+    monkeypatch.setattr(
+        storage_health,
+        "_check_repo_graph_available",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        storage_health,
+        "build_managed_vector_index",
+        lambda: type(
+            "FakeVectorIndex",
+            (),
+            {
+                "collection_hnsw_spaces": lambda self: {
+                    "code_symbols": "cosine",
+                    "code_files": "cosine",
+                    "code_modules": "cosine",
+                }
+            },
+        )(),
+    )
+
+    status = storage_health.get_repo_query_status(
+        repo_id="repo-a",
+        listed_in_catalog=True,
+    )
+
+    assert status["bm25_loaded"] is False
+    assert status["lexical_loaded"] is False
+    assert status["query_ready"] is False
+    assert status["warnings"] == [
+        "No hay corpus léxico en Postgres para repo 'repo-a'."
+    ]
 
 
 def test_run_storage_preflight_marks_bm25_as_non_critical_failure(

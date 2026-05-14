@@ -12,7 +12,16 @@ from neo4j import GraphDatabase
 from openai import OpenAI
 from redis import Redis
 
+from coderag.core.lexical_index import (
+    repository_has_query_ready_lexical_data,
+    repository_lexical_backend_label,
+)
 from coderag.core.settings import get_settings, resolve_postgres_dsn
+from coderag.core.vector_index import (
+    build_managed_vector_index,
+    count_repository_vector_collection_documents,
+    managed_vector_collection_spaces,
+)
 from coderag.ingestion.embedding import MODEL_DIMENSIONS
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import ChromaIndex
@@ -197,10 +206,20 @@ def _check_metadata_postgres(postgres_dsn: str) -> dict[str, Any]:
     return {"backend": "postgres", "repo_count": len(repo_ids)}
 
 
+def _build_metadata_check(settings: object) -> tuple[str, Any]:
+    """Resuelve nombre y callable del chequeo de metadata activo."""
+    postgres_dsn = resolve_postgres_dsn(settings)
+    if postgres_dsn:
+        return "metadata_postgres", lambda: _check_metadata_postgres(postgres_dsn)
+
+    metadata_path = settings.workspace_path.parent / "metadata.db"
+    return "metadata_sqlite", lambda: _check_metadata_sqlite(metadata_path)
+
+
 def _check_chroma() -> dict[str, Any]:
     """Valida inicialización y acceso básico a colecciones de Chroma."""
     settings = get_settings()
-    index = ChromaIndex()
+    index = build_managed_vector_index()
     if settings.chroma_mode == "remote":
         # Verificar conectividad HTTP explícitamente en modo remoto
         try:
@@ -212,7 +231,7 @@ def _check_chroma() -> dict[str, Any]:
             ) from exc
     collections = index.client.list_collections()
     expected_space = settings.resolve_chroma_hnsw_space()
-    spaces_by_collection = index.collection_hnsw_spaces()
+    spaces_by_collection = managed_vector_collection_spaces(index)
     mismatched_collections = sorted(
         name
         for name, detected_space in spaces_by_collection.items()
@@ -288,6 +307,24 @@ def _check_lexical_store(context: str, repo_id: str | None, postgres_dsn: str) -
     return {"backend": "postgres"}
 
 
+def _build_lexical_check(
+    settings: object,
+    *,
+    context: str,
+    repo_id: str | None,
+) -> tuple[str, Any]:
+    """Construye el check léxico apropiado según el backend activo."""
+    postgres_dsn = resolve_postgres_dsn(settings)
+    label = repository_lexical_backend_label(settings)
+    if label == "lexical":
+        return label, lambda: _check_lexical_store(
+            context=context,
+            repo_id=repo_id,
+            postgres_dsn=postgres_dsn,
+        )
+    return label, lambda: _check_bm25(context=context, repo_id=repo_id)
+
+
 def _check_openai(timeout_seconds: float) -> dict[str, Any]:
     """Valida credenciales OpenAI y conectividad básica con la API."""
     settings = get_settings()
@@ -338,8 +375,12 @@ def run_storage_preflight(
                 return report
 
     workspace_path = settings.workspace_path
-    metadata_path = settings.workspace_path.parent / "metadata.db"
-    postgres_dsn = resolve_postgres_dsn(settings)
+    metadata_check_name, metadata_check_fn = _build_metadata_check(settings)
+    lexical_check_name, lexical_check_fn = _build_lexical_check(
+        settings,
+        context=context,
+        repo_id=repo_id,
+    )
 
     workspace_critical = context not in {
         "query",
@@ -356,13 +397,9 @@ def run_storage_preflight(
         },
         {
             "type": "check",
-            "name": "metadata_sqlite" if not postgres_dsn else "metadata_postgres",
+            "name": metadata_check_name,
             "critical": True,
-            "check_fn": (
-                (lambda: _check_metadata_postgres(postgres_dsn))
-                if postgres_dsn
-                else (lambda: _check_metadata_sqlite(metadata_path))
-            ),
+            "check_fn": metadata_check_fn,
         },
         {
             "type": "check",
@@ -378,14 +415,10 @@ def run_storage_preflight(
         },
         {
             "type": "check",
-            "name": "lexical" if postgres_dsn else "bm25",
+            "name": lexical_check_name,
             # No crítico, solo advertencia si falta
             "critical": False,
-            "check_fn": (
-                (lambda: _check_lexical_store(context=context, repo_id=repo_id, postgres_dsn=postgres_dsn))
-                if postgres_dsn
-                else (lambda: _check_bm25(context=context, repo_id=repo_id))
-            ),
+            "check_fn": lexical_check_fn,
         },
     ]
 
@@ -506,27 +539,15 @@ def _count_chroma_documents_for_repo(
     page_size: int = 500,
 ) -> int:
     """Cuenta documentos de un repositorio en una colección Chroma paginando por offset."""
-    index = ChromaIndex()
-    collection = index.collections.get(collection_name)
-    if collection is None:
+    index = build_managed_vector_index()
+    if collection_name not in index.collections:
         return 0
-
-    total = 0
-    offset = 0
-    while True:
-        page = collection.get(
-            where={"repo_id": repo_id},
-            limit=page_size,
-            offset=offset,
-            include=[],
-        )
-        ids = page.get("ids") or []
-        page_count = len(ids)
-        total += page_count
-        if page_count < page_size:
-            break
-        offset += page_size
-    return total
+    return count_repository_vector_collection_documents(
+        index,
+        repo_id=repo_id,
+        collection_name=collection_name,
+        page_size=page_size,
+    )
 
 
 def _count_query_collections_for_repo(repo_id: str) -> dict[str, int | None]:
@@ -578,21 +599,18 @@ def get_repo_query_status(
     chroma_spaces: dict[str, str | None] = {}
     chroma_space_mismatched_collections: list[str] = []
 
-    postgres_dsn = resolve_postgres_dsn(settings)
-    if postgres_dsn:
-        from coderag.storage.lexical_store import LexicalStore
-        bm25_loaded = LexicalStore(postgres_dsn, settings.lexical_fts_language).has_corpus(repo_id)
-        if not bm25_loaded:
+    lexical_backend = repository_lexical_backend_label(settings)
+    lexical_loaded = repository_has_query_ready_lexical_data(settings, repo_id)
+    if not lexical_loaded:
+        if lexical_backend == "lexical":
             warnings.append(f"No hay corpus léxico en Postgres para repo '{repo_id}'.")
-    else:
-        bm25_loaded = GLOBAL_BM25.ensure_repo_loaded(repo_id)
-        if not bm25_loaded:
+        else:
             warnings.append(f"No hay indice BM25 en memoria para repo '{repo_id}'.")
 
     try:
         chroma_counts = _count_query_collections_for_repo(repo_id)
         if not any((count or 0) > 0 for count in chroma_counts.values()):
-            if listed_in_catalog or bm25_loaded:
+            if listed_in_catalog or lexical_loaded:
                 ChromaIndex.reset_shared_state()
                 chroma_counts = _count_query_collections_for_repo(repo_id)
     except Exception as exc:  # pragma: no cover - depende de infraestructura
@@ -600,7 +618,9 @@ def get_repo_query_status(
         warnings.append(f"No se pudo contar documentos del repo en Chroma: {exc}")
 
     try:
-        chroma_spaces = ChromaIndex().collection_hnsw_spaces()
+        chroma_spaces = managed_vector_collection_spaces(
+            build_managed_vector_index()
+        )
         chroma_space_mismatched_collections = sorted(
             name
             for name, detected_space in chroma_spaces.items()
@@ -642,7 +662,7 @@ def get_repo_query_status(
     chroma_space_compatible = len(chroma_space_mismatched_collections) == 0
     query_ready = bool(
         chroma_has_docs
-        and bm25_loaded
+        and lexical_loaded
         and embedding_compatible is not False
         and chroma_space_compatible
     )
@@ -656,7 +676,8 @@ def get_repo_query_status(
         "chroma_hnsw_space_detected": chroma_spaces,
         "chroma_hnsw_space_compatible": chroma_space_compatible,
         "chroma_hnsw_space_mismatched_collections": chroma_space_mismatched_collections,
-        "bm25_loaded": bm25_loaded,
+        "bm25_loaded": lexical_loaded,
+        "lexical_loaded": lexical_loaded,
         "graph_available": graph_available,
         "embedding_compatible": embedding_compatible,
         "compatibility_reason": embedding_compatibility["compatibility_reason"],

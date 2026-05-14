@@ -8,19 +8,9 @@ from coderag.retrieval import graph_expand
 
 def test_expand_with_graph_with_diagnostics_semantic_budgets(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
 ) -> None:
     """Aplica budgets semánticos y reporta aristas podadas correctamente."""
-
-    class _Settings:
-        graph_hops = 2
-        semantic_graph_query_enabled = True
-        semantic_graph_query_max_edges = 2
-        semantic_graph_query_max_nodes = 10
-        semantic_graph_query_max_ms = 1000.0
-
-        @staticmethod
-        def resolve_semantic_relation_types(_override=None) -> list[str]:
-            return ["CALLS", "IMPORTS"]
 
     class _Graph:
         def expand_symbols(
@@ -49,7 +39,18 @@ def test_expand_with_graph_with_diagnostics_semantic_budgets(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(graph_expand, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        graph_expand,
+        graph_hops=2,
+        semantic_graph_query_enabled=True,
+        semantic_graph_query_max_edges=2,
+        semantic_graph_query_max_nodes=10,
+        semantic_graph_query_max_ms=1000.0,
+        resolve_semantic_relation_types=lambda _override=None: [
+            "CALLS",
+            "IMPORTS",
+        ],
+    )
     monkeypatch.setattr(graph_expand, "GraphBuilder", _Graph)
 
     chunks = [
@@ -70,12 +71,9 @@ def test_expand_with_graph_with_diagnostics_semantic_budgets(
 
 def test_expand_with_graph_with_diagnostics_disabled_defaults(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
 ) -> None:
     """Mantiene campos semánticos en cero cuando la ruta está deshabilitada."""
-
-    class _Settings:
-        graph_hops = 2
-        semantic_graph_query_enabled = False
 
     class _Graph:
         def expand_symbols(self, symbol_ids, hops, relation_types=None, limit=200):
@@ -92,7 +90,11 @@ def test_expand_with_graph_with_diagnostics_disabled_defaults(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(graph_expand, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        graph_expand,
+        graph_hops=2,
+        semantic_graph_query_enabled=False,
+    )
     monkeypatch.setattr(graph_expand, "GraphBuilder", _Graph)
 
     chunks = [
@@ -113,29 +115,9 @@ def test_expand_with_graph_with_diagnostics_disabled_defaults(
 
 def test_expand_with_graph_prioritizes_relation_score(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
 ) -> None:
     """Prioriza nodos por score semántico según tipo de relación y confianza."""
-
-    class _Settings:
-        graph_hops = 2
-        semantic_graph_query_enabled = True
-        semantic_graph_query_max_edges = 10
-        semantic_graph_query_max_nodes = 1
-        semantic_graph_query_max_ms = 1000.0
-        semantic_graph_query_fallback_to_structural = True
-
-        @staticmethod
-        def resolve_semantic_relation_types(_override=None) -> list[str]:
-            return ["CALLS", "IMPORTS", "EXTENDS", "IMPLEMENTS"]
-
-        @staticmethod
-        def resolve_semantic_relation_weights(_override=None) -> dict[str, float]:
-            return {
-                "CALLS": 1.0,
-                "IMPORTS": 0.4,
-                "EXTENDS": 1.6,
-                "IMPLEMENTS": 1.0,
-            }
 
     class _Graph:
         def expand_symbols(self, symbol_ids, hops, relation_types=None, limit=200):
@@ -161,7 +143,27 @@ def test_expand_with_graph_prioritizes_relation_score(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(graph_expand, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        graph_expand,
+        graph_hops=2,
+        semantic_graph_query_enabled=True,
+        semantic_graph_query_max_edges=10,
+        semantic_graph_query_max_nodes=1,
+        semantic_graph_query_max_ms=1000.0,
+        semantic_graph_query_fallback_to_structural=True,
+        resolve_semantic_relation_types=lambda _override=None: [
+            "CALLS",
+            "IMPORTS",
+            "EXTENDS",
+            "IMPLEMENTS",
+        ],
+        resolve_semantic_relation_weights=lambda _override=None: {
+            "CALLS": 1.0,
+            "IMPORTS": 0.4,
+            "EXTENDS": 1.6,
+            "IMPLEMENTS": 1.0,
+        },
+    )
     monkeypatch.setattr(graph_expand, "GraphBuilder", _Graph)
 
     chunks = [
@@ -182,24 +184,9 @@ def test_expand_with_graph_prioritizes_relation_score(
 
 def test_expand_with_graph_uses_structural_fallback_when_semantic_pruned_all(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
 ) -> None:
     """Si budgets podan todo, aplica fallback estructural automáticamente."""
-
-    class _Settings:
-        graph_hops = 2
-        semantic_graph_query_enabled = True
-        semantic_graph_query_max_edges = 1
-        semantic_graph_query_max_nodes = 1
-        semantic_graph_query_max_ms = 1000.0
-        semantic_graph_query_fallback_to_structural = True
-
-        @staticmethod
-        def resolve_semantic_relation_types(_override=None) -> list[str]:
-            return ["CALLS"]
-
-        @staticmethod
-        def resolve_semantic_relation_weights(_override=None) -> dict[str, float]:
-            return {"CALLS": 1.0}
 
     class _Graph:
         def __init__(self):
@@ -230,7 +217,17 @@ def test_expand_with_graph_uses_structural_fallback_when_semantic_pruned_all(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(graph_expand, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        graph_expand,
+        graph_hops=2,
+        semantic_graph_query_enabled=True,
+        semantic_graph_query_max_edges=1,
+        semantic_graph_query_max_nodes=1,
+        semantic_graph_query_max_ms=1000.0,
+        semantic_graph_query_fallback_to_structural=True,
+        resolve_semantic_relation_types=lambda _override=None: ["CALLS"],
+        resolve_semantic_relation_weights=lambda _override=None: {"CALLS": 1.0},
+    )
     monkeypatch.setattr(graph_expand, "GraphBuilder", _Graph)
 
     chunks = [
@@ -251,19 +248,9 @@ def test_expand_with_graph_uses_structural_fallback_when_semantic_pruned_all(
 
 def test_expand_with_graph_appends_file_dependency_context(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
 ) -> None:
     """Anexa contexto de dependencias de archivo alcanzable desde símbolos semilla."""
-
-    class _Settings:
-        graph_hops = 2
-        semantic_graph_query_enabled = True
-        semantic_graph_query_max_edges = 10
-        semantic_graph_query_max_nodes = 5
-        semantic_graph_query_max_ms = 1000.0
-
-        @staticmethod
-        def resolve_semantic_relation_types(_override=None) -> list[str]:
-            return ["CALLS", "IMPORTS"]
 
     class _Graph:
         def expand_symbols(self, symbol_ids, hops, relation_types=None, limit=200):
@@ -303,7 +290,18 @@ def test_expand_with_graph_appends_file_dependency_context(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(graph_expand, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        graph_expand,
+        graph_hops=2,
+        semantic_graph_query_enabled=True,
+        semantic_graph_query_max_edges=10,
+        semantic_graph_query_max_nodes=5,
+        semantic_graph_query_max_ms=1000.0,
+        resolve_semantic_relation_types=lambda _override=None: [
+            "CALLS",
+            "IMPORTS",
+        ],
+    )
     monkeypatch.setattr(graph_expand, "GraphBuilder", _Graph)
 
     chunks = [
@@ -324,19 +322,9 @@ def test_expand_with_graph_appends_file_dependency_context(
 
 def test_expand_with_graph_prioritizes_file_context_by_query_overlap(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
 ) -> None:
     """Prioriza file-context con mayor solape textual respecto de la query."""
-
-    class _Settings:
-        graph_hops = 2
-        semantic_graph_query_enabled = True
-        semantic_graph_query_max_edges = 10
-        semantic_graph_query_max_nodes = 2
-        semantic_graph_query_max_ms = 1000.0
-
-        @staticmethod
-        def resolve_semantic_relation_types(_override=None) -> list[str]:
-            return ["CALLS", "IMPORTS"]
 
     class _Graph:
         def expand_symbols(self, symbol_ids, hops, relation_types=None, limit=200):
@@ -374,7 +362,18 @@ def test_expand_with_graph_prioritizes_file_context_by_query_overlap(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(graph_expand, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        graph_expand,
+        graph_hops=2,
+        semantic_graph_query_enabled=True,
+        semantic_graph_query_max_edges=10,
+        semantic_graph_query_max_nodes=2,
+        semantic_graph_query_max_ms=1000.0,
+        resolve_semantic_relation_types=lambda _override=None: [
+            "CALLS",
+            "IMPORTS",
+        ],
+    )
     monkeypatch.setattr(graph_expand, "GraphBuilder", _Graph)
 
     chunks = [
@@ -397,19 +396,9 @@ def test_expand_with_graph_prioritizes_file_context_by_query_overlap(
 
 def test_expand_with_graph_uses_file_chunk_paths_as_file_context_seeds(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
 ) -> None:
     """Usa repo_id+path de file chunks para expandir dependencias aunque no haya seed symbol."""
-
-    class _Settings:
-        graph_hops = 2
-        semantic_graph_query_enabled = True
-        semantic_graph_query_max_edges = 10
-        semantic_graph_query_max_nodes = 5
-        semantic_graph_query_max_ms = 1000.0
-
-        @staticmethod
-        def resolve_semantic_relation_types(_override=None) -> list[str]:
-            return ["CALLS", "IMPORTS"]
 
     class _Graph:
         def expand_symbols(self, symbol_ids, hops, relation_types=None, limit=200):
@@ -438,7 +427,18 @@ def test_expand_with_graph_uses_file_chunk_paths_as_file_context_seeds(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(graph_expand, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        graph_expand,
+        graph_hops=2,
+        semantic_graph_query_enabled=True,
+        semantic_graph_query_max_edges=10,
+        semantic_graph_query_max_nodes=5,
+        semantic_graph_query_max_ms=1000.0,
+        resolve_semantic_relation_types=lambda _override=None: [
+            "CALLS",
+            "IMPORTS",
+        ],
+    )
     monkeypatch.setattr(graph_expand, "GraphBuilder", _Graph)
 
     chunks = [

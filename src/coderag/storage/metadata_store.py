@@ -6,9 +6,10 @@ import sqlite3
 from pathlib import Path
 
 from coderag.core.models import JobInfo, JobStatus
+from coderag.storage.base_metadata_store import BaseMetadataStore
 
 
-class MetadataStore:
+class MetadataStore(BaseMetadataStore):
     """Almacén simple en SQLite para estado de trabajos y repositorios."""
 
     def __init__(self, db_path: Path) -> None:

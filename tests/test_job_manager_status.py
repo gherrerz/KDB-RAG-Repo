@@ -16,29 +16,17 @@ from coderag.jobs.worker import (
 
 def test_job_manager_marks_partial_when_repo_not_query_ready(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
+    sync_thread_class,
 ) -> None:
     """Marca el job como partial cuando la ingesta termina sin readiness de consulta."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(module)
     manager = JobManager()
 
-    class _SyncThread:
-        def __init__(self, target, args, daemon):
-            self._target = target
-            self._args = args
-
-        def start(self) -> None:
-            self._target(*self._args)
-
-    monkeypatch.setattr(module, "Thread", _SyncThread)
+    monkeypatch.setattr(module, "Thread", sync_thread_class)
 
     import coderag.ingestion.pipeline as pipeline_module
     import coderag.core.storage_health as health_module
@@ -74,29 +62,17 @@ def test_job_manager_marks_partial_when_repo_not_query_ready(
 
 def test_job_manager_marks_completed_when_repo_query_ready(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
+    sync_thread_class,
 ) -> None:
     """Marca el job como completed cuando readiness de consulta es verdadero."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(module)
     manager = JobManager()
 
-    class _SyncThread:
-        def __init__(self, target, args, daemon):
-            self._target = target
-            self._args = args
-
-        def start(self) -> None:
-            self._target(*self._args)
-
-    monkeypatch.setattr(module, "Thread", _SyncThread)
+    monkeypatch.setattr(module, "Thread", sync_thread_class)
 
     import coderag.ingestion.pipeline as pipeline_module
     import coderag.core.storage_health as health_module
@@ -186,39 +162,109 @@ def test_job_manager_marks_completed_when_repo_query_ready(
     ]
 
 
-def test_job_manager_cleans_workspace_after_ingest_when_configured(
+def test_job_manager_marks_transient_pipeline_failures_as_retryable(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
+    sync_thread_class,
 ) -> None:
-    """Elimina el clone local al terminar la ingesta cuando la configuración lo pide."""
-
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-        retain_workspace_after_ingest = False
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+    """Marca como reintentable un fallo transitorio originado en pipeline."""
 
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(module)
     manager = JobManager()
 
-    class _SyncThread:
-        def __init__(self, target, args, daemon):
-            self._target = target
-            self._args = args
+    monkeypatch.setattr(module, "Thread", sync_thread_class)
 
-        def start(self) -> None:
-            self._target(*self._args)
+    import coderag.ingestion.pipeline as pipeline_module
 
-    monkeypatch.setattr(module, "Thread", _SyncThread)
+    monkeypatch.setattr(
+        pipeline_module,
+        "ingest_repository",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("connection refused while cloning repo")
+        ),
+    )
+
+    request = RepoIngestRequest(
+        provider="github",
+        repo_url="https://github.com/acme/transient.git",
+        branch="main",
+        commit=None,
+    )
+    created = manager.create_ingest_job(request)
+    job = manager.get_job(created.id)
+
+    assert job is not None
+    assert job.status == JobStatus.failed
+    assert job.diagnostics["retryable_error"] is True
+    assert job.diagnostics["error_type"] == "RuntimeError"
+    assert "connection refused" in (job.error or "")
+
+
+def test_job_manager_marks_permanent_pipeline_failures_as_non_retryable(
+    monkeypatch,
+    patch_module_settings,
+    sync_thread_class,
+) -> None:
+    """No marca como reintentable un fallo permanente originado en pipeline."""
+
+    import coderag.jobs.worker as module
+
+    patch_module_settings(module)
+    manager = JobManager()
+
+    monkeypatch.setattr(module, "Thread", sync_thread_class)
+
+    import coderag.ingestion.pipeline as pipeline_module
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "ingest_repository",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("repository not found")
+        ),
+    )
+
+    request = RepoIngestRequest(
+        provider="github",
+        repo_url="https://github.com/acme/missing.git",
+        branch="main",
+        commit=None,
+    )
+    created = manager.create_ingest_job(request)
+    job = manager.get_job(created.id)
+
+    assert job is not None
+    assert job.status == JobStatus.failed
+    assert job.diagnostics["retryable_error"] is False
+    assert job.diagnostics["error_type"] == "RuntimeError"
+    assert job.error == "repository not found"
+
+
+def test_job_manager_cleans_workspace_after_ingest_when_configured(
+    monkeypatch,
+    patch_module_settings,
+    sync_thread_class,
+) -> None:
+    """Elimina el clone local al terminar la ingesta cuando la configuración lo pide."""
+
+    import coderag.jobs.worker as module
+
+    settings = patch_module_settings(
+        module,
+        retain_workspace_after_ingest=False,
+    )
+    manager = JobManager()
+
+    monkeypatch.setattr(module, "Thread", sync_thread_class)
 
     import coderag.ingestion.pipeline as pipeline_module
     import coderag.core.storage_health as health_module
 
     def _fake_ingest_repository(repo_url, branch, commit, logger, **kwargs) -> str:
         del repo_url, branch, commit, logger, kwargs
-        repo_path = _Settings.workspace_path / "repo-ready"
+        repo_path = settings.workspace_path / "repo-ready"
         repo_path.mkdir(parents=True, exist_ok=True)
         (repo_path / "README.md").write_text("demo\n", encoding="utf-8")
         return "repo-ready"
@@ -232,7 +278,7 @@ def test_job_manager_cleans_workspace_after_ingest_when_configured(
     def _fake_get_repo_query_status(repo_id, listed_in_catalog):
         assert repo_id == "repo-ready"
         assert listed_in_catalog is True
-        assert not (_Settings.workspace_path / repo_id).exists()
+        assert not (settings.workspace_path / repo_id).exists()
         return {
             "repo_id": repo_id,
             "listed_in_catalog": listed_in_catalog,
@@ -258,7 +304,7 @@ def test_job_manager_cleans_workspace_after_ingest_when_configured(
 
     assert job is not None
     assert job.status == JobStatus.completed
-    assert not (_Settings.workspace_path / "repo-ready").exists()
+    assert not (settings.workspace_path / "repo-ready").exists()
     assert job.diagnostics["workspace_retained"] is False
     assert job.diagnostics["workspace_cleanup_attempted"] is True
     assert job.diagnostics["workspace_cleanup_succeeded"] is True
@@ -267,29 +313,17 @@ def test_job_manager_cleans_workspace_after_ingest_when_configured(
 
 def test_job_manager_forwards_provider_and_token_to_pipeline(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
+    sync_thread_class,
 ) -> None:
     """Propaga provider/token para que pipeline decida estrategia de autenticación."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(module)
     manager = JobManager()
 
-    class _SyncThread:
-        def __init__(self, target, args, daemon):
-            self._target = target
-            self._args = args
-
-        def start(self) -> None:
-            self._target(*self._args)
-
-    monkeypatch.setattr(module, "Thread", _SyncThread)
+    monkeypatch.setattr(module, "Thread", sync_thread_class)
 
     import coderag.ingestion.pipeline as pipeline_module
     import coderag.core.storage_health as health_module
@@ -335,18 +369,13 @@ def test_job_manager_forwards_provider_and_token_to_pipeline(
 
 def test_job_manager_recovers_interrupted_running_jobs(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
 ) -> None:
     """Convierte jobs running heredados en failed al reiniciar API."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(module)
 
     first_manager = JobManager()
     orphan = JobInfo(
@@ -372,18 +401,13 @@ def test_job_manager_recovers_interrupted_running_jobs(
 
 def test_job_manager_lists_repos_from_metadata_without_workspace_clone(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
 ) -> None:
     """Mantiene el repo visible en catálogo aunque el workspace ya no exista."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    settings = patch_module_settings(module)
     manager = JobManager()
 
     manager.store.upsert_repo_runtime(
@@ -391,7 +415,7 @@ def test_job_manager_lists_repos_from_metadata_without_workspace_clone(
         organization="acme",
         repo_url="https://github.com/acme/ready.git",
         branch="main",
-        local_path=str(_Settings.workspace_path / "repo-ready"),
+        local_path=str(settings.workspace_path / "repo-ready"),
         embedding_provider="vertex",
         embedding_model="text-embedding-005",
     )
@@ -409,20 +433,17 @@ def test_job_manager_lists_repos_from_metadata_without_workspace_clone(
 
 def test_job_manager_enqueues_job_when_rq_mode_enabled(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
 ) -> None:
     """Encola jobs en backend RQ cuando el modo de ejecución lo requiere."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-        ingestion_execution_mode = "rq"
-        redis_url = "redis://localhost:6379/0"
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        module,
+        ingestion_execution_mode="rq",
+        redis_url="redis://localhost:6379/0",
+    )
     manager = JobManager()
 
     called: dict[str, str] = {}
@@ -449,20 +470,17 @@ def test_job_manager_enqueues_job_when_rq_mode_enabled(
 
 def test_job_manager_get_job_prefers_store_in_rq_mode(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
 ) -> None:
     """En modo RQ, get_job debe reflejar estado persistido y no caché obsoleta."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-        ingestion_execution_mode = "rq"
-        redis_url = "redis://localhost:6379/0"
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        module,
+        ingestion_execution_mode="rq",
+        redis_url="redis://localhost:6379/0",
+    )
     manager = JobManager()
 
     job = JobInfo(id=str(uuid4()), status=JobStatus.queued)
@@ -478,20 +496,17 @@ def test_job_manager_get_job_prefers_store_in_rq_mode(
 
 def test_job_manager_rejects_duplicate_active_repo_ingest(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
 ) -> None:
     """Evita crear una segunda ingesta activa para el mismo repo_id."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-        ingestion_execution_mode = "rq"
-        redis_url = "redis://localhost:6379/0"
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        module,
+        ingestion_execution_mode="rq",
+        redis_url="redis://localhost:6379/0",
+    )
     manager = JobManager()
 
     first = JobInfo(
@@ -516,20 +531,17 @@ def test_job_manager_rejects_duplicate_active_repo_ingest(
 
 def test_job_manager_uses_repo_lock_in_rq_mode(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
 ) -> None:
     """En modo RQ debe envolver creación en lock distribuido por repo."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-        ingestion_execution_mode = "rq"
-        redis_url = "redis://localhost:6379/0"
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        module,
+        ingestion_execution_mode="rq",
+        redis_url="redis://localhost:6379/0",
+    )
     manager = JobManager()
 
     captured: dict[str, str] = {}
@@ -556,19 +568,13 @@ def test_job_manager_uses_repo_lock_in_rq_mode(
 
 def test_run_ingest_job_task_raises_when_final_status_is_failed(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
 ) -> None:
     """Debe propagar error para que RQ aplique política de reintentos."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-        ingestion_retry_transient_only = True
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(module, ingestion_retry_transient_only=True)
 
     def _fake_execute(*, job, request, store, workspace_path):
         del request, store, workspace_path
@@ -591,19 +597,13 @@ def test_run_ingest_job_task_raises_when_final_status_is_failed(
 
 def test_run_ingest_job_task_does_not_raise_for_non_retryable_failure(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
 ) -> None:
     """Con retry transitorio, no relanza errores permanentes."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-        ingestion_retry_transient_only = True
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(module, ingestion_retry_transient_only=True)
 
     def _fake_execute(*, job, request, store, workspace_path):
         del request, store, workspace_path
@@ -625,19 +625,13 @@ def test_run_ingest_job_task_does_not_raise_for_non_retryable_failure(
 
 def test_run_ingest_job_task_raises_when_retry_all_enabled(
     monkeypatch,
-    tmp_path,
+    patch_module_settings,
 ) -> None:
     """Con retry-all habilitado, cualquier fallo debe relanzarse."""
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-        ingestion_retry_transient_only = False
-
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
-
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    patch_module_settings(module, ingestion_retry_transient_only=False)
 
     def _fake_execute(*, job, request, store, workspace_path):
         del request, store, workspace_path

@@ -500,6 +500,12 @@ class RepoQueryStatusResponse(BaseModel):
             "puede representar BM25 local o corpus léxico en Postgres."
         )
     )
+    lexical_loaded: bool = Field(
+        description=(
+            "Indicador neutral del readiness léxico del repo, independiente "
+            "de si el backend activo es BM25 local o LexicalStore en Postgres."
+        )
+    )
     graph_available: bool | None = Field(default=None, description="Disponibilidad de grafo para el repo (si pudo evaluarse).")
     last_embedding_provider: str | None = Field(
         default=None,

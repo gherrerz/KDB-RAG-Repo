@@ -9,9 +9,32 @@ from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
 from coderag.ingestion import pipeline
 
 
+def _patch_pipeline_settings(
+    patch_module_settings,
+    tmp_path: Path,
+    **overrides: object,
+) -> object:
+    """Aplica settings de prueba comunes para orquestación de ingesta."""
+    defaults = {
+        "workspace_path": tmp_path,
+        "scan_max_file_size_bytes": 12345,
+        "scan_excluded_dirs": ".git,node_modules",
+        "scan_excluded_extensions": ".png,.zip",
+        "scan_excluded_files": ".gitignore,.env",
+        "git_ssh_key_content": "",
+        "git_ssh_key_content_b64": "",
+        "git_ssh_known_hosts_content": "",
+        "git_ssh_known_hosts_content_b64": "",
+        "git_ssh_strict_host_key_checking": "yes",
+    }
+    defaults.update(overrides)
+    return patch_module_settings(pipeline, **defaults)
+
+
 def test_ingest_repository_continues_on_graph_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    patch_module_settings,
 ) -> None:
     """La canalización registra una advertencia y se completa incluso cuando falla la indexación de Neo4j."""
     scanned = [ScannedFile(path="a.py", language="python", content="def a():\n pass")]
@@ -28,13 +51,6 @@ def test_ingest_repository_continues_on_graph_failure(
             snippet="def a():\n pass",
         )
     ]
-
-    class _Settings:
-        workspace_path = tmp_path
-        scan_max_file_size_bytes = 12345
-        scan_excluded_dirs = ".git,node_modules"
-        scan_excluded_extensions = ".png,.zip"
-        scan_excluded_files = ".gitignore,.env"
 
     received_scan_args: dict[str, object] = {}
 
@@ -60,7 +76,14 @@ def test_ingest_repository_continues_on_graph_failure(
             "excluded_decode": 0,
         }
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        pipeline,
+        workspace_path=tmp_path,
+        scan_max_file_size_bytes=12345,
+        scan_excluded_dirs=".git,node_modules",
+        scan_excluded_extensions=".png,.zip",
+        scan_excluded_files=".gitignore,.env",
+    )
     monkeypatch.setattr(
         pipeline,
         "clone_repository",
@@ -132,6 +155,7 @@ def test_ingest_repository_continues_on_graph_failure(
 def test_ingest_repository_purges_existing_repo_before_reindex(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    patch_module_settings,
 ) -> None:
     """Ejecuta purge por repo_id antes de indexar cuando detecta datos previos."""
     scanned = [ScannedFile(path="a.py", language="python", content="def a():\n pass")]
@@ -149,16 +173,16 @@ def test_ingest_repository_purges_existing_repo_before_reindex(
         )
     ]
 
-    class _Settings:
-        workspace_path = tmp_path
-        scan_max_file_size_bytes = 12345
-        scan_excluded_dirs = ".git,node_modules"
-        scan_excluded_extensions = ".png,.zip"
-        scan_excluded_files = ".gitignore,.env"
-
     call_order: list[str] = []
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    patch_module_settings(
+        pipeline,
+        workspace_path=tmp_path,
+        scan_max_file_size_bytes=12345,
+        scan_excluded_dirs=".git,node_modules",
+        scan_excluded_extensions=".png,.zip",
+        scan_excluded_files=".gitignore,.env",
+    )
     monkeypatch.setattr(
         pipeline,
         "clone_repository",
@@ -231,9 +255,150 @@ def test_ingest_repository_purges_existing_repo_before_reindex(
     assert any("Observabilidad símbolos:" in item for item in logs)
 
 
+def test_repo_has_existing_index_data_uses_active_lexical_helper(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    patch_module_settings,
+) -> None:
+    """Consulta el backend léxico activo a través del helper compartido."""
+
+    class FakeChromaIndex:
+        def count_by_repo_id(self, collection_name: str, repo_id: str) -> int:
+            del collection_name, repo_id
+            return 0
+
+    class FakeGraphBuilder:
+        def has_repo_data(self, repo_id: str) -> bool:
+            del repo_id
+            return False
+
+        def close(self) -> None:
+            return None
+
+    _patch_pipeline_settings(patch_module_settings, tmp_path)
+    monkeypatch.setattr(
+        pipeline,
+        "build_managed_vector_index",
+        lambda: FakeChromaIndex(),
+    )
+    monkeypatch.setattr(pipeline, "GraphBuilder", FakeGraphBuilder)
+
+    captured: dict[str, str] = {}
+
+    def _fake_repository_has_active_lexical_data(
+        settings: object,
+        repo_id: str,
+    ) -> bool:
+        del settings
+        captured["repo_id"] = repo_id
+        return True
+
+    monkeypatch.setattr(
+        pipeline,
+        "repository_has_active_lexical_data",
+        _fake_repository_has_active_lexical_data,
+    )
+
+    assert pipeline._repo_has_existing_index_data("r1", lambda message: None) is True
+    assert captured["repo_id"] == "r1"
+
+
+def test_purge_repo_indices_formats_bm25_counts_from_active_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    patch_module_settings,
+) -> None:
+    """Reporta conteos BM25 cuando ese es el backend léxico activo."""
+
+    class FakeChromaIndex:
+        def delete_by_repo_id(self, repo_id: str) -> dict[str, int]:
+            del repo_id
+            return {"total": 5}
+
+    class FakeGraphBuilder:
+        def delete_repo_subgraph(self, repo_id: str) -> int:
+            del repo_id
+            return 4
+
+        def close(self) -> None:
+            return None
+
+    _patch_pipeline_settings(patch_module_settings, tmp_path)
+    monkeypatch.setattr(
+        pipeline,
+        "build_managed_vector_index",
+        lambda: FakeChromaIndex(),
+    )
+    monkeypatch.setattr(pipeline, "GraphBuilder", FakeGraphBuilder)
+    monkeypatch.setattr(
+        pipeline,
+        "delete_active_repository_lexical_data",
+        lambda settings, repo_id: {"docs_removed": 2, "snapshot_removed": 1},
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "repository_lexical_backend_label",
+        lambda settings: "bm25",
+    )
+
+    logs: list[str] = []
+    pipeline._purge_repo_indices("r1", logs.append)
+
+    assert "bm25_docs=2, bm25_snapshot=1" in logs[0]
+    assert "chroma_total=5" in logs[0]
+    assert "neo4j_nodes=4" in logs[0]
+
+
+def test_purge_repo_indices_formats_lexical_counts_from_active_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    patch_module_settings,
+) -> None:
+    """Reporta conteos LexicalStore cuando ese es el backend activo."""
+
+    class FakeChromaIndex:
+        def delete_by_repo_id(self, repo_id: str) -> dict[str, int]:
+            del repo_id
+            return {"total": 1}
+
+    class FakeGraphBuilder:
+        def delete_repo_subgraph(self, repo_id: str) -> int:
+            del repo_id
+            return 2
+
+        def close(self) -> None:
+            return None
+
+    _patch_pipeline_settings(patch_module_settings, tmp_path)
+    monkeypatch.setattr(
+        pipeline,
+        "build_managed_vector_index",
+        lambda: FakeChromaIndex(),
+    )
+    monkeypatch.setattr(pipeline, "GraphBuilder", FakeGraphBuilder)
+    monkeypatch.setattr(
+        pipeline,
+        "delete_active_repository_lexical_data",
+        lambda settings, repo_id: {"docs_removed": 3},
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "repository_lexical_backend_label",
+        lambda settings: "lexical",
+    )
+
+    logs: list[str] = []
+    pipeline._purge_repo_indices("r1", logs.append)
+
+    assert "lexical_docs=3" in logs[0]
+    assert "chroma_total=1" in logs[0]
+    assert "neo4j_nodes=2" in logs[0]
+
+
 def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    patch_module_settings,
 ) -> None:
     """Propaga configuración SSH de runtime al clonador para repos privados."""
     scanned = [ScannedFile(path="a.py", language="python", content="print('ok')")]
@@ -250,18 +415,6 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
             snippet="print('ok')",
         )
     ]
-
-    class _Settings:
-        workspace_path = tmp_path
-        scan_max_file_size_bytes = 12345
-        scan_excluded_dirs = ".git,node_modules"
-        scan_excluded_extensions = ".png,.zip"
-        scan_excluded_files = ".gitignore,.env"
-        git_ssh_key_content = "PRIVATE KEY FROM ENV"
-        git_ssh_key_content_b64 = ""
-        git_ssh_known_hosts_content = "bitbucket.example ssh-ed25519 AAAA"
-        git_ssh_known_hosts_content_b64 = ""
-        git_ssh_strict_host_key_checking = "yes"
 
     captured: dict[str, object] = {}
 
@@ -293,7 +446,12 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
         captured["ssh_strict_host_key_checking"] = ssh_strict_host_key_checking
         return "r1", tmp_path
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        git_ssh_key_content="PRIVATE KEY FROM ENV",
+        git_ssh_known_hosts_content="bitbucket.example ssh-ed25519 AAAA",
+    )
     monkeypatch.setattr(pipeline, "clone_repository", _fake_clone)
     monkeypatch.setattr(
         pipeline,
@@ -363,6 +521,7 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
 def test_ingest_repository_forwards_explicit_auth_payload_to_clone(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    patch_module_settings,
 ) -> None:
     """Pasa el bloque auth explícito al clonador para HTTPS Bitbucket."""
     scanned = [ScannedFile(path="a.py", language="python", content="print('ok')")]
@@ -379,18 +538,6 @@ def test_ingest_repository_forwards_explicit_auth_payload_to_clone(
             snippet="print('ok')",
         )
     ]
-
-    class _Settings:
-        workspace_path = tmp_path
-        scan_max_file_size_bytes = 12345
-        scan_excluded_dirs = ".git,node_modules"
-        scan_excluded_extensions = ".png,.zip"
-        scan_excluded_files = ".gitignore,.env"
-        git_ssh_key_content = ""
-        git_ssh_key_content_b64 = ""
-        git_ssh_known_hosts_content = ""
-        git_ssh_known_hosts_content_b64 = ""
-        git_ssh_strict_host_key_checking = "yes"
 
     captured: dict[str, object] = {}
 
@@ -413,7 +560,7 @@ def test_ingest_repository_forwards_explicit_auth_payload_to_clone(
         captured["auth"] = auth
         return "r1", tmp_path
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(patch_module_settings, tmp_path)
     monkeypatch.setattr(pipeline, "clone_repository", _fake_clone)
     monkeypatch.setattr(
         pipeline,
@@ -483,6 +630,8 @@ def test_ingest_repository_forwards_explicit_auth_payload_to_clone(
 
 def test_index_graph_adds_semantic_relations_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Incluye relaciones semánticas cuando el flag está habilitado."""
     scanned = [ScannedFile(path="a.py", language="python", content="def a():\n pass")]
@@ -502,9 +651,6 @@ def test_index_graph_adds_semantic_relations_when_enabled(
     captured: dict[str, object] = {}
     diagnostics: dict[str, object] = {}
 
-    class _Settings:
-        semantic_graph_enabled = True
-
     class _FakeGraphBuilder:
         def upsert_repo_graph(
             self,
@@ -520,7 +666,11 @@ def test_index_graph_adds_semantic_relations_when_enabled(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+    )
     monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
     monkeypatch.setattr(
         pipeline,
@@ -567,6 +717,8 @@ def test_index_graph_adds_semantic_relations_when_enabled(
 
 def test_index_graph_falls_back_when_semantic_extraction_fails(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Si falla extracción semántica, conserva indexación estructural."""
     scanned = [ScannedFile(path="a.py", language="python", content="def a():\n pass")]
@@ -586,9 +738,6 @@ def test_index_graph_falls_back_when_semantic_extraction_fails(
     captured: dict[str, object] = {}
     diagnostics: dict[str, object] = {}
 
-    class _Settings:
-        semantic_graph_enabled = True
-
     class _FakeGraphBuilder:
         def upsert_repo_graph(
             self,
@@ -603,7 +752,11 @@ def test_index_graph_falls_back_when_semantic_extraction_fails(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+    )
     monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
 
     def _raise_semantic_error(*args, **kwargs):
@@ -636,6 +789,8 @@ def test_index_graph_falls_back_when_semantic_extraction_fails(
 
 def test_index_graph_runs_java_semantics_only_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Ejecuta extractor Java solo cuando el flag dedicado está activo."""
     scanned = [
@@ -659,14 +814,6 @@ def test_index_graph_runs_java_semantics_only_when_enabled(
         )
     ]
     diagnostics: dict[str, object] = {}
-
-    class _SettingsDisabled:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = False
-
-    class _SettingsEnabled:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = True
 
     class _FakeGraphBuilder:
         def upsert_repo_graph(
@@ -697,7 +844,12 @@ def test_index_graph_runs_java_semantics_only_when_enabled(
         "extract_java_semantic_relations",
         _raise_if_called,
     )
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _SettingsDisabled())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+    )
     pipeline._index_graph(
         repo_id="rj",
         scanned_files=scanned,
@@ -705,7 +857,12 @@ def test_index_graph_runs_java_semantics_only_when_enabled(
         diagnostics_sink=diagnostics,
     )
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _SettingsEnabled())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=True,
+    )
     monkeypatch.setattr(
         pipeline,
         "extract_java_semantic_relations",
@@ -742,6 +899,8 @@ def test_index_graph_runs_java_semantics_only_when_enabled(
 
 def test_index_graph_reports_java_cross_file_resolved_count(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Cuenta relaciones Java resueltas hacia símbolos en archivos distintos."""
     scanned = [
@@ -774,10 +933,6 @@ def test_index_graph_reports_java_cross_file_resolved_count(
     ]
     diagnostics: dict[str, object] = {}
 
-    class _Settings:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = True
-
     class _FakeGraphBuilder:
         def upsert_repo_graph(
             self,
@@ -792,7 +947,12 @@ def test_index_graph_reports_java_cross_file_resolved_count(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=True,
+    )
     monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
     monkeypatch.setattr(
         pipeline,
@@ -834,6 +994,8 @@ def test_index_graph_reports_java_cross_file_resolved_count(
 
 def test_index_graph_reports_java_resolution_source_counts(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Incluye desglose de origen de resolución Java en diagnostics."""
     scanned = [ScannedFile(path="src/A.java", language="java", content="class A {}")]
@@ -852,10 +1014,6 @@ def test_index_graph_reports_java_resolution_source_counts(
     ]
     diagnostics: dict[str, object] = {}
 
-    class _Settings:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = True
-
     class _FakeGraphBuilder:
         def upsert_repo_graph(
             self,
@@ -870,7 +1028,12 @@ def test_index_graph_reports_java_resolution_source_counts(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=True,
+    )
     monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
     monkeypatch.setattr(
         pipeline,
@@ -909,6 +1072,8 @@ def test_index_graph_reports_java_resolution_source_counts(
 
 def test_index_graph_reports_python_resolution_source_counts(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Incluye desglose de origen de resolución Python en diagnostics."""
     scanned = [ScannedFile(path="src/a.py", language="python", content="def a():\n    pass")]
@@ -926,12 +1091,6 @@ def test_index_graph_reports_python_resolution_source_counts(
         )
     ]
     diagnostics: dict[str, object] = {}
-
-    class _Settings:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = False
-        semantic_graph_javascript_enabled = False
-        semantic_graph_typescript_enabled = False
 
     class _FakeGraphBuilder:
         def upsert_repo_graph(
@@ -958,7 +1117,14 @@ def test_index_graph_reports_python_resolution_source_counts(
             resolution_stats_sink.update({"alias": 2, "local": 1})
         return []
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=False,
+        semantic_graph_typescript_enabled=False,
+    )
     monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
     monkeypatch.setattr(
         pipeline,
@@ -996,6 +1162,8 @@ def test_index_graph_reports_python_resolution_source_counts(
 
 def test_index_graph_reports_python_top_level_file_import_counts(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Incluye conteos de imports top-level Python a nivel archivo."""
     scanned = [
@@ -1019,12 +1187,6 @@ def test_index_graph_reports_python_top_level_file_import_counts(
         )
     ]
     diagnostics: dict[str, object] = {}
-
-    class _Settings:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = False
-        semantic_graph_javascript_enabled = False
-        semantic_graph_typescript_enabled = False
 
     class _FakeGraphBuilder:
         def upsert_repo_graph(
@@ -1075,7 +1237,14 @@ def test_index_graph_reports_python_top_level_file_import_counts(
             )
         return []
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=False,
+        semantic_graph_typescript_enabled=False,
+    )
     monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
     monkeypatch.setattr(
         pipeline,
@@ -1118,6 +1287,8 @@ def test_index_graph_reports_python_top_level_file_import_counts(
 
 def test_index_graph_runs_typescript_semantics_only_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Ejecuta extractor TypeScript solo cuando el flag dedicado está activo."""
     scanned = [
@@ -1141,16 +1312,6 @@ def test_index_graph_runs_typescript_semantics_only_when_enabled(
         )
     ]
     diagnostics: dict[str, object] = {}
-
-    class _SettingsDisabled:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = False
-        semantic_graph_typescript_enabled = False
-
-    class _SettingsEnabled:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = False
-        semantic_graph_typescript_enabled = True
 
     class _FakeGraphBuilder:
         def upsert_repo_graph(
@@ -1186,7 +1347,13 @@ def test_index_graph_runs_typescript_semantics_only_when_enabled(
         "extract_typescript_semantic_relations",
         _raise_if_called,
     )
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _SettingsDisabled())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_typescript_enabled=False,
+    )
     pipeline._index_graph(
         repo_id="rt",
         scanned_files=scanned,
@@ -1194,7 +1361,13 @@ def test_index_graph_runs_typescript_semantics_only_when_enabled(
         diagnostics_sink=diagnostics,
     )
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _SettingsEnabled())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_typescript_enabled=True,
+    )
     monkeypatch.setattr(
         pipeline,
         "extract_typescript_semantic_relations",
@@ -1230,6 +1403,8 @@ def test_index_graph_runs_typescript_semantics_only_when_enabled(
 
 def test_index_graph_reports_typescript_cross_file_resolved_count(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Cuenta relaciones TypeScript resueltas hacia símbolos en archivos distintos."""
     scanned = [
@@ -1262,12 +1437,6 @@ def test_index_graph_reports_typescript_cross_file_resolved_count(
     ]
     diagnostics: dict[str, object] = {}
 
-    class _Settings:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = False
-        semantic_graph_javascript_enabled = False
-        semantic_graph_typescript_enabled = True
-
     class _FakeGraphBuilder:
         def upsert_repo_graph(
             self,
@@ -1282,7 +1451,14 @@ def test_index_graph_reports_typescript_cross_file_resolved_count(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=False,
+        semantic_graph_typescript_enabled=True,
+    )
     monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
     monkeypatch.setattr(
         pipeline,
@@ -1330,6 +1506,8 @@ def test_index_graph_reports_typescript_cross_file_resolved_count(
 
 def test_index_graph_runs_javascript_semantics_only_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Ejecuta extractor JavaScript solo cuando el flag dedicado está activo."""
     scanned = [
@@ -1353,18 +1531,6 @@ def test_index_graph_runs_javascript_semantics_only_when_enabled(
         )
     ]
     diagnostics: dict[str, object] = {}
-
-    class _SettingsDisabled:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = False
-        semantic_graph_javascript_enabled = False
-        semantic_graph_typescript_enabled = False
-
-    class _SettingsEnabled:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = False
-        semantic_graph_javascript_enabled = True
-        semantic_graph_typescript_enabled = False
 
     class _FakeGraphBuilder:
         def upsert_repo_graph(
@@ -1405,7 +1571,14 @@ def test_index_graph_runs_javascript_semantics_only_when_enabled(
         "extract_javascript_semantic_relations",
         _raise_if_called,
     )
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _SettingsDisabled())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=False,
+        semantic_graph_typescript_enabled=False,
+    )
     pipeline._index_graph(
         repo_id="rj",
         scanned_files=scanned,
@@ -1424,7 +1597,14 @@ def test_index_graph_runs_javascript_semantics_only_when_enabled(
         "extract_javascript_semantic_relations",
         _fake_extract_javascript,
     )
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _SettingsEnabled())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=True,
+        semantic_graph_typescript_enabled=False,
+    )
     pipeline._index_graph(
         repo_id="rj",
         scanned_files=scanned,
@@ -1437,6 +1617,8 @@ def test_index_graph_runs_javascript_semantics_only_when_enabled(
 
 def test_index_graph_reports_javascript_cross_file_resolved_count(
     monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
 ) -> None:
     """Cuenta relaciones JavaScript resueltas hacia símbolos en archivos distintos."""
     scanned = [
@@ -1469,12 +1651,6 @@ def test_index_graph_reports_javascript_cross_file_resolved_count(
     ]
     diagnostics: dict[str, object] = {}
 
-    class _Settings:
-        semantic_graph_enabled = True
-        semantic_graph_java_enabled = False
-        semantic_graph_javascript_enabled = True
-        semantic_graph_typescript_enabled = False
-
     class _FakeGraphBuilder:
         def upsert_repo_graph(
             self,
@@ -1489,7 +1665,14 @@ def test_index_graph_reports_javascript_cross_file_resolved_count(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=True,
+        semantic_graph_typescript_enabled=False,
+    )
     monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
     monkeypatch.setattr(
         pipeline,
@@ -1538,17 +1721,11 @@ def test_index_graph_reports_javascript_cross_file_resolved_count(
 def test_ingest_repository_fails_when_purge_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    patch_module_settings,
 ) -> None:
     """Aborta la ingesta si el purge previo falla para evitar índices mezclados."""
 
-    class _Settings:
-        workspace_path = tmp_path
-        scan_max_file_size_bytes = 12345
-        scan_excluded_dirs = ".git,node_modules"
-        scan_excluded_extensions = ".png,.zip"
-        scan_excluded_files = ".gitignore,.env"
-
-    monkeypatch.setattr(pipeline, "get_settings", lambda: _Settings())
+    _patch_pipeline_settings(patch_module_settings, tmp_path)
     monkeypatch.setattr(
         pipeline,
         "clone_repository",
@@ -1580,3 +1757,5 @@ def test_ingest_repository_fails_when_purge_fails(
         )
 
     assert "No se pudo limpiar la data indexada previa" in str(exc_info.value)
+
+

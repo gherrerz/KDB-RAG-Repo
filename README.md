@@ -251,6 +251,9 @@ Atajo de diagnostico:
 - Readiness por repo: GET /repos/{repo_id}/status
 - Salud de storage: GET /health
 
+Nota de contrato: el endpoint de readiness expone `lexical_loaded` como señal
+neutral de la capa léxica activa y mantiene `bm25_loaded` como alias legacy.
+
 ## Comandos por Journey
 
 Consulta con LLM:

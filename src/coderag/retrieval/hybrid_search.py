@@ -4,10 +4,16 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 import logging
 import re
+from typing import Any
 import unicodedata
 
+from coderag.core.lexical_index import (
+    build_repository_lexical_index,
+    ensure_repository_lexical_index_loaded,
+)
 from coderag.core.models import RetrievalChunk
-from coderag.core.settings import get_settings, resolve_postgres_dsn
+from coderag.core.settings import get_settings
+from coderag.core.vector_index import build_managed_vector_index
 from coderag.ingestion.embedding import EmbeddingClient
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import ChromaIndex
@@ -165,7 +171,7 @@ def _identifier_query_score_adjustment(query: str, chunk: RetrievalChunk) -> flo
 
 
 def _query_collection(
-    chroma: ChromaIndex,
+    chroma: Any,
     collection_name: str,
     query_embedding: list[float],
     repo_id: str,
@@ -192,7 +198,7 @@ def _vector_results_empty(results: list[dict]) -> bool:
 
 def _run_vector_search(
     *,
-    chroma: ChromaIndex,
+    chroma: Any,
     query_embedding: list[float],
     repo_id: str,
     candidate_top_n: int,
@@ -285,7 +291,7 @@ def hybrid_search(
         )
 
     if query_embedding is not None:
-        chroma = ChromaIndex()
+        chroma = build_managed_vector_index()
         vector_results = _run_vector_search(
             chroma=chroma,
             query_embedding=query_embedding,
@@ -294,7 +300,7 @@ def hybrid_search(
         )
         if _vector_results_empty(vector_results) and GLOBAL_BM25.ensure_repo_loaded(repo_id):
             ChromaIndex.reset_shared_state()
-            chroma = ChromaIndex()
+            chroma = build_managed_vector_index()
             vector_results = _run_vector_search(
                 chroma=chroma,
                 query_embedding=query_embedding,
@@ -328,20 +334,13 @@ def hybrid_search(
             )
 
     settings = get_settings()
-    postgres_dsn = resolve_postgres_dsn(settings)
-
-    if postgres_dsn:
-        from coderag.storage.lexical_store import LexicalStore
-        lexical_results = LexicalStore(
-            postgres_dsn, settings.lexical_fts_language
-        ).query(repo_id=repo_id, text=normalized_query, top_n=candidate_top_n)
-    else:
-        GLOBAL_BM25.ensure_repo_loaded(repo_id)
-        lexical_results = GLOBAL_BM25.query(
-            repo_id=repo_id,
-            text=normalized_query,
-            top_n=candidate_top_n,
-        )
+    lexical_index = build_repository_lexical_index(settings)
+    ensure_repository_lexical_index_loaded(lexical_index, repo_id)
+    lexical_results = lexical_index.query(
+        repo_id=repo_id,
+        text=normalized_query,
+        top_n=candidate_top_n,
+    )
 
     max_lexical_score = max(
         (float(item["score"]) for item in lexical_results), default=0.0
