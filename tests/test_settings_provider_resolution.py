@@ -161,7 +161,7 @@ def test_chroma_remote_auth_rejects_password_without_username() -> None:
 
 def test_postgres_dsn_is_empty_without_host() -> None:
     """Deshabilita Postgres cuando no hay host configurado."""
-    settings = Settings(_env_file=None)
+    settings = Settings(POSTGRES_HOST="", _env_file=None)
 
     assert settings.resolve_postgres_dsn() == ""
 

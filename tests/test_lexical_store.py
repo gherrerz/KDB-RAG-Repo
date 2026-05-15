@@ -18,9 +18,11 @@ from coderag.storage.postgres_table_names import (
 )
 
 # ---------------------------------------------------------------------------
-# Stub psycopg en sys.modules si no está disponible (entorno de dev sin Docker)
+# Stub psycopg solo si el import real no está disponible en el entorno
 # ---------------------------------------------------------------------------
-if "psycopg" not in sys.modules:
+try:
+    import psycopg  # noqa: F401
+except ModuleNotFoundError:
     _psycopg_stub = MagicMock()
     _psycopg_rows_stub = MagicMock()
     _psycopg_rows_stub.dict_row = MagicMock()

@@ -4,6 +4,7 @@ Estas pruebas requieren infraestructura real levantada. Se omiten
 automáticamente si las variables de entorno no están configuradas.
 
 Requisitos para ejecutar:
+    RUN_REMOTE_E2E=1
     POSTGRES_HOST=localhost
     POSTGRES_PORT=5432
     POSTGRES_DB=coderag
@@ -38,21 +39,34 @@ from coderag.core.settings import Settings
 
 _POSTGRES_SETTINGS = Settings(_env_file=None)
 _POSTGRES_DSN = _POSTGRES_SETTINGS.resolve_postgres_dsn()
-_CHROMA_MODE = os.environ.get("CHROMA_MODE", "embedded").strip()
+_RUN_REMOTE_E2E = os.environ.get("RUN_REMOTE_E2E", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+_CHROMA_MODE = os.environ.get("CHROMA_MODE", "remote").strip()
 _CHROMA_HOST = os.environ.get("CHROMA_HOST", "localhost").strip()
 _CHROMA_PORT = int(os.environ.get("CHROMA_PORT", "8001"))
 
 _skip_no_postgres = pytest.mark.skipif(
-    not _POSTGRES_DSN,
-    reason="Postgres no configurado — se omite el test E2E de Postgres",
+    not _RUN_REMOTE_E2E or not _POSTGRES_DSN,
+    reason=(
+        "E2E remoto deshabilitado por defecto. Configure RUN_REMOTE_E2E=1 "
+        "y Postgres para ejecutar este bloque."
+    ),
 )
 _skip_no_chroma_remote = pytest.mark.skipif(
-    _CHROMA_MODE != "remote",
-    reason="CHROMA_MODE != remote — se omite el test E2E de Chroma remoto",
+    not _RUN_REMOTE_E2E or _CHROMA_MODE != "remote",
+    reason=(
+        "E2E remoto deshabilitado por defecto o CHROMA_MODE != remote."
+    ),
 )
 _skip_e2e = pytest.mark.skipif(
-    not _POSTGRES_DSN or _CHROMA_MODE != "remote",
-    reason="Se requieren Postgres configurado y CHROMA_MODE=remote para el E2E completo",
+    not _RUN_REMOTE_E2E or not _POSTGRES_DSN or _CHROMA_MODE != "remote",
+    reason=(
+        "Se requieren RUN_REMOTE_E2E=1, Postgres configurado y "
+        "CHROMA_MODE=remote para el E2E completo"
+    ),
 )
 
 

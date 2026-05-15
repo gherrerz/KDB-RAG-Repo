@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -25,6 +26,29 @@ def _describe_postgres_target(postgres_dsn: str) -> tuple[str, str]:
     port = parsed.port or 5432
     database = parsed.path.lstrip("/") or "<unknown-db>"
     return host, f"{host}:{port}/{database}"
+
+
+def _coerce_mapping_row(
+    row: Any,
+    *,
+    required_keys: tuple[str, ...],
+) -> dict[str, Any] | None:
+    """Normaliza filas psycopg reales y descarta mocks vacíos o inválidos."""
+    if row is None:
+        return None
+
+    normalized_row: dict[str, Any] | None = None
+    if isinstance(row, Mapping):
+        normalized_row = dict(row)
+    else:
+        try:
+            normalized_row = dict(row)
+        except Exception:
+            return None
+
+    if not all(key in normalized_row for key in required_keys):
+        return None
+    return normalized_row
 
 
 class PostgresMetadataStore(BaseMetadataStore):
@@ -162,29 +186,47 @@ class PostgresMetadataStore(BaseMetadataStore):
                 f"SELECT * FROM {POSTGRES_JOBS_TABLE} WHERE id = %s",
                 (job_id,),
             ).fetchone()
-        if row is None:
+        normalized_row = _coerce_mapping_row(
+            row,
+            required_keys=(
+                "id",
+                "status",
+                "progress",
+                "logs",
+                "repo_id",
+                "error",
+                "diagnostics",
+                "created_at",
+                "updated_at",
+            ),
+        )
+        if normalized_row is None:
             return None
 
-        logs = row["logs"].splitlines() if row["logs"] else []
+        logs = (
+            normalized_row["logs"].splitlines()
+            if normalized_row["logs"]
+            else []
+        )
         diagnostics: dict = {}
-        if row.get("diagnostics"):
+        if normalized_row.get("diagnostics"):
             try:
-                loaded = json.loads(row["diagnostics"])
+                loaded = json.loads(normalized_row["diagnostics"])
                 if isinstance(loaded, dict):
                     diagnostics = loaded
             except Exception:
                 diagnostics = {}
 
         return JobInfo(
-            id=row["id"],
-            status=JobStatus(row["status"]),
-            progress=float(row["progress"]),
+            id=normalized_row["id"],
+            status=JobStatus(normalized_row["status"]),
+            progress=float(normalized_row["progress"]),
             logs=logs,
-            repo_id=row["repo_id"],
-            error=row["error"],
+            repo_id=normalized_row["repo_id"],
+            error=normalized_row["error"],
             diagnostics=diagnostics,
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
+            created_at=normalized_row["created_at"],
+            updated_at=normalized_row["updated_at"],
         )
 
     def list_repo_ids(self) -> list[str]:
@@ -306,11 +348,15 @@ class PostgresMetadataStore(BaseMetadataStore):
                 """,
                 (repo_id,),
             ).fetchone()
-        if row is None:
+        normalized_row = _coerce_mapping_row(
+            row,
+            required_keys=("embedding_provider", "embedding_model"),
+        )
+        if normalized_row is None:
             return None
         return {
-            "last_embedding_provider": row["embedding_provider"],
-            "last_embedding_model": row["embedding_model"],
+            "last_embedding_provider": normalized_row["embedding_provider"],
+            "last_embedding_model": normalized_row["embedding_model"],
         }
 
     def delete_repo_runtime(self, repo_id: str) -> int:

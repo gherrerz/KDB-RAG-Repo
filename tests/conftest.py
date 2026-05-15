@@ -1,10 +1,38 @@
 """Fixtures compartidos para reducir duplicación en la suite de pruebas."""
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+
+_RUN_REMOTE_E2E = os.environ.get("RUN_REMOTE_E2E", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
+if not _RUN_REMOTE_E2E:
+    for env_var in (
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "CHROMA_MODE",
+        "CHROMA_HOST",
+        "CHROMA_PORT",
+        "CHROMA_TOKEN",
+        "CHROMA_USERNAME",
+        "CHROMA_PASSWORD",
+        "NEO4J_URI",
+        "NEO4J_USER",
+        "NEO4J_PASSWORD",
+        "REDIS_URL",
+    ):
+        os.environ.pop(env_var, None)
 
 
 @pytest.fixture

@@ -8,6 +8,7 @@ sys.modules antes de cualquier importación del módulo bajo prueba.
 from __future__ import annotations
 
 import datetime
+import importlib
 import json
 import sys
 from unittest.mock import MagicMock, patch
@@ -15,9 +16,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Stub psycopg en sys.modules si no está instalado en el entorno de dev
+# Stub psycopg solo si el import real no está disponible en el entorno
 # ---------------------------------------------------------------------------
-if "psycopg" not in sys.modules:
+try:
+    import psycopg  # noqa: F401
+except ModuleNotFoundError:
     _psycopg_stub = MagicMock()
     _psycopg_rows_stub = MagicMock()
     _psycopg_rows_stub.dict_row = MagicMock()
@@ -110,13 +113,15 @@ class TestInitSchema:
     def test_sanitiza_error_de_conexion_postgres(self):
         """El error de conexión expone destino sin filtrar credenciales."""
         import coderag.storage.postgres_metadata_store as store_module
+        store_module = importlib.reload(store_module)
 
         dsn = "postgresql://coderag:secret@postgres:5432/coderag"
-        connect_error = store_module.psycopg.OperationalError(
-            "[Errno -2] Name or service not known"
-        )
+        def _raise_connect_error(*_args, **_kwargs):
+            raise store_module.psycopg.OperationalError(
+                "[Errno -2] Name or service not known"
+            )
 
-        with patch(_PATCH_CONNECT, side_effect=connect_error):
+        with patch(_PATCH_CONNECT, side_effect=_raise_connect_error):
             with pytest.raises(RuntimeError) as exc_info:
                 store_module.PostgresMetadataStore(dsn)
 
