@@ -122,9 +122,9 @@ class Settings(BaseSettings):
     chroma_password: str = Field(default="", alias="CHROMA_PASSWORD")
     postgres_host: str = Field(default="", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
-    postgres_db: str = Field(default="coderag", alias="POSTGRES_DB")
-    postgres_user: str = Field(default="coderag", alias="POSTGRES_USER")
-    postgres_password: str = Field(default="coderag", alias="POSTGRES_PASSWORD")
+    postgres_db: str = Field(default="", alias="POSTGRES_DB")
+    postgres_user: str = Field(default="", alias="POSTGRES_USER")
+    postgres_password: str = Field(default="", alias="POSTGRES_PASSWORD")
     postgres_pool_size: int = Field(default=5, alias="POSTGRES_POOL_SIZE")
     postgres_pool_timeout: float = Field(default=30.0, alias="POSTGRES_POOL_TIMEOUT")
     lexical_fts_language: str = Field(default="english", alias="LEXICAL_FTS_LANGUAGE")
@@ -387,10 +387,10 @@ class Settings(BaseSettings):
         if not host:
             return ""
 
-        database = (self.postgres_db or "coderag").strip() or "coderag"
-        user = quote((self.postgres_user or "coderag").strip() or "coderag", safe="")
+        database = (self.postgres_db).strip()
+        user = quote((self.postgres_user).strip(), safe="")
         password = quote(
-            (self.postgres_password or "coderag").strip() or "coderag",
+            (self.postgres_password).strip(),
             safe="",
         )
         host_part = host
@@ -716,9 +716,9 @@ def resolve_postgres_dsn(settings: object) -> str:
     """Resuelve la DSN de Postgres desde Settings reales o doubles de prueba."""
     resolver = getattr(settings, "resolve_postgres_dsn", None)
     if callable(resolver):
-        return str(resolver() or "").strip()
+        return str(resolver()).strip()
 
-    host = str(getattr(settings, "postgres_host", "") or "").strip()
+    host = str(getattr(settings, "postgres_host", "")).strip()
     if not host:
         return ""
 
@@ -726,14 +726,12 @@ def resolve_postgres_dsn(settings: object) -> str:
     if port <= 0:
         raise ValueError("POSTGRES_PORT debe ser un entero positivo.")
 
-    database = str(getattr(settings, "postgres_db", "coderag") or "coderag").strip()
-    database = database or "coderag"
-    user = str(getattr(settings, "postgres_user", "coderag") or "coderag").strip()
-    user = user or "coderag"
+    database = str(getattr(settings, "postgres_db", "")).strip()
+    user = str(getattr(settings, "postgres_user", "")).strip()
     password = str(
-        getattr(settings, "postgres_password", "coderag") or "coderag"
+        getattr(settings, "postgres_password", "") 
     ).strip()
-    password = password or "coderag"
+    password = password
 
     host_part = host
     if ":" in host and not host.startswith("["):
