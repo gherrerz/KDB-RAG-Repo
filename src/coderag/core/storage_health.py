@@ -24,7 +24,10 @@ from coderag.core.vector_index import (
 )
 from coderag.ingestion.embedding import MODEL_DIMENSIONS
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
-from coderag.ingestion.index_chroma import ChromaIndex
+from coderag.ingestion.index_chroma import (
+    ChromaIndex,
+    build_remote_chroma_error_message,
+)
 from coderag.storage.metadata_store import MetadataStore
 
 
@@ -146,6 +149,40 @@ def _error_code(component: str, message: str) -> str:
     if component == "chroma":
         if "hnsw" in lowered and "space" in lowered:
             return "chroma_hnsw_space_mismatch"
+        if (
+            "unauthorized" in lowered
+            or "forbidden" in lowered
+            or "authentication" in lowered
+            or "401" in lowered
+            or "403" in lowered
+        ):
+            return "chroma_auth_failed"
+        if "timeout" in lowered or "timed out" in lowered:
+            return "chroma_timeout"
+        if (
+            "name or service not known" in lowered
+            or "getaddrinfo" in lowered
+            or "temporary failure in name resolution" in lowered
+            or "failed to resolve" in lowered
+            or "nodename nor servname provided" in lowered
+        ):
+            return "chroma_dns_failed"
+        if (
+            "ssl" in lowered
+            or "tls" in lowered
+            or "certificate" in lowered
+            or "cert_verify_failed" in lowered
+        ):
+            return "chroma_tls_failed"
+        if (
+            "connection refused" in lowered
+            or "couldn't connect" in lowered
+            or "failed to establish a new connection" in lowered
+            or "connection error" in lowered
+            or "network is unreachable" in lowered
+            or "no route to host" in lowered
+        ):
+            return "chroma_unreachable"
         return "chroma_unavailable"
     if component == "metadata_sqlite":
         return "metadata_unavailable"
@@ -238,10 +275,24 @@ def _check_chroma() -> dict[str, Any]:
             index.client.heartbeat()
         except Exception as exc:
             raise RuntimeError(
-                f"Chroma remoto no responde en "
-                f"{settings.chroma_host}:{settings.chroma_port}: {exc}"
+                build_remote_chroma_error_message(
+                    settings,
+                    operation="heartbeat",
+                    exc=exc,
+                )
             ) from exc
-    collections = index.client.list_collections()
+    try:
+        collections = index.client.list_collections()
+    except Exception as exc:
+        if settings.chroma_mode == "remote":
+            raise RuntimeError(
+                build_remote_chroma_error_message(
+                    settings,
+                    operation="listar colecciones",
+                    exc=exc,
+                )
+            ) from exc
+        raise
     expected_space = settings.resolve_chroma_hnsw_space()
     spaces_by_collection = managed_vector_collection_spaces(index)
     mismatched_collections = sorted(

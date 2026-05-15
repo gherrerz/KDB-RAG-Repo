@@ -45,6 +45,42 @@ def test_error_code_for_neo4j_connection_refused() -> None:
     assert code == "neo4j_unreachable"
 
 
+def test_error_code_for_chroma_auth_failure() -> None:
+    """Clasifica errores de autenticación remota de Chroma."""
+    code = storage_health._error_code(
+        "chroma",
+        "401 unauthorized while opening collection",
+    )
+    assert code == "chroma_auth_failed"
+
+
+def test_error_code_for_chroma_timeout() -> None:
+    """Clasifica timeouts remotos de Chroma con código dedicado."""
+    code = storage_health._error_code(
+        "chroma",
+        "connect timeout while calling Chroma heartbeat",
+    )
+    assert code == "chroma_timeout"
+
+
+def test_error_code_for_chroma_dns_failure() -> None:
+    """Clasifica errores DNS de Chroma con código dedicado."""
+    code = storage_health._error_code(
+        "chroma",
+        "getaddrinfo failed for chroma.example.local",
+    )
+    assert code == "chroma_dns_failed"
+
+
+def test_error_code_for_chroma_connection_refused() -> None:
+    """Clasifica rechazos de conexión de Chroma con código dedicado."""
+    code = storage_health._error_code(
+        "chroma",
+        "connection refused while connecting to Chroma remote",
+    )
+    assert code == "chroma_unreachable"
+
+
 def test_ensure_storage_ready_raises_when_strict_and_unhealthy(monkeypatch) -> None:
     """Lanza excepción cuando el modo estricto detecta storage no saludable."""
 

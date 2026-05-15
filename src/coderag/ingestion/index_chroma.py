@@ -47,14 +47,73 @@ def build_remote_chroma_headers(settings: Any) -> dict[str, str]:
     return {"Authorization": auth_header}
 
 
+def describe_remote_chroma_target(settings: Any) -> str:
+    """Resume el destino remoto de Chroma sin exponer secretos."""
+    host = str(getattr(settings, "chroma_host", "") or "").strip() or "<unknown-host>"
+    port = int(getattr(settings, "chroma_port", 8000) or 8000)
+    return f"{host}:{port}"
+
+
+def describe_remote_chroma_auth_mode(settings: Any) -> str:
+    """Resume el modo de autenticación efectiva del cliente remoto."""
+    token = str(getattr(settings, "chroma_token", "") or "").strip()
+    if token:
+        return "bearer"
+
+    username = str(getattr(settings, "chroma_username", "") or "").strip()
+    password = str(getattr(settings, "chroma_password", "") or "").strip()
+    if username and password:
+        return "basic"
+    return "none"
+
+
+def build_remote_chroma_error_message(
+    settings: Any,
+    *,
+    operation: str,
+    exc: Exception,
+    collection_name: str | None = None,
+) -> str:
+    """Construye un mensaje sanitario para errores de Chroma remoto."""
+    target = describe_remote_chroma_target(settings)
+    auth_mode = describe_remote_chroma_auth_mode(settings)
+    collection_hint = (
+        f", colección={collection_name}"
+        if collection_name
+        else ""
+    )
+    host = str(getattr(settings, "chroma_host", "") or "").strip()
+    compose_hint = ""
+    if host == "chroma":
+        compose_hint = (
+            " Si usas docker-compose, el host 'chroma' solo existe "
+            "cuando el perfil 'remote' está activo."
+        )
+    return (
+        "No se pudo completar la operación de Chroma remoto "
+        f"'{operation}' en {target} "
+        f"(auth={auth_mode}{collection_hint})."
+        f"{compose_hint} Error original: {exc}"
+    )
+
+
 def build_remote_chroma_client(settings: Any | None = None) -> Any:
     """Crea un cliente HTTP de Chroma remoto con auth opcional."""
     runtime_settings = settings or get_settings()
-    return chromadb.HttpClient(
-        host=runtime_settings.chroma_host,
-        port=runtime_settings.chroma_port,
-        headers=build_remote_chroma_headers(runtime_settings),
-    )
+    try:
+        return chromadb.HttpClient(
+            host=runtime_settings.chroma_host,
+            port=runtime_settings.chroma_port,
+            headers=build_remote_chroma_headers(runtime_settings),
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            build_remote_chroma_error_message(
+                runtime_settings,
+                operation="crear cliente HTTP",
+                exc=exc,
+            )
+        ) from exc
 
 
 def _build_remote_client_key(settings: Any) -> str:
@@ -131,13 +190,24 @@ class ChromaIndex:
                         path=str(settings.chroma_path),
                         settings=ChromaSettings(anonymized_telemetry=False),
                     )
-                collections = {
-                    name: client.get_or_create_collection(
-                        name,
-                        metadata={"hnsw:space": hnsw_space},
-                    )
-                    for name in COLLECTIONS
-                }
+                collections: dict[str, Any] = {}
+                for name in COLLECTIONS:
+                    try:
+                        collections[name] = client.get_or_create_collection(
+                            name,
+                            metadata={"hnsw:space": hnsw_space},
+                        )
+                    except Exception as exc:
+                        if chroma_mode == "remote":
+                            raise RuntimeError(
+                                build_remote_chroma_error_message(
+                                    settings,
+                                    operation="abrir colección gestionada",
+                                    exc=exc,
+                                    collection_name=name,
+                                )
+                            ) from exc
+                        raise
                 self.__class__._shared_client = client
                 self.__class__._shared_collections = collections
                 self.__class__._shared_path = client_key
@@ -154,6 +224,7 @@ class ChromaIndex:
         metadatas: list[dict[str, Any]],
     ) -> None:
         """Insertar o actualizar vectores y metadatos en la colección."""
+        settings = get_settings()
         batch_size = self._max_batch_size()
         try:
             self._upsert_batched(
@@ -169,20 +240,41 @@ class ChromaIndex:
                 # Recupera referencias stale tras reset concurrente/externo.
                 self.__class__.reset_shared_state()
                 self.__init__()
-                self._upsert_batched(
-                    collection_name=collection_name,
-                    ids=ids,
-                    documents=documents,
-                    embeddings=embeddings,
-                    metadatas=metadatas,
-                    batch_size=batch_size,
-                )
+                try:
+                    self._upsert_batched(
+                        collection_name=collection_name,
+                        ids=ids,
+                        documents=documents,
+                        embeddings=embeddings,
+                        metadatas=metadatas,
+                        batch_size=batch_size,
+                    )
+                except Exception as retry_exc:
+                    if settings.chroma_mode == "remote":
+                        raise RuntimeError(
+                            build_remote_chroma_error_message(
+                                settings,
+                                operation="upsert",
+                                exc=retry_exc,
+                                collection_name=collection_name,
+                            )
+                        ) from retry_exc
+                    raise
                 return
             if not _is_dimension_mismatch_error(exc):
                 if _is_space_mismatch_error(exc):
                     raise RuntimeError(
                         "Espacio HNSW incompatible en Chroma. Verifica "
                         "CHROMA_HNSW_SPACE y recrea índices antes de reintentar."
+                    ) from exc
+                if settings.chroma_mode == "remote":
+                    raise RuntimeError(
+                        build_remote_chroma_error_message(
+                            settings,
+                            operation="upsert",
+                            exc=exc,
+                            collection_name=collection_name,
+                        )
                     ) from exc
                 raise
             raise RuntimeError(
@@ -227,6 +319,7 @@ class ChromaIndex:
         where: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Busque vectores por similitud y filtro de metadatos opcional."""
+        settings = get_settings()
         try:
             return self.collections[collection_name].query(
                 query_embeddings=[query_embedding],
@@ -237,16 +330,37 @@ class ChromaIndex:
             if _is_missing_collection_error(exc):
                 self.__class__.reset_shared_state()
                 self.__init__()
-                return self.collections[collection_name].query(
-                    query_embeddings=[query_embedding],
-                    n_results=top_n,
-                    where=where,
-                )
+                try:
+                    return self.collections[collection_name].query(
+                        query_embeddings=[query_embedding],
+                        n_results=top_n,
+                        where=where,
+                    )
+                except Exception as retry_exc:
+                    if settings.chroma_mode == "remote":
+                        raise RuntimeError(
+                            build_remote_chroma_error_message(
+                                settings,
+                                operation="query",
+                                exc=retry_exc,
+                                collection_name=collection_name,
+                            )
+                        ) from retry_exc
+                    raise
             if not _is_dimension_mismatch_error(exc):
                 if _is_space_mismatch_error(exc):
                     raise RuntimeError(
                         "Espacio HNSW incompatible en Chroma. Verifica "
                         "CHROMA_HNSW_SPACE y recrea índices antes de consultar."
+                    ) from exc
+                if settings.chroma_mode == "remote":
+                    raise RuntimeError(
+                        build_remote_chroma_error_message(
+                            settings,
+                            operation="query",
+                            exc=exc,
+                            collection_name=collection_name,
+                        )
                     ) from exc
                 raise
             return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
@@ -278,16 +392,29 @@ class ChromaIndex:
         page_size: int = 500,
     ) -> int:
         """Cuenta documentos de un repositorio en una colección Chroma."""
+        settings = get_settings()
         collection = self.collections[collection_name]
         total = 0
         offset = 0
         while True:
-            page = collection.get(
-                where={"repo_id": repo_id},
-                limit=page_size,
-                offset=offset,
-                include=[],
-            )
+            try:
+                page = collection.get(
+                    where={"repo_id": repo_id},
+                    limit=page_size,
+                    offset=offset,
+                    include=[],
+                )
+            except Exception as exc:
+                if settings.chroma_mode == "remote":
+                    raise RuntimeError(
+                        build_remote_chroma_error_message(
+                            settings,
+                            operation="contar documentos por repo_id",
+                            exc=exc,
+                            collection_name=collection_name,
+                        )
+                    ) from exc
+                raise
             ids = page.get("ids") or []
             page_count = len(ids)
             total += page_count
@@ -301,6 +428,7 @@ class ChromaIndex:
         repo_id: str,
     ) -> dict[str, int]:
         """Elimina documentos de todas las colecciones por repo_id y retorna conteos."""
+        settings = get_settings()
         batch_size = self._max_batch_size()
         deleted_by_collection: dict[str, int] = {}
 
@@ -309,16 +437,40 @@ class ChromaIndex:
             deleted_total = 0
 
             while True:
-                page = collection.get(
-                    where={"repo_id": repo_id},
-                    limit=batch_size,
-                    offset=0,
-                    include=[],
-                )
+                try:
+                    page = collection.get(
+                        where={"repo_id": repo_id},
+                        limit=batch_size,
+                        offset=0,
+                        include=[],
+                    )
+                except Exception as exc:
+                    if settings.chroma_mode == "remote":
+                        raise RuntimeError(
+                            build_remote_chroma_error_message(
+                                settings,
+                                operation="listar documentos para delete_by_repo_id",
+                                exc=exc,
+                                collection_name=collection_name,
+                            )
+                        ) from exc
+                    raise
                 ids = page.get("ids") or []
                 if not ids:
                     break
-                collection.delete(ids=ids)
+                try:
+                    collection.delete(ids=ids)
+                except Exception as exc:
+                    if settings.chroma_mode == "remote":
+                        raise RuntimeError(
+                            build_remote_chroma_error_message(
+                                settings,
+                                operation="delete_by_repo_id",
+                                exc=exc,
+                                collection_name=collection_name,
+                            )
+                        ) from exc
+                    raise
                 deleted_total += len(ids)
 
             deleted_by_collection[collection_name] = deleted_total

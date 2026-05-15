@@ -160,6 +160,46 @@ def test_reset_managed_vector_storage_remote_deletes_managed_collections(
     assert deleted == COLLECTIONS
 
 
+def test_reset_managed_vector_storage_remote_returns_sanitized_warning(
+    monkeypatch,
+) -> None:
+    """En modo remoto retorna warning con destino y auth mode cuando falla reset."""
+
+    class FailingRemoteClient:
+        def delete_collection(self, collection_name: str) -> None:
+            del collection_name
+            raise RuntimeError("401 unauthorized")
+
+    monkeypatch.setattr(
+        "coderag.core.vector_index.build_remote_chroma_client",
+        lambda settings: FailingRemoteClient(),
+    )
+    monkeypatch.setattr(
+        ChromaIndex,
+        "reset_shared_state",
+        classmethod(lambda cls: None),
+    )
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="",
+        chroma_username="svc-user",
+        chroma_password="svc-pass",
+    )
+
+    reset_done, warnings = reset_managed_vector_storage(settings)
+
+    assert reset_done is False
+    assert len(warnings) == 1
+    assert "eliminar colección" in warnings[0]
+    assert "chroma.example.local:8443" in warnings[0]
+    assert "auth=basic" in warnings[0]
+    assert "colección=code_symbols" in warnings[0]
+    assert "svc-pass" not in warnings[0]
+
+
 def test_reset_managed_vector_storage_local_recreates_embedded_path(
     monkeypatch,
     tmp_path: Path,

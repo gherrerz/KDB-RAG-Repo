@@ -237,6 +237,132 @@ def test_remote_client_uses_basic_auth_header(
     }
 
 
+def test_remote_client_wraps_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Envuelve errores remotos con destino y auth mode sanitizados."""
+    import coderag.ingestion.index_chroma as module
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="super-secret-token",
+        chroma_username="",
+        chroma_password="",
+        resolve_chroma_hnsw_space=lambda: "cosine",
+    )
+
+    def _raising_http_client(*args: Any, **kwargs: Any) -> _FakeRemoteClient:
+        del args, kwargs
+        raise RuntimeError("connect timeout")
+
+    monkeypatch.setattr(module.chromadb, "HttpClient", _raising_http_client)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        module.build_remote_chroma_client(settings)
+
+    message = str(exc_info.value)
+    assert "crear cliente HTTP" in message
+    assert "chroma.example.local:8443" in message
+    assert "auth=bearer" in message
+    assert "super-secret-token" not in message
+
+
+def test_remote_init_wraps_collection_open_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incluye colección y auth mode cuando falla el bootstrap remoto."""
+    import coderag.ingestion.index_chroma as module
+
+    class _FailingRemoteClient(_FakeRemoteClient):
+        def get_or_create_collection(
+            self,
+            name: str,
+            metadata: dict[str, str] | None = None,
+        ) -> _FakeCollection:
+            del name, metadata
+            raise RuntimeError("401 unauthorized")
+
+    def _fake_http_client(
+        host: str,
+        port: int,
+        headers: dict[str, str],
+    ) -> _FailingRemoteClient:
+        return _FailingRemoteClient(host, port, headers)
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="",
+        chroma_username="svc-user",
+        chroma_password="svc-pass",
+        resolve_chroma_hnsw_space=lambda: "cosine",
+    )
+
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module.chromadb, "HttpClient", _fake_http_client)
+    module.ChromaIndex.reset_shared_state()
+
+    with pytest.raises(RuntimeError) as exc_info:
+        module.ChromaIndex()
+
+    message = str(exc_info.value)
+    assert "abrir colección gestionada" in message
+    assert "auth=basic" in message
+    assert "colección=code_symbols" in message
+    assert "svc-pass" not in message
+
+
+def test_count_by_repo_id_wraps_remote_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incluye operación y colección cuando falla el conteo remoto."""
+    import coderag.ingestion.index_chroma as module
+
+    captured: dict[str, Any] = {}
+
+    def _fake_http_client(
+        host: str,
+        port: int,
+        headers: dict[str, str],
+    ) -> _FakeRemoteClient:
+        captured["client"] = _FakeRemoteClient(host, port, headers)
+        return captured["client"]
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="",
+        chroma_username="",
+        chroma_password="",
+        resolve_chroma_hnsw_space=lambda: "cosine",
+    )
+
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module.chromadb, "HttpClient", _fake_http_client)
+    module.ChromaIndex.reset_shared_state()
+
+    index = module.ChromaIndex()
+
+    def _raise_get(**kwargs: Any) -> dict[str, list[str]]:
+        del kwargs
+        raise RuntimeError("connection refused")
+
+    index.collections["code_symbols"].get = _raise_get
+
+    with pytest.raises(RuntimeError) as exc_info:
+        index.count_by_repo_id("code_symbols", "repo-1")
+
+    message = str(exc_info.value)
+    assert "contar documentos por repo_id" in message
+    assert "auth=none" in message
+    assert "colección=code_symbols" in message
+    assert "chroma.example.local:8443" in message
+
+
 def test_upsert_recovers_from_dimension_message_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

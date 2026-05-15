@@ -12,6 +12,7 @@ from chromadb.config import Settings as ChromaSettings
 from coderag.ingestion.index_chroma import (
     COLLECTIONS,
     ChromaIndex,
+    build_remote_chroma_error_message,
     build_remote_chroma_client,
 )
 
@@ -114,15 +115,25 @@ def reset_managed_vector_storage(
         for collection_name in COLLECTIONS:
             try:
                 client.delete_collection(collection_name)
-            except Exception:
+            except Exception as exc:
+                lowered = str(exc).lower()
+                if "collection" in lowered and "does not exist" in lowered:
+                    continue
+                if chroma_mode == "remote":
+                    raise RuntimeError(
+                        build_remote_chroma_error_message(
+                            settings,
+                            operation="eliminar colección",
+                            exc=exc,
+                            collection_name=collection_name,
+                        )
+                    ) from exc
                 continue
 
         reset_done = True
     except Exception as exc:
         if chroma_mode == "remote":
-            warnings.append(
-                f"No se pudieron limpiar colecciones Chroma remoto: {exc}"
-            )
+            warnings.append(str(exc))
         else:
             warnings.append(
                 f"No se pudieron limpiar colecciones Chroma por API: {exc}"
