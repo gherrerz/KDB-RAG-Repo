@@ -7,6 +7,7 @@ Docker/CI), se inyecta un stub en sys.modules antes de importar el módulo.
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 from unittest.mock import MagicMock, patch
@@ -26,6 +27,7 @@ except ModuleNotFoundError:
     _psycopg_stub = MagicMock()
     _psycopg_rows_stub = MagicMock()
     _psycopg_rows_stub.dict_row = MagicMock()
+    _psycopg_stub.OperationalError = RuntimeError
     _psycopg_stub.rows = _psycopg_rows_stub
     sys.modules["psycopg"] = _psycopg_stub
     sys.modules["psycopg.rows"] = _psycopg_rows_stub
@@ -111,6 +113,27 @@ class TestInitSchema:
         # No debe propagar excepción
         with patch(_PATCH_CONNECT, return_value=init_conn):
             LexicalStore("postgresql://fake/db")
+
+    def test_sanitiza_error_de_conexion_postgres(self):
+        """El error de conexión expone destino sin filtrar credenciales."""
+        import coderag.storage.lexical_store as store_module
+
+        store_module = importlib.reload(store_module)
+        dsn = "postgresql://coderag:secret@postgres:5432/coderag"
+
+        def _raise_connect_error(*_args, **_kwargs):
+            raise store_module.psycopg.OperationalError(
+                "[Errno -2] Name or service not known"
+            )
+
+        with patch(_PATCH_CONNECT, side_effect=_raise_connect_error):
+            with pytest.raises(RuntimeError) as exc_info:
+                store_module.LexicalStore(dsn)
+
+        message = str(exc_info.value)
+        assert "postgres:5432/coderag" in message
+        assert "perfil 'remote'" in message
+        assert "secret" not in message
 
 
 # ===========================================================================

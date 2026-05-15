@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
 import psycopg
 from psycopg.rows import dict_row
@@ -11,6 +12,15 @@ from psycopg.rows import dict_row
 from coderag.storage.postgres_table_names import (
     POSTGRES_LEXICAL_CORPUS_TABLE,
 )
+
+
+def _describe_postgres_target(postgres_dsn: str) -> tuple[str, str]:
+    """Resume el destino del DSN sin exponer credenciales."""
+    parsed = urlsplit(postgres_dsn)
+    host = parsed.hostname or "<unknown-host>"
+    port = parsed.port or 5432
+    database = parsed.path.lstrip("/") or "<unknown-db>"
+    return host, f"{host}:{port}/{database}"
 
 
 class LexicalStore:
@@ -24,7 +34,22 @@ class LexicalStore:
 
     def _connect(self) -> psycopg.Connection[dict[str, Any]]:
         """Abre conexión a Postgres con row_factory dict_row."""
-        return psycopg.connect(self._url, row_factory=dict_row)
+        try:
+            return psycopg.connect(self._url, row_factory=dict_row)
+        except psycopg.OperationalError as exc:
+            host, target = _describe_postgres_target(self._url)
+            compose_hint = ""
+            if host == "postgres":
+                compose_hint = (
+                    " Si usas docker-compose, el host 'postgres' solo existe "
+                    "cuando el perfil 'remote' está activo."
+                )
+            raise RuntimeError(
+                "No se pudo conectar a Postgres para LexicalStore en "
+                f"{target}. Verifica POSTGRES_HOST/POSTGRES_PORT y que el "
+                f"host sea resolvible desde este runtime.{compose_hint} "
+                f"Error original: {exc}"
+            ) from exc
 
     def _init_schema(self) -> None:
         """Crea tabla lexical_corpus e índices si no existen."""
