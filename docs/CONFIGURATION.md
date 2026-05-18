@@ -53,6 +53,7 @@ Compatibilidad temporal de naming:
 - `CHROMA_TOKEN`: bearer token opcional para Chroma remoto. Default: vacio.
 - `CHROMA_USERNAME`: usuario opcional para Basic auth contra Chroma remoto. Default: vacio.
 - `CHROMA_PASSWORD`: password opcional para Basic auth contra Chroma remoto. Default: vacio.
+- `CHROMA_REMOTE_BATCH_SIZE_OVERRIDE`: override opcional del batch size solo para Chroma remoto. Default: `0`, que significa usar el limite informado por el cliente y, si no existe, caer al fallback actual de `5000`.
 - `CHROMA_PATH`: ruta fisica del indice vectorial solo relevante en `CHROMA_MODE=embedded`. Default: `/app/storage/chroma`.
 - `CHROMA_HNSW_SPACE`: metrica del indice HNSW (`cosine` o `l2`). Default: `cosine`.
 - `MAX_CONTEXT_TOKENS`: limite superior de tokens de contexto armado para LLM. Default: `8000`.
@@ -88,6 +89,8 @@ Notas operativas de storage:
   aplica una migracion manual.
 - Si `CHROMA_MODE=embedded`, `CHROMA_PATH` vuelve a ser relevante, pero ese modo no es el default del runtime.
 - En modo remoto, usa exactamente uno de estos mecanismos: `CHROMA_TOKEN` o `CHROMA_USERNAME` + `CHROMA_PASSWORD`.
+- Si el write-path remoto de Chroma corta conexiones durante ingesta, puedes reducir `CHROMA_REMOTE_BATCH_SIZE_OVERRIDE` de forma gradual; recomendacion operativa: `1000`, luego `500`, luego `250` solo si el fallo persiste.
+- Este ajuste apunta principalmente al write-path remoto de ingesta y limpieza por repo; no cambia la semantica de query y no deberia alterar la latencia de busqueda principal.
 
 ### Ingesta asincrona distribuida
 
@@ -205,6 +208,7 @@ VERTEX_API_BASE_URL=https://us-central1-aiplatform.googleapis.com
 CHROMA_MODE=remote
 CHROMA_HOST=<chroma-host>
 CHROMA_PORT=8000
+CHROMA_REMOTE_BATCH_SIZE_OVERRIDE=0
 # Opcion A: bearer token
 CHROMA_TOKEN=<chroma-bearer-token>
 # Opcion B: Basic auth (mutuamente excluyente con CHROMA_TOKEN)

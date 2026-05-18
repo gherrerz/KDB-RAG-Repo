@@ -73,15 +73,21 @@ def build_remote_chroma_error_message(
     operation: str,
     exc: Exception,
     collection_name: str | None = None,
+    batch_size: int | None = None,
 ) -> str:
     """Construye un mensaje sanitario para errores de Chroma remoto."""
     target = describe_remote_chroma_target(settings)
     auth_mode = describe_remote_chroma_auth_mode(settings)
-    collection_hint = (
-        f", colección={collection_name}"
-        if collection_name
-        else ""
-    )
+    details = [f"auth={auth_mode}"]
+    if collection_name:
+        details.append(f"colección={collection_name}")
+    if batch_size is not None and batch_size > 0:
+        details.append(f"lote={batch_size}")
+
+    signal = _detect_remote_chroma_error_signal(exc)
+    if signal is not None:
+        details.append(f"señal={signal}")
+
     host = str(getattr(settings, "chroma_host", "") or "").strip()
     compose_hint = ""
     if host == "chroma":
@@ -89,11 +95,12 @@ def build_remote_chroma_error_message(
             " Si usas docker-compose, el host 'chroma' solo existe "
             "cuando el perfil 'remote' está activo."
         )
+    remediation_hint = _build_remote_chroma_remediation_hint(signal)
     return (
         "No se pudo completar la operación de Chroma remoto "
         f"'{operation}' en {target} "
-        f"(auth={auth_mode}{collection_hint})."
-        f"{compose_hint} Error original: {exc}"
+        f"({', '.join(details)})."
+        f"{compose_hint}{remediation_hint} Error original: {exc}"
     )
 
 
@@ -147,6 +154,98 @@ def _is_missing_collection_error(exc: Exception) -> bool:
     """Detecta errores de colección no encontrada emitidos por Chroma."""
     message = str(exc).lower()
     return "collection" in message and "does not exist" in message
+
+
+def _resolve_remote_batch_size_override(settings: Any) -> int | None:
+    """Resuelve un override explícito de lote remoto sin afectar embedded."""
+    if str(getattr(settings, "chroma_mode", "") or "").strip().lower() != "remote":
+        return None
+
+    raw_value = getattr(settings, "chroma_remote_batch_size_override", 0) or 0
+    try:
+        override = int(raw_value)
+    except (TypeError, ValueError):
+        return None
+    if override <= 0:
+        return None
+    return override
+
+
+def _is_payload_too_large_error(exc: Exception) -> bool:
+    """Detecta respuestas compatibles con payload demasiado grande."""
+    message = str(exc).lower()
+    return any(
+        pattern in message
+        for pattern in (
+            "413",
+            "payload too large",
+            "request entity too large",
+            "entity too large",
+            "content length exceeded",
+        )
+    )
+
+
+def _is_proxy_reset_error(exc: Exception) -> bool:
+    """Detecta resets de conexión compatibles con proxy o service mesh."""
+    message = str(exc).lower()
+    return any(
+        pattern in message
+        for pattern in (
+            "server disconnected without sending a response",
+            "connection reset",
+            "connection reset by peer",
+            "disconnect/reset before headers",
+            "remote protocol error",
+            "broken pipe",
+        )
+    )
+
+
+def _is_upstream_restarting_error(exc: Exception) -> bool:
+    """Detecta señales compatibles con upstream no disponible o reiniciando."""
+    message = str(exc).lower()
+    return any(
+        pattern in message
+        for pattern in (
+            "connection refused",
+            "503",
+            "service unavailable",
+            "no healthy upstream",
+            "connection aborted",
+            "connection closed",
+        )
+    )
+
+
+def _detect_remote_chroma_error_signal(exc: Exception) -> str | None:
+    """Clasifica una señal operativa útil a partir de la excepción remota."""
+    if _is_payload_too_large_error(exc):
+        return "payload_grande"
+    if _is_proxy_reset_error(exc):
+        return "proxy_reset"
+    if _is_upstream_restarting_error(exc):
+        return "upstream_reiniciando"
+    return None
+
+
+def _build_remote_chroma_remediation_hint(signal: str | None) -> str:
+    """Devuelve una pista operativa breve según la señal detectada."""
+    if signal == "payload_grande":
+        return (
+            " Reduce CHROMA_REMOTE_BATCH_SIZE_OVERRIDE y vuelve a intentar."
+        )
+    if signal == "proxy_reset":
+        return (
+            " Revisa resets o timeouts en proxy, ingress o service mesh "
+            "entre la API y Chroma."
+        )
+    if signal == "upstream_reiniciando":
+        return (
+            " Revisa disponibilidad del servicio y posibles reinicios del "
+            "pod remoto de Chroma."
+        )
+    return ""
 
 
 class ChromaIndex:
@@ -257,6 +356,7 @@ class ChromaIndex:
                                 operation="upsert",
                                 exc=retry_exc,
                                 collection_name=collection_name,
+                                batch_size=batch_size,
                             )
                         ) from retry_exc
                     raise
@@ -274,6 +374,7 @@ class ChromaIndex:
                             operation="upsert",
                             exc=exc,
                             collection_name=collection_name,
+                            batch_size=batch_size,
                         )
                     ) from exc
                 raise
@@ -285,6 +386,11 @@ class ChromaIndex:
 
     def _max_batch_size(self) -> int:
         """Devuelve el tamaño de lote máximo seguro admitido por el tiempo de ejecución de Chroma."""
+        settings = get_settings()
+        override = _resolve_remote_batch_size_override(settings)
+        if override is not None:
+            return override
+
         getter = getattr(self.client, "get_max_batch_size", None)
         if callable(getter):
             value = getter()
@@ -452,6 +558,7 @@ class ChromaIndex:
                                 operation="listar documentos para delete_by_repo_id",
                                 exc=exc,
                                 collection_name=collection_name,
+                                batch_size=batch_size,
                             )
                         ) from exc
                     raise
@@ -468,6 +575,7 @@ class ChromaIndex:
                                 operation="delete_by_repo_id",
                                 exc=exc,
                                 collection_name=collection_name,
+                                batch_size=batch_size,
                             )
                         ) from exc
                     raise

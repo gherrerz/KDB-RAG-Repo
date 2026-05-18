@@ -28,6 +28,33 @@ Incidencias frecuentes y acciones sugeridas.
 - Usa modo estable sin autoreload para ingestas largas.
 - Revisa logs del job con GET /jobs/{job_id}?logs_tail=400.
 
+## Error remoto de Chroma por payload grande, proxy reset o pod reiniciado
+
+Sintomas tipicos:
+
+- `No se pudo completar la operación de Chroma remoto 'upsert' ... (señal=payload_grande ...)`
+- `No se pudo completar la operación de Chroma remoto 'upsert' ... (señal=proxy_reset ...)`
+- `No se pudo completar la operación de Chroma remoto 'upsert' ... (señal=upstream_reiniciando ...)`
+
+Causas probables:
+
+- `payload_grande`: el request de escritura remota excede lo que acepta Chroma o el proxy intermedio.
+- `proxy_reset`: un proxy, ingress o service mesh cerró la conexión antes de devolver respuesta útil.
+- `upstream_reiniciando`: el servicio remoto estaba no disponible, reiniciando o sin upstream sano en el momento del write.
+
+Acción recomendada:
+
+- Si ves `señal=payload_grande`, reduce `CHROMA_REMOTE_BATCH_SIZE_OVERRIDE` de forma gradual: `1000`, luego `500`, luego `250` solo si el fallo persiste.
+- Si ves `señal=proxy_reset`, revisa timeouts, resets o límites de body en proxy, ingress, Envoy o service mesh entre la API y Chroma.
+- Si ves `señal=upstream_reiniciando`, revisa estado del servicio remoto, eventos del deployment y reinicios del pod de Chroma.
+- Reintenta la ingesta solo después de corregir la causa operativa, especialmente si el fallo ocurrió durante `code_symbols`, que suele ser el payload más voluminoso.
+
+Notas:
+
+- El fallback actual cuando no hay override ni límite informado por el cliente es `5000`.
+- Reducir el batch aumenta la cantidad de requests HTTP y puede hacer la ingesta algo más lenta.
+- El ajuste del batch remoto no cambia la semántica de query ni debería afectar la latencia principal de búsqueda.
+
 ## Error de dimensión en Chroma durante ingesta o query
 
 Síntoma típico:

@@ -27,6 +27,7 @@ if not _RUN_REMOTE_E2E:
         "CHROMA_TOKEN",
         "CHROMA_USERNAME",
         "CHROMA_PASSWORD",
+        "CHROMA_REMOTE_BATCH_SIZE_OVERRIDE",
         "NEO4J_URI",
         "NEO4J_USER",
         "NEO4J_PASSWORD",

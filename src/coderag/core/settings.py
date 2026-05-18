@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     chroma_token: str = Field(default="", alias="CHROMA_TOKEN")
     chroma_username: str = Field(default="", alias="CHROMA_USERNAME")
     chroma_password: str = Field(default="", alias="CHROMA_PASSWORD")
+    chroma_remote_batch_size_override: int = Field(
+        default=0,
+        alias="CHROMA_REMOTE_BATCH_SIZE_OVERRIDE",
+        ge=0,
+    )
     postgres_host: str = Field(default="", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
     postgres_db: str = Field(default="", alias="POSTGRES_DB")
@@ -348,6 +353,10 @@ class Settings(BaseSettings):
         if password and not username:
             raise ValueError(
                 "CHROMA_USERNAME es obligatorio cuando CHROMA_PASSWORD está configurado."
+            )
+        if self.chroma_remote_batch_size_override < 0:
+            raise ValueError(
+                "CHROMA_REMOTE_BATCH_SIZE_OVERRIDE no puede ser negativo."
             )
         return self
 

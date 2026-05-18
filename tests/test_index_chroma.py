@@ -141,6 +141,79 @@ def test_upsert_is_split_by_chroma_max_batch_size(monkeypatch: pytest.MonkeyPatc
     assert calls == [3, 3, 1]
 
 
+def test_remote_batch_size_override_takes_precedence_over_client_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prioriza el override remoto explícito por encima del límite del cliente."""
+    fake_client = _FakeClient()
+
+    import coderag.ingestion.index_chroma as module
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="",
+        chroma_username="",
+        chroma_password="",
+        chroma_remote_batch_size_override=2,
+        resolve_chroma_hnsw_space=lambda: "cosine",
+    )
+
+    def _fake_http_client(host: str, port: int, headers: dict[str, str]) -> _FakeClient:
+        del host, port, headers
+        return fake_client
+
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module.chromadb, "HttpClient", _fake_http_client)
+    module.ChromaIndex.reset_shared_state()
+
+    index = module.ChromaIndex()
+    index.upsert(
+        "code_symbols",
+        [f"id{i}" for i in range(5)],
+        ["x"] * 5,
+        [[0.1, 0.2]] * 5,
+        [{"i": i} for i in range(5)],
+    )
+
+    calls = fake_client.collections["code_symbols"].calls
+    assert calls == [2, 2, 1]
+
+
+def test_embedded_ignores_remote_batch_size_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No aplica el override remoto cuando Chroma corre embebido."""
+    fake_client = _FakeClient()
+
+    import coderag.ingestion.index_chroma as module
+
+    monkeypatch.setattr(
+        module.chromadb,
+        "PersistentClient",
+        lambda *args, **kwargs: fake_client,
+    )
+    monkeypatch.setenv("CHROMA_REMOTE_BATCH_SIZE_OVERRIDE", "2")
+    _prepare_embedded_settings(monkeypatch, module)
+
+    try:
+        index = module.ChromaIndex()
+    finally:
+        module.get_settings.cache_clear()
+
+    index.upsert(
+        "code_symbols",
+        [f"id{i}" for i in range(7)],
+        ["x"] * 7,
+        [[0.1, 0.2]] * 7,
+        [{"i": i} for i in range(7)],
+    )
+
+    calls = fake_client.collections["code_symbols"].calls
+    assert calls == [3, 3, 1]
+
+
 def test_collections_are_created_with_configured_hnsw_space(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -267,6 +340,104 @@ def test_remote_client_wraps_connection_error(
     assert "chroma.example.local:8443" in message
     assert "auth=bearer" in message
     assert "super-secret-token" not in message
+
+
+def test_build_remote_error_message_detects_proxy_reset_signal() -> None:
+    """Anota señal e hipótesis operativa cuando el upstream corta la respuesta."""
+    import coderag.ingestion.index_chroma as module
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="",
+        chroma_username="svc-user",
+        chroma_password="svc-pass",
+    )
+
+    message = module.build_remote_chroma_error_message(
+        settings,
+        operation="upsert",
+        exc=RuntimeError("Server disconnected without sending a response"),
+        collection_name="code_symbols",
+        batch_size=250,
+    )
+
+    assert "señal=proxy_reset" in message
+    assert "lote=250" in message
+    assert "proxy, ingress o service mesh" in message
+    assert "svc-pass" not in message
+
+
+def test_build_remote_error_message_detects_upstream_restart_signal() -> None:
+    """Anota señal compatible con upstream no disponible o reiniciando."""
+    import coderag.ingestion.index_chroma as module
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="",
+        chroma_username="",
+        chroma_password="",
+    )
+
+    message = module.build_remote_chroma_error_message(
+        settings,
+        operation="upsert",
+        exc=RuntimeError("503 no healthy upstream"),
+        collection_name="code_symbols",
+    )
+
+    assert "señal=upstream_reiniciando" in message
+    assert "reinicios del pod remoto de Chroma" in message
+
+
+def test_remote_upsert_wraps_payload_too_large_with_batch_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incluye señal e instrucción de tuning cuando el payload remoto es grande."""
+    import coderag.ingestion.index_chroma as module
+
+    fake_client = _FakeClient()
+    fake_client.collections["code_symbols"] = _FakeCollection(
+        error_once=RuntimeError("413 request entity too large")
+    )
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="",
+        chroma_username="",
+        chroma_password="",
+        chroma_remote_batch_size_override=2,
+        resolve_chroma_hnsw_space=lambda: "cosine",
+    )
+
+    def _fake_http_client(host: str, port: int, headers: dict[str, str]) -> _FakeClient:
+        del host, port, headers
+        return fake_client
+
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module.chromadb, "HttpClient", _fake_http_client)
+    module.ChromaIndex.reset_shared_state()
+
+    index = module.ChromaIndex()
+
+    with pytest.raises(RuntimeError) as exc_info:
+        index.upsert(
+            "code_symbols",
+            [f"id{i}" for i in range(5)],
+            ["x"] * 5,
+            [[0.1, 0.2]] * 5,
+            [{"i": i} for i in range(5)],
+        )
+
+    message = str(exc_info.value)
+    assert "señal=payload_grande" in message
+    assert "lote=2" in message
+    assert "CHROMA_REMOTE_BATCH_SIZE_OVERRIDE" in message
 
 
 def test_remote_init_wraps_collection_open_error(
