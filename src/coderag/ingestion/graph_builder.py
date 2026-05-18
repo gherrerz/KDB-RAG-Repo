@@ -2,8 +2,10 @@
 
 import hashlib
 from collections import defaultdict
+from contextlib import contextmanager
 from threading import Lock
 from typing import Any
+from urllib.parse import urlparse
 
 from neo4j import GraphDatabase
 
@@ -15,6 +17,89 @@ from coderag.core.models import (
 )
 from coderag.core.settings import get_settings
 from coderag.ingestion.component_metadata import infer_component_purpose
+
+
+def describe_neo4j_target(settings: Any) -> str:
+    """Resume el destino de Neo4j sin exponer credenciales."""
+    raw_uri = str(getattr(settings, "neo4j_uri", "") or "").strip()
+    if not raw_uri:
+        return "<unknown-neo4j>"
+
+    parsed = urlparse(raw_uri)
+    host = parsed.hostname
+    if host:
+        port = parsed.port or 7687
+        return f"{host}:{port}"
+
+    sanitized = raw_uri.rsplit("@", 1)[-1].lstrip("/")
+    return sanitized or "<unknown-neo4j>"
+
+
+def describe_neo4j_auth_mode(settings: Any) -> str:
+    """Resume el modo de autenticación efectivo configurado para Neo4j."""
+    username = str(getattr(settings, "neo4j_user", "") or "").strip()
+    password = str(getattr(settings, "neo4j_password", "") or "").strip()
+    if username and password:
+        return "basic"
+    return "none"
+
+
+def build_neo4j_error_message(
+    settings: Any,
+    *,
+    operation: str,
+    exc: Exception,
+    repo_id: str | None = None,
+) -> str:
+    """Construye un mensaje sanitario y consistente para errores Neo4j."""
+    target = describe_neo4j_target(settings)
+    auth_mode = describe_neo4j_auth_mode(settings)
+    repo_hint = f", repo_id={repo_id}" if repo_id else ""
+    host = urlparse(str(getattr(settings, "neo4j_uri", "") or "").strip()).hostname
+    compose_hint = ""
+    if host == "neo4j":
+        compose_hint = (
+            " Si usas docker-compose, el host 'neo4j' solo existe "
+            "cuando el servicio está en la red esperada."
+        )
+    return (
+        "No se pudo completar la operación de Neo4j "
+        f"'{operation}' en {target} "
+        f"(auth={auth_mode}{repo_hint})."
+        f"{compose_hint} Error original: {exc}"
+    )
+
+
+def build_neo4j_driver(
+    settings: Any | None = None,
+    *,
+    operation: str = "crear driver",
+    timeout_seconds: float | None = None,
+) -> Any:
+    """Crea un driver Neo4j con diagnóstico sanitario si falla."""
+    runtime_settings = settings or get_settings()
+    driver_kwargs: dict[str, Any] = {}
+    if timeout_seconds is not None:
+        driver_kwargs["connection_timeout"] = max(1.0, timeout_seconds)
+    try:
+        return GraphDatabase.driver(
+            runtime_settings.neo4j_uri,
+            auth=(runtime_settings.neo4j_user, runtime_settings.neo4j_password),
+            **driver_kwargs,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            build_neo4j_error_message(
+                runtime_settings,
+                operation=operation,
+                exc=exc,
+            )
+        ) from exc
+
+
+def _is_wrapped_neo4j_error(exc: Exception) -> bool:
+    """Detecta errores Neo4j ya enriquecidos para evitar doble wrapping."""
+    return str(exc).startswith("No se pudo completar la operación de Neo4j ")
 
 
 class GraphBuilder:
@@ -37,12 +122,35 @@ class GraphBuilder:
         config = (settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
         with self._driver_lock:
             if self._shared_driver is None or self._shared_config != config:
-                self.__class__._shared_driver = GraphDatabase.driver(
-                    settings.neo4j_uri,
-                    auth=(settings.neo4j_user, settings.neo4j_password),
+                self.__class__._shared_driver = build_neo4j_driver(
+                    settings,
+                    operation="crear driver compartido",
                 )
                 self.__class__._shared_config = config
             self.driver = self._shared_driver
+
+    @contextmanager
+    def _managed_session(
+        self,
+        *,
+        operation: str,
+        repo_id: str | None = None,
+    ):
+        """Abre una sesión Neo4j y envuelve errores con contexto operativo."""
+        try:
+            with self.driver.session() as session:
+                yield session
+        except Exception as exc:
+            if _is_wrapped_neo4j_error(exc):
+                raise
+            raise RuntimeError(
+                build_neo4j_error_message(
+                    get_settings(),
+                    operation=operation,
+                    exc=exc,
+                    repo_id=repo_id,
+                )
+            ) from exc
 
     def close(self) -> None:
         """Mantiene compatibilidad de API; el driver se comparte por proceso."""
@@ -95,7 +203,10 @@ class GraphBuilder:
             s.end_line = $end_line
         MERGE (f)-[:DECLARES]->(s)
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="upsert de grafo por repositorio",
+            repo_id=repo_id,
+        ) as session:
             symbols_by_path: dict[str, list[SymbolChunk]] = defaultdict(list)
             for symbol in symbols:
                 symbols_by_path[symbol.path].append(symbol)
@@ -382,7 +493,10 @@ class GraphBuilder:
     def has_repo_data(self, repo_id: str) -> bool:
         """Indica si existen nodos asociados al repositorio en Neo4j."""
         query = "MATCH (n {repo_id: $repo_id}) RETURN count(n) AS total"
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="verificar nodos por repo_id",
+            repo_id=repo_id,
+        ) as session:
             record = session.run(query, repo_id=repo_id).single()
             if record is None:
                 return False
@@ -391,8 +505,21 @@ class GraphBuilder:
     def delete_repo_subgraph(self, repo_id: str) -> int:
         """Elimina el subgrafo asociado al repo_id y devuelve nodos borrados."""
         query = "MATCH (n {repo_id: $repo_id}) DETACH DELETE n"
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="eliminar subgrafo por repo_id",
+            repo_id=repo_id,
+        ) as session:
             result = session.run(query, repo_id=repo_id)
+            summary = result.consume()
+            return int(summary.counters.nodes_deleted)
+
+    def clear_graph(self) -> int:
+        """Elimina el grafo completo y devuelve la cantidad de nodos borrados."""
+        query = "MATCH (n) DETACH DELETE n"
+        with self._managed_session(
+            operation="eliminar grafo completo",
+        ) as session:
+            result = session.run(query)
             summary = result.consume()
             return int(summary.counters.nodes_deleted)
 
@@ -445,7 +572,10 @@ class GraphBuilder:
             SKIP $offset
             LIMIT $limit
             """
-            with self.driver.session() as session:
+            with self._managed_session(
+                operation="consultar inventario de dependencias",
+                repo_id=repo_id,
+            ) as session:
                 records = session.run(
                     query,
                     repo_id=repo_id,
@@ -495,7 +625,10 @@ class GraphBuilder:
         SKIP $offset
         LIMIT $limit
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="consultar inventario",
+            repo_id=repo_id,
+        ) as session:
             records = session.run(
                 query,
                 repo_id=repo_id,
@@ -545,7 +678,10 @@ class GraphBuilder:
         )
         RETURN count(DISTINCT f.path) AS total
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="contar inventario",
+            repo_id=repo_id,
+        ) as session:
             record = session.run(
                 query,
                 repo_id=repo_id,
@@ -582,7 +718,10 @@ class GraphBuilder:
         SKIP $offset
         LIMIT $limit
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="consultar archivos por módulo",
+            repo_id=repo_id,
+        ) as session:
             records = session.run(
                 query,
                 repo_id=repo_id,
@@ -600,7 +739,10 @@ class GraphBuilder:
         RETURN DISTINCT m.path AS module_path
         ORDER BY module_path ASC
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="listar módulos del repositorio",
+            repo_id=repo_id,
+        ) as session:
             records = session.run(query, repo_id=repo_id)
             modules: list[str] = []
             for record in records:
@@ -633,7 +775,10 @@ class GraphBuilder:
         ORDER BY match_score DESC, source_path ASC
         LIMIT $limit
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="consultar importadores externos",
+            repo_id=repo_id,
+        ) as session:
             records = session.run(
                 query,
                 repo_id=repo_id,
@@ -680,7 +825,10 @@ class GraphBuilder:
         ORDER BY match_score DESC, size(split(f.path, '/')) ASC, f.path ASC
         LIMIT $limit
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="resolver archivos por sufijo",
+            repo_id=repo_id,
+        ) as session:
             records = session.run(
                 query,
                 repo_id=repo_id,
@@ -714,7 +862,10 @@ class GraphBuilder:
         ORDER BY target_path ASC, path ASC
         LIMIT $limit
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="consultar importadores de archivos",
+            repo_id=repo_id,
+        ) as session:
             records = session.run(
                 query,
                 repo_id=repo_id,
@@ -740,7 +891,10 @@ class GraphBuilder:
                f.purpose_summary AS purpose_summary,
                f.purpose_source AS purpose_source
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="consultar propósitos de archivos",
+            repo_id=repo_id,
+        ) as session:
             records = session.run(
                 query,
                 repo_id=repo_id,
@@ -791,7 +945,9 @@ class GraphBuilder:
              END as relation_confidence_avg
         LIMIT $limit
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="expandir símbolos",
+        ) as session:
             records = session.run(
                 query,
                 symbol_ids=symbol_ids,
@@ -844,7 +1000,9 @@ class GraphBuilder:
                source_path
         LIMIT $limit
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="expandir contexto de archivos desde símbolos",
+        ) as session:
             records = session.run(
                 query,
                 symbol_ids=symbol_ids,
@@ -898,7 +1056,10 @@ class GraphBuilder:
                source_path
         LIMIT $limit
         """
-        with self.driver.session() as session:
+        with self._managed_session(
+            operation="expandir contexto de archivos",
+            repo_id=repo_id,
+        ) as session:
             records = session.run(
                 query,
                 repo_id=repo_id,

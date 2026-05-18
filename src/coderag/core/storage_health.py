@@ -8,7 +8,6 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
-from neo4j import GraphDatabase
 from openai import OpenAI
 from redis import Redis
 
@@ -23,6 +22,12 @@ from coderag.core.vector_index import (
     managed_vector_collection_spaces,
 )
 from coderag.ingestion.embedding import MODEL_DIMENSIONS
+from coderag.ingestion.graph_builder import (
+    build_neo4j_driver,
+    build_neo4j_error_message,
+    describe_neo4j_auth_mode,
+    describe_neo4j_target,
+)
 from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import (
     ChromaIndex,
@@ -144,7 +149,31 @@ def _error_code(component: str, message: str) -> str:
     if component == "neo4j":
         if "unauthorized" in lowered or "authentication" in lowered:
             return "neo4j_auth_failed"
-        if "connection refused" in lowered or "couldn't connect" in lowered:
+        if "timeout" in lowered or "timed out" in lowered:
+            return "neo4j_timeout"
+        if (
+            "name or service not known" in lowered
+            or "getaddrinfo" in lowered
+            or "temporary failure in name resolution" in lowered
+            or "failed to resolve" in lowered
+            or "nodename nor servname provided" in lowered
+        ):
+            return "neo4j_dns_failed"
+        if (
+            "ssl" in lowered
+            or "tls" in lowered
+            or "certificate" in lowered
+            or "cert" in lowered
+        ):
+            return "neo4j_tls_failed"
+        if (
+            "connection refused" in lowered
+            or "couldn't connect" in lowered
+            or "failed to establish a new connection" in lowered
+            or "connection error" in lowered
+            or "network is unreachable" in lowered
+            or "no route to host" in lowered
+        ):
             return "neo4j_unreachable"
     if component == "chroma":
         if "hnsw" in lowered and "space" in lowered:
@@ -320,17 +349,29 @@ def _check_chroma() -> dict[str, Any]:
 def _check_neo4j(timeout_seconds: float) -> dict[str, Any]:
     """Valida conexión Neo4j, autenticación y query mínima de salud."""
     settings = get_settings()
-    driver = GraphDatabase.driver(
-        settings.neo4j_uri,
-        auth=(settings.neo4j_user, settings.neo4j_password),
-        connection_timeout=max(1.0, timeout_seconds),
+    driver = build_neo4j_driver(
+        settings,
+        operation="crear driver para healthcheck",
+        timeout_seconds=timeout_seconds,
     )
     try:
-        with driver.session() as session:
-            record = session.run("RETURN 1 AS ok").single()
+        try:
+            with driver.session() as session:
+                record = session.run("RETURN 1 AS ok").single()
+        except Exception as exc:
+            raise RuntimeError(
+                build_neo4j_error_message(
+                    settings,
+                    operation="health query",
+                    exc=exc,
+                )
+            ) from exc
         if record is None or int(record["ok"]) != 1:
             raise RuntimeError("Neo4j no respondió correctamente al health query.")
-        return {"uri": settings.neo4j_uri}
+        return {
+            "target": describe_neo4j_target(settings),
+            "auth_mode": describe_neo4j_auth_mode(settings),
+        }
     finally:
         driver.close()
 
@@ -627,17 +668,27 @@ def _count_query_collections_for_repo(repo_id: str) -> dict[str, int | None]:
 def _check_repo_graph_available(repo_id: str, timeout_seconds: float) -> bool:
     """Determina si existen nodos asociados al repo en Neo4j."""
     settings = get_settings()
-    driver = GraphDatabase.driver(
-        settings.neo4j_uri,
-        auth=(settings.neo4j_user, settings.neo4j_password),
-        connection_timeout=max(1.0, timeout_seconds),
+    driver = build_neo4j_driver(
+        settings,
+        operation="crear driver para verificación por repo_id",
+        timeout_seconds=timeout_seconds,
     )
     try:
-        with driver.session() as session:
-            record = session.run(
-                "MATCH (n {repo_id: $repo_id}) RETURN count(n) AS total",
-                repo_id=repo_id,
-            ).single()
+        try:
+            with driver.session() as session:
+                record = session.run(
+                    "MATCH (n {repo_id: $repo_id}) RETURN count(n) AS total",
+                    repo_id=repo_id,
+                ).single()
+        except Exception as exc:
+            raise RuntimeError(
+                build_neo4j_error_message(
+                    settings,
+                    operation="verificar nodos por repo_id",
+                    exc=exc,
+                    repo_id=repo_id,
+                )
+            ) from exc
         if record is None:
             return False
         return int(record["total"]) > 0

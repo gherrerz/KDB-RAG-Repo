@@ -187,13 +187,15 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
         metadata_db.touch(exist_ok=True)
         cleared.append(f"Metadata ({metadata_db})")
 
-    graph = GraphBuilder()
     try:
-        with graph.driver.session() as session:
-            session.run("MATCH (n) DETACH DELETE n")
-        cleared.append("Grafo Neo4j")
-    finally:
-        graph.close()
+        graph = GraphBuilder()
+        try:
+            graph.clear_graph()
+            cleared.append("Grafo Neo4j")
+        finally:
+            graph.close()
+    except Exception as exc:
+        warnings.append(f"No se pudo limpiar Neo4j: {exc}")
 
     return cleared, warnings
 
@@ -254,15 +256,16 @@ def delete_repo_storage(
     warnings.extend(lexical_warnings)
     deleted_counts.update(lexical_counts)
 
-    graph = GraphBuilder()
     try:
-        graph_nodes_deleted = graph.delete_repo_subgraph(normalized_repo_id)
+        graph = GraphBuilder()
+        try:
+            graph_nodes_deleted = graph.delete_repo_subgraph(normalized_repo_id)
+        finally:
+            graph.close()
         deleted_counts["neo4j_nodes"] = int(graph_nodes_deleted)
         cleared.append("Grafo Neo4j")
     except Exception as exc:
         warnings.append(f"No se pudo limpiar Neo4j para '{normalized_repo_id}': {exc}")
-    finally:
-        graph.close()
 
     workspace_removed = 0
     for path in _workspace_repo_paths(settings.workspace_path, normalized_repo_id):

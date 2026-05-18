@@ -123,8 +123,13 @@ def test_ingest_repository_continues_on_graph_failure(
         scanned_files: list[ScannedFile],
         chunks: list[SymbolChunk],
         logger=None,
+        **kwargs,
     ) -> None:
-        raise RuntimeError("neo4j auth")
+        del repo_id, scanned_files, chunks, logger, kwargs
+        raise RuntimeError(
+            "No se pudo completar la operación de Neo4j 'upsert de grafo por "
+            "repositorio' en neo4j:7687 (auth=basic). Error original: neo4j auth"
+        )
 
     monkeypatch.setattr(pipeline, "_index_graph", fail_graph)
 
@@ -148,7 +153,8 @@ def test_ingest_repository_continues_on_graph_failure(
     assert ".gitignore" in received_scan_args["excluded_files"]
     assert ".env" in received_scan_args["excluded_files"]
     assert any("Observabilidad símbolos:" in item for item in logs)
-    assert any("Advertencia: grafo Neo4j no disponible" in item for item in logs)
+    assert any("Advertencia: no se pudo indexar grafo Neo4j" in item for item in logs)
+    assert any("neo4j:7687" in item for item in logs)
     assert logs[-1] == "Ingesta finalizada"
 
 

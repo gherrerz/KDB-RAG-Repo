@@ -16,6 +16,9 @@ def _fake_settings() -> SimpleNamespace:
         chroma_mode="remote",
         chroma_host="localhost",
         chroma_port=8001,
+        neo4j_uri="bolt://neo4j:7687",
+        neo4j_user="neo4j",
+        neo4j_password="super-secret",
         health_check_strict=True,
         health_check_timeout_seconds=2.0,
         health_check_ttl_seconds=60.0,
@@ -43,6 +46,73 @@ def test_error_code_for_neo4j_connection_refused() -> None:
         "Couldn't connect to 127.0.0.1:17687 (connection refused)",
     )
     assert code == "neo4j_unreachable"
+
+
+def test_error_code_for_neo4j_timeout() -> None:
+    """Clasifica timeouts de Neo4j con código dedicado."""
+    code = storage_health._error_code(
+        "neo4j",
+        "Neo4j connection timed out during health query",
+    )
+    assert code == "neo4j_timeout"
+
+
+def test_error_code_for_neo4j_dns_failure() -> None:
+    """Clasifica errores DNS de Neo4j con código dedicado."""
+    code = storage_health._error_code(
+        "neo4j",
+        "getaddrinfo failed while resolving neo4j.internal",
+    )
+    assert code == "neo4j_dns_failed"
+
+
+def test_error_code_for_neo4j_tls_failure() -> None:
+    """Clasifica errores TLS de Neo4j con código dedicado."""
+    code = storage_health._error_code(
+        "neo4j",
+        "TLS certificate verify failed for neo4j connection",
+    )
+    assert code == "neo4j_tls_failed"
+
+
+def test_check_neo4j_wraps_session_errors_with_sanitized_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Envuelve fallos del health query con destino y auth sanitizados."""
+
+    class _FailingSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        def run(self, query: str):
+            del query
+            raise RuntimeError("connection refused")
+
+    class _FakeDriver:
+        def session(self) -> _FailingSession:
+            return _FailingSession()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage_health, "get_settings", _fake_settings)
+    monkeypatch.setattr(
+        storage_health,
+        "build_neo4j_driver",
+        lambda settings, operation, timeout_seconds: _FakeDriver(),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        storage_health._check_neo4j(2.0)
+
+    message = str(exc_info.value)
+    assert "health query" in message
+    assert "neo4j:7687" in message
+    assert "auth=basic" in message
+    assert "super-secret" not in message
 
 
 def test_error_code_for_chroma_auth_failure() -> None:

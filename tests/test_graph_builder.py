@@ -1,5 +1,6 @@
 """Pruebas unitarias para operaciones de limpieza en GraphBuilder."""
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -11,7 +12,7 @@ from coderag.core.models import (
     SymbolChunk,
 )
 import coderag.ingestion.graph_builder as graph_builder_module
-from coderag.ingestion.graph_builder import GraphBuilder
+from coderag.ingestion.graph_builder import GraphBuilder, build_neo4j_error_message
 
 
 class _FakeCounters:
@@ -88,6 +89,62 @@ class _FakeDriver:
             total_nodes=self.total_nodes,
         )
         return self.last_session
+
+    def close(self) -> None:
+        """Compatibilidad con el contrato del driver real."""
+        return None
+
+
+def test_build_neo4j_error_message_sanitizes_target_and_auth() -> None:
+    """Expone destino, auth y repo sin filtrar secretos de Neo4j."""
+    settings = SimpleNamespace(
+        neo4j_uri="bolt://neo4j:7687",
+        neo4j_user="neo4j",
+        neo4j_password="super-secret",
+    )
+
+    message = build_neo4j_error_message(
+        settings,
+        operation="verificar nodos por repo_id",
+        exc=RuntimeError("connection refused"),
+        repo_id="repo-x",
+    )
+
+    assert "neo4j:7687" in message
+    assert "auth=basic" in message
+    assert "repo_id=repo-x" in message
+    assert "super-secret" not in message
+
+
+def test_graph_builder_wraps_driver_connection_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Envuelve fallos de creación del driver con mensaje sanitario."""
+    settings = SimpleNamespace(
+        neo4j_uri="bolt://neo4j:7687",
+        neo4j_user="neo4j",
+        neo4j_password="super-secret",
+    )
+
+    class _FailingGraphDatabase:
+        @staticmethod
+        def driver(*args: Any, **kwargs: Any) -> Any:
+            del args, kwargs
+            raise RuntimeError("connection refused")
+
+    GraphBuilder._shared_driver = None
+    GraphBuilder._shared_config = None
+    monkeypatch.setattr(graph_builder_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(graph_builder_module, "GraphDatabase", _FailingGraphDatabase)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        GraphBuilder()
+
+    message = str(exc_info.value)
+    assert "crear driver compartido" in message
+    assert "neo4j:7687" in message
+    assert "auth=basic" in message
+    assert "super-secret" not in message
 
 
 def test_delete_repo_subgraph_returns_deleted_nodes() -> None:

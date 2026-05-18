@@ -1288,7 +1288,13 @@ def test_query_endpoint_returns_422_when_embedding_is_incompatible(monkeypatch) 
 
 @pytest.mark.parametrize(
     "health_code",
-    ["neo4j_auth_failed", "neo4j_unreachable"],
+    [
+        "neo4j_auth_failed",
+        "neo4j_timeout",
+        "neo4j_dns_failed",
+        "neo4j_tls_failed",
+        "neo4j_unreachable",
+    ],
 )
 def test_query_endpoint_exposes_neo4j_failure_code(
     monkeypatch,

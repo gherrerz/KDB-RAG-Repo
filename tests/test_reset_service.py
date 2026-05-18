@@ -141,23 +141,9 @@ def test_reset_all_storage_uses_vector_helper(
         ),
     )
 
-    class FakeGraphSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def run(self, query: str) -> None:
-            return None
-
-    class FakeGraphDriver:
-        def session(self) -> FakeGraphSession:
-            return FakeGraphSession()
-
     class FakeGraphBuilder:
-        def __init__(self) -> None:
-            self.driver = FakeGraphDriver()
+        def clear_graph(self) -> int:
+            return 0
 
         def close(self) -> None:
             return None
@@ -171,6 +157,55 @@ def test_reset_all_storage_uses_vector_helper(
     assert warnings == ["warning vectorial"]
     assert captured["settings"] is settings
     assert callable(captured["remove_path"])
+
+
+def test_reset_all_storage_warns_when_neo4j_cleanup_fails(
+    patch_module_settings,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Convierte la caída de Neo4j en warning sanitario durante reset global."""
+    patch_module_settings(
+        reset_service,
+        workspace_path=tmp_path / "workspace",
+        chroma_path=tmp_path / "chroma",
+        chroma_mode="local",
+    )
+
+    monkeypatch.setattr(reset_service, "_reset_bm25_storage", lambda settings: ([], []))
+    monkeypatch.setattr(
+        reset_service,
+        "_reset_postgres_lexical_storage",
+        lambda settings: ([], []),
+    )
+    monkeypatch.setattr(reset_service, "_remove_path", lambda path: None)
+    monkeypatch.setattr(
+        reset_service,
+        "reset_managed_vector_storage",
+        lambda active_settings, remove_path: (True, []),
+    )
+
+    class FakeGraphBuilder:
+        def clear_graph(self) -> int:
+            raise RuntimeError(
+                "No se pudo completar la operación de Neo4j 'eliminar grafo "
+                "completo' en neo4j:7687 (auth=basic). Error original: timeout"
+            )
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(reset_service, "GraphBuilder", FakeGraphBuilder)
+
+    cleared, warnings = reset_service.reset_all_storage()
+
+    assert "Chroma" in cleared
+    assert "Grafo Neo4j" not in cleared
+    assert warnings == [
+        "No se pudo limpiar Neo4j: No se pudo completar la operación de "
+        "Neo4j 'eliminar grafo completo' en neo4j:7687 (auth=basic). "
+        "Error original: timeout"
+    ]
 
 
 def test_delete_repo_storage_uses_vector_helper(

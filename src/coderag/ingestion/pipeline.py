@@ -148,8 +148,9 @@ def _repo_has_existing_index_data(repo_id: str, logger: LoggerFn) -> bool:
     lexical_exists = repository_has_active_lexical_data(settings, repo_id)
 
     graph_exists = False
-    graph = GraphBuilder()
+    graph: GraphBuilder | None = None
     try:
+        graph = GraphBuilder()
         graph_exists = graph.has_repo_data(repo_id)
     except Exception as exc:
         logger(
@@ -157,7 +158,8 @@ def _repo_has_existing_index_data(repo_id: str, logger: LoggerFn) -> bool:
             f"para repo '{repo_id}' ({exc})"
         )
     finally:
-        graph.close()
+        if graph is not None:
+            graph.close()
 
     return chroma_total > 0 or lexical_exists or graph_exists
 
@@ -179,11 +181,13 @@ def _purge_repo_indices(repo_id: str, logger: LoggerFn) -> None:
             f"bm25_snapshot={lexical_deleted['snapshot_removed']}"
         )
 
-    graph = GraphBuilder()
+    graph: GraphBuilder | None = None
     try:
+        graph = GraphBuilder()
         graph_deleted = graph.delete_repo_subgraph(repo_id)
     finally:
-        graph.close()
+        if graph is not None:
+            graph.close()
 
     logger(
         "Purge por repo_id completado: "
@@ -302,7 +306,7 @@ def ingest_repository(
             diagnostics_sink=diagnostics_sink,
         )
     except Exception as exc:
-        logger(f"Advertencia: grafo Neo4j no disponible ({exc})")
+        logger(f"Advertencia: no se pudo indexar grafo Neo4j ({exc})")
 
     logger("Ingesta finalizada")
     return repo_id
