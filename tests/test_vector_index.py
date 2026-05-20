@@ -25,6 +25,38 @@ def test_build_managed_vector_index_returns_chroma_index(monkeypatch) -> None:
         def collection_hnsw_spaces(self) -> dict[str, str | None]:
             return {}
 
+        def list_collection_names(self) -> list[str]:
+            return []
+
+        def get_collection_metadata(self, collection_name: str) -> dict[str, str]:
+            del collection_name
+            return {}
+
+        def count_collection(
+            self,
+            collection_name: str,
+            page_size: int = 500,
+            where: dict | None = None,
+        ) -> int:
+            del collection_name, page_size, where
+            return 0
+
+        def get_collection(
+            self,
+            collection_name: str,
+            **kwargs,
+        ) -> dict[str, object]:
+            del collection_name, kwargs
+            return {}
+
+        def query_collection(
+            self,
+            collection_name: str,
+            **kwargs,
+        ) -> dict[str, object]:
+            del collection_name, kwargs
+            return {}
+
         def count_by_repo_id(self, collection_name: str, repo_id: str) -> int:
             del collection_name, repo_id
             return 0
@@ -54,6 +86,38 @@ def test_count_repository_vector_documents_sums_managed_collections() -> None:
         def collection_hnsw_spaces(self) -> dict[str, str | None]:
             return {}
 
+        def list_collection_names(self) -> list[str]:
+            return []
+
+        def get_collection_metadata(self, collection_name: str) -> dict[str, str]:
+            del collection_name
+            return {}
+
+        def count_collection(
+            self,
+            collection_name: str,
+            page_size: int = 500,
+            where: dict | None = None,
+        ) -> int:
+            del collection_name, page_size, where
+            return 0
+
+        def get_collection(
+            self,
+            collection_name: str,
+            **kwargs,
+        ) -> dict[str, object]:
+            del collection_name, kwargs
+            return {}
+
+        def query_collection(
+            self,
+            collection_name: str,
+            **kwargs,
+        ) -> dict[str, object]:
+            del collection_name, kwargs
+            return {}
+
         def count_by_repo_id(self, collection_name: str, repo_id: str) -> int:
             del repo_id
             return {"code_symbols": 2, "code_files": 3}.get(collection_name, 0)
@@ -79,6 +143,38 @@ def test_count_repository_vector_collection_documents_delegates_page_size() -> N
         collections = {"code_symbols": object()}
 
         def collection_hnsw_spaces(self) -> dict[str, str | None]:
+            return {}
+
+        def list_collection_names(self) -> list[str]:
+            return ["code_symbols"]
+
+        def get_collection_metadata(self, collection_name: str) -> dict[str, str]:
+            assert collection_name == "code_symbols"
+            return {}
+
+        def count_collection(
+            self,
+            collection_name: str,
+            page_size: int = 500,
+            where: dict | None = None,
+        ) -> int:
+            del collection_name, page_size, where
+            return 0
+
+        def get_collection(
+            self,
+            collection_name: str,
+            **kwargs,
+        ) -> dict[str, object]:
+            del collection_name, kwargs
+            return {}
+
+        def query_collection(
+            self,
+            collection_name: str,
+            **kwargs,
+        ) -> dict[str, object]:
+            del collection_name, kwargs
             return {}
 
         def count_by_repo_id(
@@ -115,6 +211,38 @@ def test_managed_vector_helpers_delegate_to_backend() -> None:
 
         def collection_hnsw_spaces(self) -> dict[str, str | None]:
             return {"code_symbols": "cosine"}
+
+        def list_collection_names(self) -> list[str]:
+            return ["code_symbols"]
+
+        def get_collection_metadata(self, collection_name: str) -> dict[str, str]:
+            assert collection_name == "code_symbols"
+            return {"hnsw:space": "cosine"}
+
+        def count_collection(
+            self,
+            collection_name: str,
+            page_size: int = 500,
+            where: dict | None = None,
+        ) -> int:
+            del collection_name, page_size, where
+            return 0
+
+        def get_collection(
+            self,
+            collection_name: str,
+            **kwargs,
+        ) -> dict[str, object]:
+            del collection_name, kwargs
+            return {}
+
+        def query_collection(
+            self,
+            collection_name: str,
+            **kwargs,
+        ) -> dict[str, object]:
+            del collection_name, kwargs
+            return {}
 
         def count_by_repo_id(self, collection_name: str, repo_id: str) -> int:
             del collection_name, repo_id

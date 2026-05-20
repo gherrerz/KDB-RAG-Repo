@@ -63,6 +63,9 @@ VERTEX_API_BASE_URL=https://us-central1-aiplatform.googleapis.com
 CHROMA_MODE=remote
 CHROMA_HOST=<chroma-host>
 CHROMA_PORT=8000
+CHROMA_ADMIN_API_ENABLED=false
+# Opcional cuando actives endpoints admin de Chroma
+# CHROMA_ADMIN_API_TOKEN=<token-admin-chroma>
 # Opcion A: bearer token
 CHROMA_TOKEN=<chroma-bearer-token>
 # Opcion B: Basic auth (mutuamente excluyente con CHROMA_TOKEN)
@@ -236,6 +239,8 @@ Rutas principales:
 - GET /repos/{repo_id}/status
 - GET /providers/models
 - GET /health
+- GET /admin/chroma/diagnostics
+- POST /admin/chroma/query
 - POST /admin/reset
 
 Referencia completa por journeys y contratos:
@@ -253,9 +258,38 @@ Atajo de diagnostico:
 
 - Readiness por repo: GET /repos/{repo_id}/status
 - Salud de storage: GET /health
+- Diagnostico de colecciones Chroma: GET /admin/chroma/diagnostics
+- Query directa controlada a Chroma: POST /admin/chroma/query
 
 Nota de contrato: el endpoint de readiness expone `lexical_loaded` como señal
 neutral de la capa léxica activa y mantiene `bm25_loaded` como alias legacy.
+
+Nota operativa: los endpoints de Chroma son de solo lectura y se pensaron para
+soporte y pruebas. Aunque puedan quedar abiertos temporalmente en un entorno
+controlado, no deben exponerse a internet sin autenticación o controles
+adicionales.
+
+Para habilitarlos explícitamente, activa `CHROMA_ADMIN_API_ENABLED=true`. Si
+además defines `CHROMA_ADMIN_API_TOKEN`, debes enviar el header
+`X-Chroma-Admin-Token` en cada request.
+
+Ejemplo rapido para obtener vector store collection count:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/admin/chroma/diagnostics?collection_names=code_symbols"
+```
+
+Ejemplo rapido para consulta directa controlada:
+
+```powershell
+$body = @{
+  operation = 'collection_count'
+  collection_name = 'code_symbols'
+  where = @{ language = 'python' }
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/admin/chroma/query -ContentType 'application/json' -Headers @{ 'X-Chroma-Admin-Token' = '<token-opcional>' } -Body $body
+```
 
 ## Comandos por Journey
 

@@ -23,6 +23,7 @@ class _FakeCollection:
         self.fail_once = fail_once
         self.error_once = error_once
         self.repo_ids: list[str] = []
+        self.metadata: dict[str, Any] = {}
 
     def upsert(
         self,
@@ -45,16 +46,25 @@ class _FakeCollection:
         """Proporcione una respuesta de consulta mínima para que esté completa."""
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
+    def count(self) -> int:
+        """Devuelve el total de ids almacenados en la colección falsa."""
+        return len(self.repo_ids)
+
     def get(self, **kwargs: Any) -> dict[str, list[str]]:
         """Devuelve ids filtrados por repo_id para probar borrado selectivo."""
         where = kwargs.get("where") or {}
         repo_id = where.get("repo_id")
         if repo_id is None:
-            return {"ids": []}
-
-        matches = [item_id for item_id in self.repo_ids if item_id.startswith(f"{repo_id}:")]
+            matches = list(self.repo_ids)
+        else:
+            matches = [
+                item_id
+                for item_id in self.repo_ids
+                if item_id.startswith(f"{repo_id}:")
+            ]
         limit = int(kwargs.get("limit") or len(matches))
-        return {"ids": matches[:limit]}
+        offset = int(kwargs.get("offset") or 0)
+        return {"ids": matches[offset:offset + limit]}
 
     def delete(self, ids: list[str]) -> None:
         """Elimina ids simulados para un repo_id en pruebas."""
@@ -391,6 +401,93 @@ def test_build_remote_error_message_detects_upstream_restart_signal() -> None:
 
     assert "señal=upstream_reiniciando" in message
     assert "reinicios del pod remoto de Chroma" in message
+
+
+def test_count_collection_uses_native_counter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Usa count nativo de la colección cuando el runtime lo expone."""
+    fake_client = _FakeClient()
+
+    import coderag.ingestion.index_chroma as module
+
+    monkeypatch.setattr(
+        module.chromadb,
+        "PersistentClient",
+        lambda *args, **kwargs: fake_client,
+    )
+    _prepare_embedded_settings(monkeypatch, module)
+    try:
+        index = module.ChromaIndex()
+    finally:
+        module.get_settings.cache_clear()
+
+    fake_client.collections["code_symbols"].repo_ids = [
+        "repo-1:a",
+        "repo-1:b",
+        "repo-2:c",
+    ]
+
+    assert index.count_collection("code_symbols") == 3
+
+
+def test_get_collection_metadata_returns_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entrega una copia defensiva de metadata de la colección gestionada."""
+    fake_client = _FakeClient()
+
+    import coderag.ingestion.index_chroma as module
+
+    monkeypatch.setattr(
+        module.chromadb,
+        "PersistentClient",
+        lambda *args, **kwargs: fake_client,
+    )
+    _prepare_embedded_settings(monkeypatch, module)
+    try:
+        index = module.ChromaIndex()
+    finally:
+        module.get_settings.cache_clear()
+
+    metadata = index.get_collection_metadata("code_symbols")
+    metadata["mutated"] = True
+
+    assert index.get_collection_metadata("code_symbols") == {
+        "hnsw:space": "cosine"
+    }
+
+
+def test_count_collection_supports_filtered_where(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cuenta subconjuntos usando where cuando no aplica count nativo global."""
+    fake_client = _FakeClient()
+
+    import coderag.ingestion.index_chroma as module
+
+    monkeypatch.setattr(
+        module.chromadb,
+        "PersistentClient",
+        lambda *args, **kwargs: fake_client,
+    )
+    _prepare_embedded_settings(monkeypatch, module)
+    try:
+        index = module.ChromaIndex()
+    finally:
+        module.get_settings.cache_clear()
+
+    fake_client.collections["code_symbols"].repo_ids = [
+        "repo-1:a",
+        "repo-1:b",
+        "repo-2:c",
+    ]
+
+    assert index.count_collection(
+        "code_symbols",
+        page_size=1,
+        where={"repo_id": "repo-1"},
+    ) == 2
 
 
 def test_remote_upsert_wraps_payload_too_large_with_batch_hint(

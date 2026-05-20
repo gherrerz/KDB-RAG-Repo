@@ -1,5 +1,7 @@
 """Pruebas API para puntos finales primarios."""
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -1383,3 +1385,293 @@ def test_ingest_endpoint_blocks_when_storage_preflight_fails(monkeypatch) -> Non
     assert response.status_code == 503
     payload = response.json()
     assert payload["detail"]["health"]["failed_components"] == ["chroma"]
+
+
+def test_chroma_diagnostics_endpoint_returns_counts(monkeypatch) -> None:
+    """Retorna conteos y metadata para colecciones gestionadas de Chroma."""
+
+    class FakeIndex:
+        def list_collection_names(self) -> list[str]:
+            return ["code_symbols", "code_files"]
+
+        def count_collection(
+            self,
+            collection_name: str,
+            page_size: int = 500,
+            where: dict | None = None,
+        ) -> int:
+            assert page_size == 250
+            assert where is None
+            return {"code_symbols": 11, "code_files": 3}[collection_name]
+
+        def get_collection_metadata(self, collection_name: str) -> dict[str, str]:
+            return {"name": collection_name, "hnsw:space": "cosine"}
+
+        def count_by_repo_id(
+            self,
+            collection_name: str,
+            repo_id: str,
+            page_size: int = 500,
+        ) -> int:
+            assert repo_id == "mall"
+            assert page_size == 250
+            return {"code_symbols": 7, "code_files": 1}[collection_name]
+
+    monkeypatch.setattr(server, "build_managed_vector_index", lambda: FakeIndex())
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            chroma_mode="remote",
+            chroma_admin_api_enabled=True,
+            chroma_admin_api_token="",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.get(
+        "/admin/chroma/diagnostics",
+        params=[
+            ("repo_id", "mall"),
+            ("collection_names", "code_symbols"),
+            ("page_size", "250"),
+        ],
+        headers={"X-Chroma-Admin-Token": "ignored-when-empty"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["chroma_mode"] == "remote"
+    assert payload["repo_id"] == "mall"
+    assert payload["partial"] is False
+    assert payload["collection_names"] == ["code_symbols"]
+    assert payload["collections"][0]["total_count"] == 11
+    assert payload["collections"][0]["repo_count"] == 7
+    assert payload["collections"][0]["metadata"]["hnsw:space"] == "cosine"
+
+
+def test_chroma_query_endpoint_lists_managed_collections(monkeypatch) -> None:
+    """Expone un listado controlado de colecciones gestionadas de Chroma."""
+
+    class FakeIndex:
+        def list_collection_names(self) -> list[str]:
+            return ["code_symbols", "code_files"]
+
+    monkeypatch.setattr(server, "build_managed_vector_index", lambda: FakeIndex())
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            chroma_admin_api_enabled=True,
+            chroma_admin_api_token="",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/admin/chroma/query",
+        json={"operation": "list_collections"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["operation"] == "list_collections"
+    assert payload["result"]["collection_names"] == [
+        "code_symbols",
+        "code_files",
+    ]
+
+
+def test_chroma_query_endpoint_rejects_invalid_collection(monkeypatch) -> None:
+    """Rechaza colecciones no gestionadas antes de ejecutar la operación."""
+
+    class FakeIndex:
+        def list_collection_names(self) -> list[str]:
+            return ["code_symbols"]
+
+    monkeypatch.setattr(server, "build_managed_vector_index", lambda: FakeIndex())
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            chroma_admin_api_enabled=True,
+            chroma_admin_api_token="",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/admin/chroma/query",
+        json={
+            "operation": "collection_count",
+            "collection_name": "unknown_collection",
+        },
+    )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["detail"]["code"] == "invalid_chroma_collection"
+
+
+def test_chroma_query_endpoint_executes_get(monkeypatch) -> None:
+    """Delega get directo a la capa vectorial gestionada."""
+
+    class FakeIndex:
+        def list_collection_names(self) -> list[str]:
+            return ["code_symbols"]
+
+        def get_collection(
+            self,
+            collection_name: str,
+            *,
+            where: dict | None = None,
+            where_document: dict | None = None,
+            include: list[str] | None = None,
+            limit: int | None = None,
+            offset: int | None = None,
+        ) -> dict[str, object]:
+            assert collection_name == "code_symbols"
+            assert where == {"repo_id": "mall"}
+            assert include == ["metadatas", "documents"]
+            assert limit == 5
+            assert offset == 0
+            assert where_document is None
+            return {"ids": ["id-1"], "documents": ["hello"]}
+
+    monkeypatch.setattr(server, "build_managed_vector_index", lambda: FakeIndex())
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            chroma_admin_api_enabled=True,
+            chroma_admin_api_token="",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/admin/chroma/query",
+        json={
+            "operation": "get",
+            "collection_name": "code_symbols",
+            "where": {"repo_id": "mall"},
+            "include": ["metadatas", "documents"],
+            "limit": 5,
+            "offset": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["collection_name"] == "code_symbols"
+    assert payload["effective_params"]["where"] == {"repo_id": "mall"}
+    assert payload["result"]["ids"] == ["id-1"]
+
+
+def test_chroma_query_endpoint_requires_query_texts_for_query_operation() -> None:
+    """Valida el contrato del payload antes de ejecutar query en Chroma."""
+
+    server.get_settings.cache_clear()
+    
+    client = TestClient(app)
+    response = client.post(
+        "/admin/chroma/query",
+        json={
+            "operation": "query",
+            "collection_name": "code_symbols",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_chroma_admin_endpoints_are_disabled_by_feature_flag(monkeypatch) -> None:
+    """Oculta endpoints administrativos de Chroma cuando el flag está apagado."""
+
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            chroma_admin_api_enabled=False,
+            chroma_admin_api_token="",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.get("/admin/chroma/diagnostics")
+
+    assert response.status_code == 404
+
+
+def test_chroma_query_endpoint_requires_admin_token_when_configured(
+    monkeypatch,
+) -> None:
+    """Requiere header administrativo cuando hay token configurado."""
+
+    class FakeIndex:
+        def list_collection_names(self) -> list[str]:
+            return ["code_symbols"]
+
+    monkeypatch.setattr(server, "build_managed_vector_index", lambda: FakeIndex())
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            chroma_admin_api_enabled=True,
+            chroma_admin_api_token="secret-token",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/admin/chroma/query",
+        json={"operation": "list_collections"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_chroma_query_endpoint_supports_filtered_collection_count(
+    monkeypatch,
+) -> None:
+    """Permite contar subconjuntos por where sin limitarse a repo_id."""
+
+    class FakeIndex:
+        def list_collection_names(self) -> list[str]:
+            return ["code_symbols"]
+
+        def count_collection(
+            self,
+            collection_name: str,
+            page_size: int = 500,
+            where: dict | None = None,
+        ) -> int:
+            assert collection_name == "code_symbols"
+            assert page_size == 500
+            assert where == {"language": "python"}
+            return 9
+
+    monkeypatch.setattr(server, "build_managed_vector_index", lambda: FakeIndex())
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            chroma_admin_api_enabled=True,
+            chroma_admin_api_token="",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/admin/chroma/query",
+        json={
+            "operation": "collection_count",
+            "collection_name": "code_symbols",
+            "where": {"language": "python"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["result"]["count"] == 9
+    assert payload["effective_params"]["where"] == {"language": "python"}

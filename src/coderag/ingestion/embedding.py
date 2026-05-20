@@ -116,7 +116,7 @@ class EmbeddingClient:
             api_key=self.api_key,
         )
         self.max_chars_per_text = 12000
-        self.batch_size = 64
+        self.batch_size = 5 if self.provider == "vertex" else 64
 
     @classmethod
     def _resolve_client(

@@ -137,6 +137,60 @@ Retorna reporte consolidado de salud de storage.
 
 - Response schema: `StorageHealthResponse`
 
+#### GET /admin/chroma/diagnostics
+
+Retorna un resumen diagnóstico de colecciones gestionadas de Chroma.
+
+- Query params:
+  - `repo_id: str | null`
+  - `collection_names: list[str] | null`
+  - `page_size: int = 500` (min `1`, max `5000`)
+- Header opcional cuando hay token configurado:
+  - `X-Chroma-Admin-Token: str`
+- Response schema: `ChromaDiagnosticsResponse`
+- Error responses:
+  - `422`: se solicitaron colecciones no gestionadas (`detail` es objeto)
+  - `503`: no se pudo construir el diagnóstico (`detail` es objeto)
+
+Notas de comportamiento:
+
+- Siempre retorna conteo total por colección cuando la lectura es posible.
+- Si se envía `repo_id`, agrega además `repo_count` por colección.
+- Si algunas colecciones fallan y otras responden, devuelve `200` con
+  `partial=true` y llena `warnings[]`.
+
+#### POST /admin/chroma/query
+
+Ejecuta una operación directa de solo lectura sobre Chroma, acotada a un
+allowlist de operaciones permitidas.
+
+- Request schema: `ChromaQueryRequest`
+- Header opcional cuando hay token configurado:
+  - `X-Chroma-Admin-Token: str`
+- Response schema: `ChromaQueryResponse`
+- Error responses:
+  - `422`: payload inválido o colección no gestionada (`detail` es objeto)
+  - `503`: fallo durante la operación remota/local en Chroma (`detail` es objeto)
+
+Operaciones permitidas:
+
+- `list_collections`
+- `collection_count`
+- `collection_metadata`
+- `get`
+- `peek`
+- `query`
+
+Notas de comportamiento:
+
+- Es un endpoint de solo lectura; no expone writes, deletes ni creación de
+  colecciones.
+- El endpoint solo está disponible cuando `CHROMA_ADMIN_API_ENABLED=true`.
+- `query` en esta versión usa `query_texts`; `query_embeddings` no está
+  expuesto por el contrato HTTP.
+- La colección debe pertenecer al set gestionado por la aplicación.
+- `collection_count` acepta `where` para contar subconjuntos arbitrarios.
+
 #### DELETE /repos/{repo_id}
 
 Elimina datos del repositorio en todas las capas de storage.
@@ -172,6 +226,8 @@ Limpia todo el estado indexado.
 | GET | `/repos/{repo_id}/status` | `get_repo_query_status` | Path/query params | `RepoQueryStatusResponse` |
 | GET | `/providers/models` | `discover_models` | Query params | `ProviderModelCatalogResponse` |
 | GET | `/health` | `run_storage_preflight` | N/A | `StorageHealthResponse` |
+| GET | `/admin/chroma/diagnostics` | `build_managed_vector_index` + Chroma diagnostics | Query params | `ChromaDiagnosticsResponse` |
+| POST | `/admin/chroma/query` | `build_managed_vector_index` + Chroma direct read | `ChromaQueryRequest` | `ChromaQueryResponse` |
 | DELETE | `/repos/{repo_id}` | `JobManager.delete_repo` | Path params | `RepoDeleteResponse` |
 | POST | `/admin/reset` | `JobManager.reset_all_data` | N/A | `ResetResponse` |
 
@@ -423,6 +479,67 @@ Notas operativas de inventory/discovery:
 | `models` | `list[str]` | no | Modelos disponibles o fallback |
 | `source` | `str` | sí | `remote`, `cache` o `fallback` |
 | `warning` | `str \| null` | no | Warning opcional de fallback |
+
+### Enum: ChromaQueryOperation
+
+- `list_collections`
+- `collection_count`
+- `collection_metadata`
+- `get`
+- `peek`
+- `query`
+
+### ChromaDiagnosticsCollectionResult
+
+| Field | Type | Requerido | Default |
+| --- | --- | --- | --- |
+| `collection_name` | `str` | sí | - |
+| `total_count` | `int \| null` | no | `null` |
+| `repo_count` | `int \| null` | no | `null` |
+| `metadata` | `dict[str, Any]` | no | `{}` |
+| `error` | `str \| null` | no | `null` |
+
+### ChromaDiagnosticsResponse
+
+| Field | Type | Requerido | Default |
+| --- | --- | --- | --- |
+| `chroma_mode` | `str` | sí | - |
+| `repo_id` | `str \| null` | no | `null` |
+| `collection_names` | `list[str]` | no | `[]` |
+| `partial` | `bool` | no | `false` |
+| `warnings` | `list[str]` | no | `[]` |
+| `collections` | `list[ChromaDiagnosticsCollectionResult]` | no | `[]` |
+
+### ChromaQueryRequest
+
+| Field | Type | Requerido | Default |
+| --- | --- | --- | --- |
+| `operation` | `ChromaQueryOperation` | sí | - |
+| `collection_name` | `str \| null` | no | `null` |
+| `where` | `dict[str, Any] \| null` | no | `null` |
+| `where_document` | `dict[str, Any] \| null` | no | `null` |
+| `include` | `list[str] \| null` | no | `null` |
+| `limit` | `int \| null` | no | `10` |
+| `offset` | `int \| null` | no | `0` |
+| `n_results` | `int \| null` | no | `10` |
+| `query_texts` | `list[str] \| null` | no | `null` |
+
+Notas:
+
+- `query_texts` es obligatorio solo cuando `operation=query`.
+- `collection_name` es obligatorio para todas las operaciones excepto
+  `list_collections`.
+
+### ChromaQueryResponse
+
+| Field | Type | Requerido | Default |
+| --- | --- | --- | --- |
+| `operation` | `ChromaQueryOperation` | sí | - |
+| `collection_name` | `str \| null` | no | `null` |
+| `effective_params` | `dict[str, Any]` | no | `{}` |
+| `result` | `Any` | sí | - |
+| `warnings` | `list[str]` | no | `[]` |
+| `elapsed_ms` | `float` | sí | - |
 
 ### RepoQueryStatusResponse
 

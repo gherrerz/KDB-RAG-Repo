@@ -120,6 +120,14 @@ class Settings(BaseSettings):
     chroma_token: str = Field(default="", alias="CHROMA_TOKEN")
     chroma_username: str = Field(default="", alias="CHROMA_USERNAME")
     chroma_password: str = Field(default="", alias="CHROMA_PASSWORD")
+    chroma_admin_api_enabled: bool = Field(
+        default=True,
+        alias="CHROMA_ADMIN_API_ENABLED",
+    )
+    chroma_admin_api_token: str = Field(
+        default="",
+        alias="CHROMA_ADMIN_API_TOKEN",
+    )
     chroma_remote_batch_size_override: int = Field(
         default=0,
         alias="CHROMA_REMOTE_BATCH_SIZE_OVERRIDE",
@@ -339,6 +347,9 @@ class Settings(BaseSettings):
         self.chroma_token = token
         self.chroma_username = username
         self.chroma_password = password
+        self.chroma_admin_api_token = (
+            self.chroma_admin_api_token or ""
+        ).strip()
 
         has_basic = bool(username or password)
         if token and has_basic:
@@ -357,6 +368,17 @@ class Settings(BaseSettings):
         if self.chroma_remote_batch_size_override < 0:
             raise ValueError(
                 "CHROMA_REMOTE_BATCH_SIZE_OVERRIDE no puede ser negativo."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _warn_unprotected_chroma_admin_api(self) -> "Settings":
+        """Advierte cuando el endpoint admin de Chroma queda sin token."""
+        if self.chroma_admin_api_enabled and not self.chroma_admin_api_token:
+            _settings_log.warning(
+                "SECURITY: CHROMA_ADMIN_API_ENABLED=true sin "
+                "CHROMA_ADMIN_API_TOKEN. El endpoint admin de Chroma quedará "
+                "protegido solo por feature flag."
             )
         return self
 

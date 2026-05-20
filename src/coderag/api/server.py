@@ -2,12 +2,18 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from time import perf_counter
 from typing import cast
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 
 from coderag.core.logging import configure_logging
 from coderag.core.models import (
+    ChromaDiagnosticsCollectionResult,
+    ChromaDiagnosticsResponse,
+    ChromaQueryOperation,
+    ChromaQueryRequest,
+    ChromaQueryResponse,
     InventoryQueryRequest,
     InventoryQueryResponse,
     JobInfo,
@@ -31,6 +37,7 @@ from coderag.core.storage_health import (
     run_storage_preflight,
 )
 from coderag.core.settings import get_settings
+from coderag.core.vector_index import build_managed_vector_index
 from coderag.jobs.worker import IngestionConflictError, JobManager
 from coderag.llm.model_discovery import discover_models
 
@@ -147,6 +154,103 @@ def _ensure_repo_query_ready(readiness: dict[str, object]) -> None:
                 "repo_status": readiness,
             },
         )
+
+
+def _ensure_chroma_admin_access(admin_token: str | None) -> None:
+    """Protege endpoints administrativos de Chroma con flag y token opcional."""
+    settings = get_settings()
+    if not bool(getattr(settings, "chroma_admin_api_enabled", False)):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": "El endpoint administrativo de Chroma está deshabilitado.",
+                "code": "chroma_admin_disabled",
+            },
+        )
+
+    expected_token = str(
+        getattr(settings, "chroma_admin_api_token", "") or ""
+    ).strip()
+    if expected_token and (admin_token or "").strip() != expected_token:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Token administrativo inválido para endpoint Chroma.",
+                "code": "invalid_chroma_admin_token",
+            },
+        )
+
+
+def _resolve_chroma_collection_names(
+    requested_names: list[str] | None,
+) -> tuple[object, list[str]]:
+    """Valida y retorna las colecciones gestionadas a consultar."""
+    index = build_managed_vector_index()
+    available_names = index.list_collection_names()
+    if not requested_names:
+        return index, available_names
+
+    unique_names = list(dict.fromkeys(requested_names))
+    invalid_names = sorted(
+        name for name in unique_names if name not in available_names
+    )
+    if invalid_names:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Se solicitaron colecciones Chroma no gestionadas.",
+                "code": "invalid_chroma_collection",
+                "invalid_collections": invalid_names,
+                "available_collections": available_names,
+            },
+        )
+    return index, unique_names
+
+
+def _validate_chroma_collection_name(
+    index: object,
+    collection_name: str | None,
+) -> str | None:
+    """Valida que una colección exista dentro del backend gestionado."""
+    if collection_name is None:
+        return None
+
+    available_names = index.list_collection_names()
+    if collection_name not in available_names:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "La colección solicitada no existe en Chroma gestionado.",
+                "code": "invalid_chroma_collection",
+                "collection_name": collection_name,
+                "available_collections": available_names,
+            },
+        )
+    return collection_name
+
+
+def _build_chroma_effective_params(
+    request: ChromaQueryRequest,
+) -> dict[str, object]:
+    """Serializa solo los parámetros efectivos del request a Chroma."""
+    params: dict[str, object] = {}
+    if request.collection_name is not None:
+        params["collection_name"] = request.collection_name
+    if request.where is not None:
+        params["where"] = request.where
+    if request.where_document is not None:
+        params["where_document"] = request.where_document
+    if request.include is not None:
+        params["include"] = request.include
+    if request.limit is not None:
+        params["limit"] = request.limit
+    if request.offset is not None:
+        params["offset"] = request.offset
+    if request.n_results is not None:
+        params["n_results"] = request.n_results
+    if request.query_texts is not None:
+        params["query_texts"] = request.query_texts
+    return params
 
 
 @app.post(
@@ -533,6 +637,192 @@ def storage_health() -> StorageHealthResponse:
     report = run_storage_preflight(context="health", force=True)
     app.state.storage_health = report
     return StorageHealthResponse(**report)
+
+
+@app.get(
+    "/admin/chroma/diagnostics",
+    response_model=ChromaDiagnosticsResponse,
+    tags=["Admin"],
+    summary="Diagnóstico directo de Chroma",
+    description=(
+        "Retorna conteos y metadata de colecciones gestionadas de Chroma, "
+        "con opción de contar también por repo_id."
+    ),
+    responses={
+        422: {"description": "Se solicitaron colecciones no gestionadas."},
+        503: {"description": "No se pudo construir el diagnóstico en Chroma."},
+    },
+)
+def chroma_diagnostics(
+    repo_id: str | None = None,
+    collection_names: list[str] | None = Query(
+        default=None,
+        description="Lista opcional de colecciones gestionadas a evaluar.",
+    ),
+    page_size: int = Query(
+        default=500,
+        ge=1,
+        le=5000,
+        description="Tamaño de página usado para conteos paginados.",
+    ),
+    x_chroma_admin_token: str | None = Header(
+        default=None,
+        alias="X-Chroma-Admin-Token",
+    ),
+) -> ChromaDiagnosticsResponse:
+    """Expone un resumen operativo de Chroma útil para soporte."""
+    _ensure_chroma_admin_access(x_chroma_admin_token)
+    settings = get_settings()
+    index, selected_names = _resolve_chroma_collection_names(collection_names)
+    warnings: list[str] = []
+    results: list[ChromaDiagnosticsCollectionResult] = []
+
+    for collection_name in selected_names:
+        total_count: int | None = None
+        repo_count: int | None = None
+        metadata: dict[str, object] = {}
+        error: str | None = None
+        try:
+            total_count = index.count_collection(
+                collection_name,
+                page_size=page_size,
+            )
+            metadata = index.get_collection_metadata(collection_name)
+            if repo_id is not None:
+                repo_count = index.count_by_repo_id(
+                    collection_name,
+                    repo_id,
+                    page_size=page_size,
+                )
+        except Exception as exc:
+            error = str(exc)
+            warnings.append(f"{collection_name}: {exc}")
+
+        results.append(
+            ChromaDiagnosticsCollectionResult(
+                collection_name=collection_name,
+                total_count=total_count,
+                repo_count=repo_count,
+                metadata=metadata,
+                error=error,
+            )
+        )
+
+    if results and all(item.error is not None for item in results):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "No se pudo construir el diagnóstico de Chroma.",
+                "code": "chroma_diagnostics_failed",
+                "warnings": warnings,
+            },
+        )
+
+    return ChromaDiagnosticsResponse(
+        chroma_mode=str(settings.chroma_mode),
+        repo_id=repo_id,
+        collection_names=selected_names,
+        partial=any(item.error is not None for item in results),
+        warnings=warnings,
+        collections=results,
+    )
+
+
+@app.post(
+    "/admin/chroma/query",
+    response_model=ChromaQueryResponse,
+    tags=["Admin"],
+    summary="Consulta directa controlada a Chroma",
+    description=(
+        "Ejecuta operaciones de lectura permitidas sobre Chroma para "
+        "diagnóstico y soporte operativo."
+    ),
+    responses={
+        422: {"description": "Payload inválido o colección no gestionada."},
+        503: {"description": "Fallo al ejecutar la operación en Chroma."},
+    },
+)
+def chroma_query(
+    request: ChromaQueryRequest,
+    x_chroma_admin_token: str | None = Header(
+        default=None,
+        alias="X-Chroma-Admin-Token",
+    ),
+) -> ChromaQueryResponse:
+    """Ejecuta una operación de lectura permitida sobre Chroma."""
+    started_at = perf_counter()
+    _ensure_chroma_admin_access(x_chroma_admin_token)
+    index = build_managed_vector_index()
+    collection_name = _validate_chroma_collection_name(
+        index,
+        request.collection_name,
+    )
+
+    try:
+        if request.operation == ChromaQueryOperation.list_collections:
+            result: object = {"collection_names": index.list_collection_names()}
+        elif request.operation == ChromaQueryOperation.collection_count:
+            assert collection_name is not None
+            result = {
+                "count": index.count_collection(
+                    collection_name,
+                    where=request.where,
+                ),
+            }
+        elif request.operation == ChromaQueryOperation.collection_metadata:
+            assert collection_name is not None
+            result = index.get_collection_metadata(collection_name)
+        elif request.operation == ChromaQueryOperation.get:
+            assert collection_name is not None
+            result = index.get_collection(
+                collection_name,
+                where=request.where,
+                where_document=request.where_document,
+                include=request.include,
+                limit=request.limit,
+                offset=request.offset,
+            )
+        elif request.operation == ChromaQueryOperation.peek:
+            assert collection_name is not None
+            result = index.get_collection(
+                collection_name,
+                include=request.include,
+                limit=request.limit,
+                offset=0,
+            )
+        else:
+            assert collection_name is not None
+            result = index.query_collection(
+                collection_name,
+                query_texts=request.query_texts,
+                n_results=request.n_results or 10,
+                where=request.where,
+                where_document=request.where_document,
+                include=request.include,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "La operación de lectura en Chroma falló.",
+                "code": "chroma_query_failed",
+                "operation": request.operation.value,
+                "collection_name": collection_name,
+                "error": str(exc),
+            },
+        ) from exc
+
+    elapsed_ms = round((perf_counter() - started_at) * 1000, 3)
+    return ChromaQueryResponse(
+        operation=request.operation,
+        collection_name=collection_name,
+        effective_params=_build_chroma_effective_params(request),
+        result=result,
+        warnings=[],
+        elapsed_ms=elapsed_ms,
+    )
 
 
 @app.post(

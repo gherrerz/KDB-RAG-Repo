@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _normalize_optional_text(value: Any) -> str | None | Any:
@@ -18,6 +18,23 @@ def _normalize_optional_text(value: Any) -> str | None | Any:
     if cleaned.lower() == "string":
         return None
     return cleaned
+
+
+def _normalize_optional_text_list(value: Any) -> list[str] | None | Any:
+    """Normaliza listas opcionales de texto provenientes de OpenAPI."""
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return value
+
+    normalized = [
+        item.strip()
+        for item in value
+        if isinstance(item, str)
+        and item.strip()
+        and item.strip().lower() != "string"
+    ]
+    return normalized or None
 
 
 def utc_now() -> datetime:
@@ -462,6 +479,185 @@ class ProviderModelCatalogResponse(BaseModel):
     models: list[str] = Field(default_factory=list, description="Lista de modelos disponibles o fallback.")
     source: str = Field(description="Origen de datos: remote, cache o fallback.")
     warning: str | None = Field(default=None, description="Código de advertencia cuando aplica fallback o error.")
+
+
+class ChromaQueryOperation(str, Enum):
+    """Operaciones de lectura permitidas para consultas directas a Chroma."""
+
+    list_collections = "list_collections"
+    collection_count = "collection_count"
+    collection_metadata = "collection_metadata"
+    get = "get"
+    peek = "peek"
+    query = "query"
+
+
+class ChromaDiagnosticsCollectionResult(BaseModel):
+    """Resumen diagnóstico de una colección gestionada en Chroma."""
+
+    collection_name: str = Field(description="Nombre de la colección evaluada.")
+    total_count: int | None = Field(
+        default=None,
+        description="Conteo total de documentos en la colección.",
+    )
+    repo_count: int | None = Field(
+        default=None,
+        description="Conteo filtrado por repo_id cuando se solicita.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Metadata cruda útil para diagnóstico.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Detalle de error parcial cuando la colección falla.",
+    )
+
+
+class ChromaDiagnosticsResponse(BaseModel):
+    """Respuesta consolidada del endpoint diagnóstico de Chroma."""
+
+    chroma_mode: str = Field(description="Modo efectivo del backend Chroma.")
+    repo_id: str | None = Field(
+        default=None,
+        description="Repositorio evaluado cuando se solicita conteo por repo.",
+    )
+    collection_names: list[str] = Field(
+        default_factory=list,
+        description="Colecciones evaluadas en esta ejecución.",
+    )
+    partial: bool = Field(
+        default=False,
+        description="Indica si hubo fallos parciales recuperables.",
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Advertencias operativas acumuladas durante el diagnóstico.",
+    )
+    collections: list[ChromaDiagnosticsCollectionResult] = Field(
+        default_factory=list,
+        description="Resultados por colección gestionada.",
+    )
+
+
+class ChromaQueryRequest(BaseModel):
+    """Payload controlado para consultas directas de solo lectura a Chroma."""
+
+    operation: ChromaQueryOperation = Field(
+        description="Operación de lectura permitida a ejecutar.",
+    )
+    collection_name: str | None = Field(
+        default=None,
+        description="Colección objetivo cuando la operación lo requiere.",
+    )
+    where: dict[str, Any] | None = Field(
+        default=None,
+        description="Filtro metadata opcional para operaciones get o query.",
+    )
+    where_document: dict[str, Any] | None = Field(
+        default=None,
+        description="Filtro documental opcional para get o query.",
+    )
+    include: list[str] | None = Field(
+        default=None,
+        description="Campos adicionales requeridos en la respuesta de Chroma.",
+    )
+    limit: int | None = Field(
+        default=10,
+        ge=1,
+        le=1000,
+        description="Límite máximo para operaciones tipo get o peek.",
+    )
+    offset: int | None = Field(
+        default=0,
+        ge=0,
+        le=100000,
+        description="Offset para operaciones tipo get.",
+    )
+    n_results: int | None = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Cantidad de resultados para operaciones tipo query.",
+    )
+    query_texts: list[str] | None = Field(
+        default=None,
+        description="Textos de consulta cuando la operación es query.",
+    )
+
+    @field_validator("collection_name", mode="before")
+    @classmethod
+    def normalize_collection_name(cls, value: Any) -> str | None | Any:
+        """Sanea collection_name opcional recibido por HTTP."""
+        return _normalize_optional_text(value)
+
+    @field_validator("include", "query_texts", mode="before")
+    @classmethod
+    def normalize_text_lists(
+        cls,
+        value: Any,
+    ) -> list[str] | None | Any:
+        """Elimina placeholders vacíos en listas de strings opcionales."""
+        return _normalize_optional_text_list(value)
+
+    @model_validator(mode="after")
+    def validate_operation_contract(self) -> "ChromaQueryRequest":
+        """Valida requisitos mínimos por operación soportada."""
+        collection_operations = {
+            ChromaQueryOperation.collection_count,
+            ChromaQueryOperation.collection_metadata,
+            ChromaQueryOperation.get,
+            ChromaQueryOperation.peek,
+            ChromaQueryOperation.query,
+        }
+        if self.operation in collection_operations and not self.collection_name:
+            raise ValueError(
+                "collection_name es obligatorio para la operación solicitada"
+            )
+
+        if self.operation == ChromaQueryOperation.list_collections:
+            if self.collection_name is not None:
+                raise ValueError(
+                    "list_collections no acepta collection_name"
+                )
+            if self.query_texts is not None:
+                raise ValueError("list_collections no acepta query_texts")
+
+        if self.operation == ChromaQueryOperation.query:
+            if not self.query_texts:
+                raise ValueError(
+                    "query_texts es obligatorio para la operación query"
+                )
+        elif self.query_texts is not None:
+            raise ValueError(
+                "query_texts solo se admite cuando operation=query"
+            )
+
+        return self
+
+
+class ChromaQueryResponse(BaseModel):
+    """Respuesta envelope de consultas directas controladas a Chroma."""
+
+    operation: ChromaQueryOperation = Field(
+        description="Operación ejecutada sobre Chroma.",
+    )
+    collection_name: str | None = Field(
+        default=None,
+        description="Colección objetivo cuando aplica.",
+    )
+    effective_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parámetros efectivos usados en la ejecución.",
+    )
+    result: Any = Field(description="Resultado serializable retornado por la operación.")
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Advertencias no fatales asociadas a la ejecución.",
+    )
+    elapsed_ms: float = Field(
+        description="Tiempo total de ejecución de la operación en milisegundos.",
+    )
 
 
 class RepoQueryStatusResponse(BaseModel):

@@ -13,7 +13,7 @@ appContext: /
 resources:
   limits:
     cpu: 4000m
-    memory: 4096Mi
+    memory: 8192Mi
   requests:
     cpu: 500m
     memory: 1024Mi
@@ -80,7 +80,8 @@ extraEnv:
   LLM_VERIFY_ENABLED: "false"
   EMBEDDING_PROVIDER: "vertex"
   EMBEDDING_MODEL: "text-embedding-005"
-  VERTEX_API_BASE_URL: "https://aiplatform.googleapis.com"
+  #VERTEX_API_BASE_URL: "https://aiplatform.googleapis.com"
+  VERTEX_API_BASE_URL: "https://us-central1-aiplatform.googleapis.com"
   VERTEX_AUTH_TOKEN_URL: "https://oauth2.googleapis.com/token"
   VERTEX_API_VERSION: "v1"
   VERTEX_GENERATE_CONTENT_PATH_TEMPLATE: "/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
@@ -90,17 +91,17 @@ extraEnv:
   VERTEX_AI_PROJECT_ID: "cidat-21008-stg-cacc"
   VERTEX_AI_LOCATION: "us-central1"
   VERTEX_AI_LABELS_ENABLED: "true"
+  VERTEX_AI_LABELS_ENABLED: "true"
   VERTEX_AI_LABEL_SERVICE: "webspec-coipo"
   VERTEX_AI_LABEL_SERVICE_ACCOUNT: "qa-anthos"
   VERTEX_AI_LABEL_USE_CASE_ID: "tbd"
   VERTEX_AI_CORRELATION_ID_ENABLED: "true"
   CHROMA_PATH: "/app/storage/chroma"
   CHROMA_MODE: "remote"
-#  CHROMA_HOST: "http://chromadb-operator.svc"
   CHROMA_HOST: "chromadb-operator.chromadb-operator.svc"
   CHROMA_PORT: "8000"
   CHROMA_HNSW_SPACE: "cosine"
-#  POSTGRES_HOST: "http://coipo-postgres.svc"
+  CHROMA_REMOTE_BATCH_SIZE_OVERRIDE: "0"
   POSTGRES_HOST: "coipo-postgres.coipo.svc"
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "coipo_db"

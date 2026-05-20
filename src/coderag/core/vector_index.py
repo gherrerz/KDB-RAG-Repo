@@ -27,6 +27,45 @@ class ManagedVectorIndex(Protocol):
     def collection_hnsw_spaces(self) -> dict[str, str | None]:
         """Retorna el espacio HNSW detectado por colección."""
 
+    def list_collection_names(self) -> list[str]:
+        """Lista las colecciones gestionadas disponibles."""
+
+    def get_collection_metadata(self, collection_name: str) -> dict[str, Any]:
+        """Retorna metadata diagnóstica de una colección gestionada."""
+
+    def count_collection(
+        self,
+        collection_name: str,
+        page_size: int = 500,
+        where: dict[str, Any] | None = None,
+    ) -> int:
+        """Cuenta documentos totales en una colección gestionada."""
+
+    def get_collection(
+        self,
+        collection_name: str,
+        *,
+        where: dict[str, Any] | None = None,
+        where_document: dict[str, Any] | None = None,
+        include: list[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> dict[str, Any]:
+        """Ejecuta una lectura directa tipo get sobre una colección."""
+
+    def query_collection(
+        self,
+        collection_name: str,
+        *,
+        query_embeddings: list[list[float]] | None = None,
+        query_texts: list[str] | None = None,
+        n_results: int = 10,
+        where: dict[str, Any] | None = None,
+        where_document: dict[str, Any] | None = None,
+        include: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Ejecuta una consulta directa tipo query sobre una colección."""
+
     def count_by_repo_id(
         self,
         collection_name: str,

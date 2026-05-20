@@ -314,6 +314,177 @@ class ChromaIndex:
             self.client = self._shared_client
             self.collections = self._shared_collections
 
+    def list_collection_names(self) -> list[str]:
+        """Lista los nombres de colecciones gestionadas por el backend."""
+        return sorted(self.collections.keys())
+
+    def get_collection_metadata(self, collection_name: str) -> dict[str, Any]:
+        """Retorna una copia defensiva de la metadata de la colección."""
+        metadata = getattr(self.collections[collection_name], "metadata", None) or {}
+        return dict(metadata)
+
+    def _count_collection_pages(
+        self,
+        collection: Any,
+        *,
+        page_size: int,
+        where: dict[str, Any] | None = None,
+    ) -> int:
+        """Cuenta documentos vía paginación cuando no hay contador nativo."""
+        total = 0
+        offset = 0
+        while True:
+            page_args: dict[str, Any] = {
+                "limit": page_size,
+                "offset": offset,
+                "include": [],
+            }
+            if where is not None:
+                page_args["where"] = where
+            page = collection.get(**page_args)
+            ids = page.get("ids") or []
+            page_count = len(ids)
+            total += page_count
+            if page_count < page_size:
+                break
+            offset += page_size
+        return total
+
+    def count_collection(
+        self,
+        collection_name: str,
+        page_size: int = 500,
+        where: dict[str, Any] | None = None,
+    ) -> int:
+        """Cuenta documentos totales en una colección gestionada."""
+        settings = get_settings()
+        collection = self.collections[collection_name]
+        counter = getattr(collection, "count", None)
+        safe_page_size = max(1, page_size)
+        try:
+            if callable(counter) and where is None:
+                return int(counter())
+            return self._count_collection_pages(
+                collection,
+                page_size=safe_page_size,
+                where=where,
+            )
+        except Exception as exc:
+            if settings.chroma_mode == "remote":
+                raise RuntimeError(
+                    build_remote_chroma_error_message(
+                        settings,
+                        operation="contar documentos de colección",
+                        exc=exc,
+                        collection_name=collection_name,
+                        batch_size=safe_page_size,
+                    )
+                ) from exc
+            raise
+
+    def get_collection(
+        self,
+        collection_name: str,
+        *,
+        where: dict[str, Any] | None = None,
+        where_document: dict[str, Any] | None = None,
+        include: list[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> dict[str, Any]:
+        """Ejecuta una lectura directa tipo get sobre una colección."""
+        settings = get_settings()
+        request_args: dict[str, Any] = {}
+        if where is not None:
+            request_args["where"] = where
+        if where_document is not None:
+            request_args["where_document"] = where_document
+        if include is not None:
+            request_args["include"] = include
+        if limit is not None:
+            request_args["limit"] = limit
+        if offset is not None:
+            request_args["offset"] = offset
+        try:
+            return self.collections[collection_name].get(**request_args)
+        except Exception as exc:
+            if settings.chroma_mode == "remote":
+                raise RuntimeError(
+                    build_remote_chroma_error_message(
+                        settings,
+                        operation="leer colección con get",
+                        exc=exc,
+                        collection_name=collection_name,
+                    )
+                ) from exc
+            raise
+
+    def query_collection(
+        self,
+        collection_name: str,
+        *,
+        query_embeddings: list[list[float]] | None = None,
+        query_texts: list[str] | None = None,
+        n_results: int = 10,
+        where: dict[str, Any] | None = None,
+        where_document: dict[str, Any] | None = None,
+        include: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Ejecuta una consulta directa tipo query sobre una colección."""
+        settings = get_settings()
+        request_args: dict[str, Any] = {"n_results": n_results}
+        if query_embeddings is not None:
+            request_args["query_embeddings"] = query_embeddings
+        if query_texts is not None:
+            request_args["query_texts"] = query_texts
+        if where is not None:
+            request_args["where"] = where
+        if where_document is not None:
+            request_args["where_document"] = where_document
+        if include is not None:
+            request_args["include"] = include
+        try:
+            return self.collections[collection_name].query(**request_args)
+        except Exception as exc:
+            if _is_missing_collection_error(exc):
+                self.__class__.reset_shared_state()
+                self.__init__()
+                try:
+                    return self.collections[collection_name].query(**request_args)
+                except Exception as retry_exc:
+                    if settings.chroma_mode == "remote":
+                        raise RuntimeError(
+                            build_remote_chroma_error_message(
+                                settings,
+                                operation="query",
+                                exc=retry_exc,
+                                collection_name=collection_name,
+                            )
+                        ) from retry_exc
+                    raise
+            if not _is_dimension_mismatch_error(exc):
+                if _is_space_mismatch_error(exc):
+                    raise RuntimeError(
+                        "Espacio HNSW incompatible en Chroma. Verifica "
+                        "CHROMA_HNSW_SPACE y recrea índices antes de consultar."
+                    ) from exc
+                if settings.chroma_mode == "remote":
+                    raise RuntimeError(
+                        build_remote_chroma_error_message(
+                            settings,
+                            operation="query",
+                            exc=exc,
+                            collection_name=collection_name,
+                        )
+                    ) from exc
+                raise
+            return {
+                "ids": [[]],
+                "documents": [[]],
+                "metadatas": [[]],
+                "distances": [[]],
+            }
+
     def upsert(
         self,
         collection_name: str,
@@ -425,51 +596,12 @@ class ChromaIndex:
         where: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Busque vectores por similitud y filtro de metadatos opcional."""
-        settings = get_settings()
-        try:
-            return self.collections[collection_name].query(
-                query_embeddings=[query_embedding],
-                n_results=top_n,
-                where=where,
-            )
-        except Exception as exc:
-            if _is_missing_collection_error(exc):
-                self.__class__.reset_shared_state()
-                self.__init__()
-                try:
-                    return self.collections[collection_name].query(
-                        query_embeddings=[query_embedding],
-                        n_results=top_n,
-                        where=where,
-                    )
-                except Exception as retry_exc:
-                    if settings.chroma_mode == "remote":
-                        raise RuntimeError(
-                            build_remote_chroma_error_message(
-                                settings,
-                                operation="query",
-                                exc=retry_exc,
-                                collection_name=collection_name,
-                            )
-                        ) from retry_exc
-                    raise
-            if not _is_dimension_mismatch_error(exc):
-                if _is_space_mismatch_error(exc):
-                    raise RuntimeError(
-                        "Espacio HNSW incompatible en Chroma. Verifica "
-                        "CHROMA_HNSW_SPACE y recrea índices antes de consultar."
-                    ) from exc
-                if settings.chroma_mode == "remote":
-                    raise RuntimeError(
-                        build_remote_chroma_error_message(
-                            settings,
-                            operation="query",
-                            exc=exc,
-                            collection_name=collection_name,
-                        )
-                    ) from exc
-                raise
-            return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+        return self.query_collection(
+            collection_name,
+            query_embeddings=[query_embedding],
+            n_results=top_n,
+            where=where,
+        )
 
     @staticmethod
     def _normalize_hnsw_space(raw_value: Any) -> str | None:
@@ -500,15 +632,12 @@ class ChromaIndex:
         """Cuenta documentos de un repositorio en una colección Chroma."""
         settings = get_settings()
         collection = self.collections[collection_name]
-        total = 0
-        offset = 0
         while True:
             try:
-                page = collection.get(
+                return self._count_collection_pages(
+                    collection,
+                    page_size=max(1, page_size),
                     where={"repo_id": repo_id},
-                    limit=page_size,
-                    offset=offset,
-                    include=[],
                 )
             except Exception as exc:
                 if settings.chroma_mode == "remote":
@@ -518,16 +647,10 @@ class ChromaIndex:
                             operation="contar documentos por repo_id",
                             exc=exc,
                             collection_name=collection_name,
+                            batch_size=max(1, page_size),
                         )
                     ) from exc
                 raise
-            ids = page.get("ids") or []
-            page_count = len(ids)
-            total += page_count
-            if page_count < page_size:
-                break
-            offset += page_size
-        return total
 
     def delete_by_repo_id(
         self,
