@@ -20,10 +20,23 @@ if config.config_file_name is not None:
 target_metadata = POSTGRES_SCHEMA_METADATA
 
 
+def _has_explicit_sqlalchemy_url(configured_url: str) -> bool:
+    """Indica si la URL configurada apunta a un destino utilizable."""
+    normalized = configured_url.strip()
+    if not normalized:
+        return False
+
+    return normalized not in {
+        "postgres://",
+        "postgresql://",
+        "postgresql+psycopg://",
+    }
+
+
 def _get_postgres_url() -> str:
     """Resuelve la URL de Postgres para ejecutar migraciones."""
     configured_url = (config.get_main_option("sqlalchemy.url") or "").strip()
-    if configured_url:
+    if _has_explicit_sqlalchemy_url(configured_url):
         return configured_url
 
     settings = get_settings()

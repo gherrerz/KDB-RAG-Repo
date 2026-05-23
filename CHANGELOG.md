@@ -53,12 +53,17 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Nueva guia de handoff para cierre formal del bloque ORM/PostgreSQL y retiro
     legacy, con backlog final, evidencia de validacion y superficie residual
     aceptada.
+- Tracking operativo `last_queried_at` por repositorio en metadata runtime y
+    nuevo endpoint `GET /repos/last-query/stale` para listar repositorios sin
+    consultas recientes o nunca consultados.
 
 ### Changed
 
 - Se elimina la variable monolitica legacy de conexion Postgres del contrato de configuracion; el runtime, Compose,
   Kubernetes y scripts pasan a usar `POSTGRES_HOST`, `POSTGRES_PORT`,
   `POSTGRES_DB`, `POSTGRES_USER` y `POSTGRES_PASSWORD`.
+- El CLI directo de Alembic vuelve a resolver `POSTGRES_*` correctamente al
+    no tratar placeholders vacios de `sqlalchemy.url` como una URL efectiva.
 - El backend Postgres ahora crea y consulta las tablas
     `tbl_repository_jobs`, `tbl_repository_repos` y
     `tbl_repository_lexical_corpus`; despliegues existentes con tablas legacy

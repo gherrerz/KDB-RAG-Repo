@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 from typing import Any
 
 from sqlalchemy import case, delete, literal, select, update, union
@@ -26,6 +27,31 @@ def _coerce_diagnostics(value: Any) -> dict[str, Any]:
             return {}
         return loaded if isinstance(loaded, dict) else {}
     return {}
+
+
+def _normalize_datetime_offset(value: str) -> str:
+    """Normaliza offsets timezone abreviados a formato ISO completo."""
+    normalized = value.strip().replace(" ", "T", 1)
+    if normalized.endswith("Z"):
+        return normalized[:-1] + "+00:00"
+    if re.search(r"[+-]\d{2}$", normalized):
+        return normalized + ":00"
+    return normalized
+
+
+def _coerce_datetime_value(value: Any) -> datetime.datetime | None:
+    """Convierte timestamps runtime a datetime timezone-aware cuando aplica."""
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
+        return value
+    if isinstance(value, str) and value.strip():
+        normalized = _normalize_datetime_offset(value)
+        try:
+            return datetime.datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+    return None
 
 
 def _job_record_to_job_info(record: JobRecord) -> JobInfo:
@@ -207,6 +233,7 @@ class PostgresMetadataStore(BaseMetadataStore):
             local_path=local_path,
             created_at=now,
             updated_at=now,
+            last_queried_at=None,
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
         )
@@ -231,15 +258,77 @@ class PostgresMetadataStore(BaseMetadataStore):
         statement = select(
             RepoRecord.embedding_provider,
             RepoRecord.embedding_model,
+            RepoRecord.last_queried_at,
         ).where(RepoRecord.id == repo_id)
         with self._session_factory.get_session() as session:
             row = session.execute(statement).mappings().one_or_none()
         if row is None:
             return None
+        last_queried_at = _coerce_datetime_value(row["last_queried_at"])
         return {
             "last_embedding_provider": row["embedding_provider"],
             "last_embedding_model": row["embedding_model"],
+            "last_queried_at": (
+                last_queried_at.isoformat()
+                if last_queried_at is not None
+                else None
+            ),
         }
+
+    def touch_repo_last_queried_at(self, repo_id: str) -> int:
+        """Actualiza la fecha de última consulta del repositorio."""
+        now = datetime.datetime.now(datetime.UTC)
+        statement = (
+            update(RepoRecord)
+            .where(RepoRecord.id == repo_id)
+            .values(last_queried_at=now)
+        )
+        with self._session_factory.get_session() as session:
+            result = session.execute(statement)
+            session.commit()
+        return int(result.rowcount or 0)
+
+    def list_stale_repos(
+        self,
+        *,
+        last_queried_on_or_before: datetime.datetime,
+    ) -> list[dict[str, object | None]]:
+        """Lista repositorios con última consulta vencida o inexistente."""
+        statement = (
+            select(
+                RepoRecord.id.label("repo_id"),
+                RepoRecord.organization,
+                RepoRecord.url,
+                RepoRecord.branch,
+                RepoRecord.local_path,
+                RepoRecord.created_at,
+                RepoRecord.updated_at,
+                RepoRecord.last_queried_at,
+            )
+            .where(
+                (RepoRecord.last_queried_at.is_(None))
+                | (RepoRecord.last_queried_at <= last_queried_on_or_before)
+            )
+            .order_by(RepoRecord.id.asc())
+        )
+        with self._session_factory.get_session() as session:
+            rows = session.execute(statement).mappings().all()
+        return [
+            {
+                "repo_id": str(row["repo_id"]),
+                "organization": row["organization"],
+                "url": row["url"],
+                "branch": row["branch"],
+                "local_path": row["local_path"],
+                "created_at": _coerce_datetime_value(row["created_at"]),
+                "updated_at": _coerce_datetime_value(row["updated_at"]),
+                "last_queried_at": _coerce_datetime_value(
+                    row["last_queried_at"]
+                ),
+            }
+            for row in rows
+            if row["repo_id"]
+        ]
 
     def delete_repo_runtime(self, repo_id: str) -> int:
         """Elimina metadata runtime del repositorio y devuelve filas afectadas."""

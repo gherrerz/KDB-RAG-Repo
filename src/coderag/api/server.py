@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from time import perf_counter
 from typing import cast
 
@@ -21,6 +22,8 @@ from coderag.core.models import (
     QueryRequest,
     QueryResponse,
     RepoCatalogEntry,
+    RepoLastQueryStaleResponse,
+    RepoRuntimeEntry,
     RetrievalQueryRequest,
     RetrievalQueryResponse,
     RepoCatalogResponse,
@@ -125,6 +128,11 @@ def _build_repo_query_readiness(
     if runtime_payload:
         readiness.update(runtime_payload)
     return _normalize_repo_query_status_payload(readiness)
+
+
+def _mark_repo_as_queried(*, job_manager: JobManager, repo_id: str) -> None:
+    """Marca el repo como consultado cuando entra a un flujo válido."""
+    job_manager.touch_repo_last_queried_at(repo_id)
 
 
 def _ensure_repo_query_ready(readiness: dict[str, object]) -> None:
@@ -436,6 +444,7 @@ def query_repo(request: QueryRequest) -> QueryResponse:
         requested_embedding_model=request.embedding_model,
     )
     _ensure_repo_query_ready(readiness)
+    _mark_repo_as_queried(job_manager=job_manager, repo_id=request.repo_id)
 
     return run_query(
         repo_id=request.repo_id,
@@ -479,6 +488,9 @@ def query_inventory(request: InventoryQueryRequest) -> InventoryQueryResponse:
                 "health": exc.report,
             },
         ) from exc
+
+    job_manager = get_job_manager()
+    _mark_repo_as_queried(job_manager=job_manager, repo_id=request.repo_id)
 
     return run_inventory_query(
         repo_id=request.repo_id,
@@ -529,6 +541,7 @@ def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
         requested_embedding_model=request.embedding_model,
     )
     _ensure_repo_query_ready(readiness)
+    _mark_repo_as_queried(job_manager=job_manager, repo_id=request.repo_id)
 
     return run_retrieval_query(
         repo_id=request.repo_id,
@@ -562,6 +575,58 @@ def list_repos() -> RepoCatalogResponse:
     ]
     return RepoCatalogResponse(
         repo_ids=[item.repo_id for item in repositories],
+        repositories=repositories,
+    )
+
+
+@app.get(
+    "/repos/last-query/stale",
+    response_model=RepoLastQueryStaleResponse,
+    tags=["Catalogo"],
+    summary="Listar repositorios sin consultas recientes",
+    description=(
+        "Retorna repositorios cuya última consulta es menor o igual a una "
+        "fecha de corte, incluyendo repos nunca consultados."
+    ),
+)
+def list_stale_repos(
+    last_queried_on_or_before: datetime = Query(
+        ...,
+        description=(
+            "Fecha de corte ISO-8601. Incluye repos con last_queried_at <= "
+            "este valor y repos con last_queried_at null."
+        ),
+    ),
+) -> RepoLastQueryStaleResponse:
+    """Lista repositorios sin consultas recientes para una fecha de corte."""
+    job_manager = get_job_manager()
+    repositories = [
+        RepoRuntimeEntry(
+            repo_id=str(item["repo_id"]),
+            organization=(
+                str(item["organization"])
+                if item.get("organization") is not None
+                else None
+            ),
+            url=str(item["url"]) if item.get("url") is not None else None,
+            branch=(
+                str(item["branch"]) if item.get("branch") is not None else None
+            ),
+            local_path=(
+                str(item["local_path"])
+                if item.get("local_path") is not None
+                else None
+            ),
+            created_at=item["created_at"],
+            updated_at=item.get("updated_at"),
+            last_queried_at=item.get("last_queried_at"),
+        )
+        for item in job_manager.list_stale_repos(
+            last_queried_on_or_before=last_queried_on_or_before,
+        )
+    ]
+    return RepoLastQueryStaleResponse(
+        last_queried_on_or_before=last_queried_on_or_before,
         repositories=repositories,
     )
 

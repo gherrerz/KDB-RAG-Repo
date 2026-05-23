@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import datetime
 
 from coderag.core.models import JobInfo
 
@@ -51,6 +52,18 @@ class BaseMetadataStore(ABC):
     @abstractmethod
     def get_repo_runtime(self, repo_id: str) -> dict[str, str | None] | None:
         """Obtiene metadata runtime almacenada para un repositorio."""
+
+    @abstractmethod
+    def touch_repo_last_queried_at(self, repo_id: str) -> int:
+        """Actualiza la fecha de última consulta del repositorio."""
+
+    @abstractmethod
+    def list_stale_repos(
+        self,
+        *,
+        last_queried_on_or_before: datetime.datetime,
+    ) -> list[dict[str, object | None]]:
+        """Lista repositorios cuya última consulta es menor o igual a la fecha."""
 
     @abstractmethod
     def delete_repo_runtime(self, repo_id: str) -> int:

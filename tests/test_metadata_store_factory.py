@@ -103,6 +103,14 @@ def test_build_metadata_store_returns_postgres_store_when_dsn_exists(
             del repo_id
             return None
 
+        def touch_repo_last_queried_at(self, repo_id: str) -> int:
+            del repo_id
+            return 0
+
+        def list_stale_repos(self, *, last_queried_on_or_before):
+            del last_queried_on_or_before
+            return []
+
         def delete_repo_runtime(self, repo_id: str) -> int:
             del repo_id
             return 0

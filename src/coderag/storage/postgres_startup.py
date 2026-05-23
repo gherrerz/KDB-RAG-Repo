@@ -47,6 +47,7 @@ _REQUIRED_COLUMNS_BY_TABLE: dict[str, set[str]] = {
         "local_path",
         "created_at",
         "updated_at",
+        "last_queried_at",
         "embedding_provider",
         "embedding_model",
     },

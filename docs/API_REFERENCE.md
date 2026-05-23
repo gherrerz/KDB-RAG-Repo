@@ -79,6 +79,10 @@ Notas de comportamiento:
 - En ese modo, `items[].kind` puede ser `file_dependency` para dependencias
   internas entre archivos del repositorio o `external_dependency` para
   imports externos asociados al archivo fuente citado.
+- Las consultas válidas a `POST /query`, `POST /query/retrieval` y
+  `POST /inventory/query` actualizan `last_queried_at` del repositorio en
+  metadata runtime después del preflight de storage y antes de delegar al
+  servicio de consulta.
 
 ### Catalog
 
@@ -92,6 +96,15 @@ ingesta persistida, retorna además URL, rama y organización persistida.
   normalmente Postgres, y deja de derivarse al vuelo en el endpoint.
 
 - Response schema: `RepoCatalogResponse`
+
+#### GET /repos/last-query/stale
+
+Lista repositorios cuya última consulta es menor o igual a una fecha de corte,
+incluyendo repositorios nunca consultados (`last_queried_at = null`).
+
+- Query params:
+  - `last_queried_on_or_before: datetime` (required, ISO-8601)
+- Response schema: `RepoLastQueryStaleResponse`
 
 #### GET /repos/{repo_id}/status
 
@@ -227,6 +240,7 @@ Limpia todo el estado indexado.
 | POST | `/query/retrieval` | `run_retrieval_query` | `RetrievalQueryRequest` | `RetrievalQueryResponse` |
 | POST | `/inventory/query` | `run_inventory_query` | `InventoryQueryRequest` | `InventoryQueryResponse` |
 | GET | `/repos` | `JobManager.list_repo_catalog` | N/A | `RepoCatalogResponse` |
+| GET | `/repos/last-query/stale` | `JobManager.list_stale_repos` | Query params | `RepoLastQueryStaleResponse` |
 | GET | `/repos/{repo_id}/status` | `get_repo_query_status` | Path/query params | `RepoQueryStatusResponse` |
 | GET | `/providers/models` | `discover_models` | Query params | `ProviderModelCatalogResponse` |
 | GET | `/health` | `run_storage_preflight` | N/A | `StorageHealthResponse` |
@@ -473,6 +487,35 @@ Notas operativas de inventory/discovery:
 | --- | --- | --- | --- |
 | `repo_ids` | `list[str]` | no | `[]` |
 | `repositories` | `list[RepoCatalogEntry]` | no | `[]` |
+
+### RepoCatalogEntry
+
+| Field | Type | Requerido | Default |
+| --- | --- | --- | --- |
+| `repo_id` | `str` | sí | - |
+| `organization` | `str \| null` | no | `null` |
+| `url` | `str \| null` | no | `null` |
+| `branch` | `str \| null` | no | `null` |
+
+### RepoRuntimeEntry
+
+| Field | Type | Requerido | Default |
+| --- | --- | --- | --- |
+| `repo_id` | `str` | sí | - |
+| `organization` | `str \| null` | no | `null` |
+| `url` | `str \| null` | no | `null` |
+| `branch` | `str \| null` | no | `null` |
+| `local_path` | `str \| null` | no | `null` |
+| `created_at` | `datetime` | sí | - |
+| `updated_at` | `datetime \| null` | no | `null` |
+| `last_queried_at` | `datetime \| null` | no | `null` |
+
+### RepoLastQueryStaleResponse
+
+| Field | Type | Requerido | Default |
+| --- | --- | --- | --- |
+| `last_queried_on_or_before` | `datetime` | sí | - |
+| `repositories` | `list[RepoRuntimeEntry]` | no | `[]` |
 
 ### ProviderModelCatalogResponse
 

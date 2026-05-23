@@ -471,6 +471,51 @@ class RepoCatalogEntry(BaseModel):
     )
 
 
+class RepoRuntimeEntry(BaseModel):
+    """Representa metadata runtime completa de un repositorio persistido."""
+
+    repo_id: str = Field(description="Identificador público del repositorio.")
+    organization: str | None = Field(
+        default=None,
+        description="Organización, owner o grupo derivado desde repo_url.",
+    )
+    url: str | None = Field(
+        default=None,
+        description="URL remota utilizada durante la ingesta más reciente.",
+    )
+    branch: str | None = Field(
+        default=None,
+        description="Rama utilizada durante la ingesta más reciente.",
+    )
+    local_path: str | None = Field(
+        default=None,
+        description="Ruta local persistida para el repositorio en runtime.",
+    )
+    created_at: datetime = Field(
+        description="Fecha de alta inicial del repositorio en metadata runtime.",
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        description="Fecha de última actualización de metadata runtime por ingesta.",
+    )
+    last_queried_at: datetime | None = Field(
+        default=None,
+        description="Fecha de última consulta válida sobre el repo.",
+    )
+
+
+class RepoLastQueryStaleResponse(BaseModel):
+    """Respuesta para repositorios sin consultas desde una fecha dada."""
+
+    last_queried_on_or_before: datetime = Field(
+        description="Fecha de corte usada para filtrar repositorios stale.",
+    )
+    repositories: list[RepoRuntimeEntry] = Field(
+        default_factory=list,
+        description="Repositorios con última consulta menor o igual a la fecha.",
+    )
+
+
 class ProviderModelCatalogResponse(BaseModel):
     """Respuesta de catálogo de modelos para provider/tipo solicitado."""
 

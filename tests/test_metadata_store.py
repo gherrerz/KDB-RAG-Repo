@@ -104,7 +104,29 @@ def test_repo_runtime_round_trip_and_catalog_listing(tmp_path: Path) -> None:
     assert runtime == {
         "last_embedding_provider": "vertex",
         "last_embedding_model": "text-embedding-005",
+        "last_queried_at": None,
     }
+
+
+def test_touch_repo_last_queried_at_updates_runtime_payload(tmp_path: Path) -> None:
+    """El store SQLite legacy usado en tests debe poder tocar última consulta."""
+    store = _make_store(tmp_path)
+    store.upsert_repo_runtime(
+        repo_id="repo-1",
+        organization="acme",
+        repo_url="https://github.com/acme/demo.git",
+        branch="main",
+        local_path=str(tmp_path / "workspace" / "repo-1"),
+        embedding_provider="vertex",
+        embedding_model="text-embedding-005",
+    )
+
+    updated = store.touch_repo_last_queried_at("repo-1")
+    runtime = store.get_repo_runtime("repo-1")
+
+    assert updated == 1
+    assert runtime is not None
+    assert runtime["last_queried_at"] is not None
 
 
 def test_delete_repo_data_removes_jobs_and_runtime(tmp_path: Path) -> None:

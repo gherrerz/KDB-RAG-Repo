@@ -58,5 +58,9 @@ class RepoRecord(PostgresDeclarativeBase):
         TIMESTAMP(timezone=True),
         nullable=True,
     )
+    last_queried_at: Mapped[Any] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
     embedding_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
     embedding_model: Mapped[str | None] = mapped_column(Text, nullable=True)

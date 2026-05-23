@@ -268,6 +268,23 @@ class JobManager:
         """Devuelve metadata runtime de la última ingesta del repositorio."""
         return self.store.get_repo_runtime(repo_id)
 
+    def touch_repo_last_queried_at(self, repo_id: str) -> int:
+        """Marca el repositorio con la fecha de su última consulta válida."""
+        normalized_repo_id = repo_id.strip()
+        if not normalized_repo_id:
+            return 0
+        return self.store.touch_repo_last_queried_at(normalized_repo_id)
+
+    def list_stale_repos(
+        self,
+        *,
+        last_queried_on_or_before: datetime.datetime,
+    ) -> list[dict[str, object | None]]:
+        """Lista repositorios sin consultas recientes para una fecha de corte."""
+        return self.store.list_stale_repos(
+            last_queried_on_or_before=last_queried_on_or_before,
+        )
+
     def reset_all_data(self) -> tuple[list[str], list[str]]:
         """Restablezca todos los índices persistentes y el estado del trabajo/caché en memoria."""
         running_jobs = self.store.list_active_job_ids()

@@ -250,6 +250,14 @@ def test_get_repo_runtime_returns_expected_keys() -> None:
     session.execute.return_value.mappings.return_value.one_or_none.return_value = {
         "embedding_provider": "vertex",
         "embedding_model": "te-005",
+        "last_queried_at": datetime.datetime(
+            2026,
+            5,
+            23,
+            12,
+            0,
+            tzinfo=datetime.UTC,
+        ),
     }
     store = PostgresMetadataStore(
         "postgresql://fake/db",
@@ -261,7 +269,130 @@ def test_get_repo_runtime_returns_expected_keys() -> None:
     assert result == {
         "last_embedding_provider": "vertex",
         "last_embedding_model": "te-005",
+        "last_queried_at": "2026-05-23T12:00:00+00:00",
     }
+
+
+def test_get_repo_runtime_normalizes_legacy_timestamp_strings() -> None:
+    """get_repo_runtime debe tolerar timestamps string con offset abreviado."""
+    session = MagicMock()
+    session.execute.return_value.mappings.return_value.one_or_none.return_value = {
+        "embedding_provider": "vertex",
+        "embedding_model": "te-005",
+        "last_queried_at": "2026-05-23 12:00:00.12345+00",
+    }
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    result = store.get_repo_runtime("r1")
+
+    assert result == {
+        "last_embedding_provider": "vertex",
+        "last_embedding_model": "te-005",
+        "last_queried_at": "2026-05-23T12:00:00.123450+00:00",
+    }
+
+
+def test_touch_repo_last_queried_at_updates_timestamp_and_commits() -> None:
+    """touch_repo_last_queried_at debe ejecutar update y confirmar transacción."""
+    session = MagicMock()
+    session.execute.return_value = SimpleNamespace(rowcount=1)
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    updated = store.touch_repo_last_queried_at("r1")
+
+    statement = session.execute.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert compiled.params["id_1"] == "r1"
+    assert updated == 1
+    session.commit.assert_called_once_with()
+
+
+def test_list_stale_repos_returns_runtime_shape() -> None:
+    """list_stale_repos debe devolver el detalle runtime esperado."""
+    session = MagicMock()
+    cutoff = datetime.datetime(2026, 5, 23, 0, 0, tzinfo=datetime.UTC)
+    session.execute.return_value.mappings.return_value.all.return_value = [
+        {
+            "repo_id": "r1",
+            "organization": "org",
+            "url": "https://example.com/repo.git",
+            "branch": "main",
+            "local_path": "/tmp/r1",
+            "created_at": datetime.datetime(2026, 5, 1, tzinfo=datetime.UTC),
+            "updated_at": datetime.datetime(2026, 5, 2, tzinfo=datetime.UTC),
+            "last_queried_at": None,
+        }
+    ]
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    result = store.list_stale_repos(last_queried_on_or_before=cutoff)
+
+    statement = session.execute.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert cutoff in compiled.params.values()
+    assert result == [
+        {
+            "repo_id": "r1",
+            "organization": "org",
+            "url": "https://example.com/repo.git",
+            "branch": "main",
+            "local_path": "/tmp/r1",
+            "created_at": datetime.datetime(2026, 5, 1, tzinfo=datetime.UTC),
+            "updated_at": datetime.datetime(2026, 5, 2, tzinfo=datetime.UTC),
+            "last_queried_at": None,
+        }
+    ]
+
+
+def test_list_stale_repos_normalizes_legacy_timestamp_strings() -> None:
+    """list_stale_repos debe normalizar timestamps string legados."""
+    session = MagicMock()
+    cutoff = datetime.datetime(2026, 5, 23, 0, 0, tzinfo=datetime.UTC)
+    session.execute.return_value.mappings.return_value.all.return_value = [
+        {
+            "repo_id": "r1",
+            "organization": "org",
+            "url": "https://example.com/repo.git",
+            "branch": "main",
+            "local_path": "/tmp/r1",
+            "created_at": "2026-05-01 00:00:00+00",
+            "updated_at": "2026-05-02 00:00:00+00",
+            "last_queried_at": "2026-05-03 00:00:00+00",
+        }
+    ]
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    result = store.list_stale_repos(last_queried_on_or_before=cutoff)
+
+    assert result == [
+        {
+            "repo_id": "r1",
+            "organization": "org",
+            "url": "https://example.com/repo.git",
+            "branch": "main",
+            "local_path": "/tmp/r1",
+            "created_at": datetime.datetime(2026, 5, 1, tzinfo=datetime.UTC),
+            "updated_at": datetime.datetime(2026, 5, 2, tzinfo=datetime.UTC),
+            "last_queried_at": datetime.datetime(
+                2026,
+                5,
+                3,
+                tzinfo=datetime.UTC,
+            ),
+        }
+    ]
 
 
 def test_delete_repo_data_returns_aggregated_counts() -> None:

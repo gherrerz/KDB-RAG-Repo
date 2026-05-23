@@ -1,5 +1,6 @@
 """Pruebas API para puntos finales primarios."""
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -62,6 +63,21 @@ def bypass_storage_preflight(monkeypatch):
             "expected_heads": [],
             "cached": False,
         },
+    )
+    monkeypatch.setattr(
+        server.jobs,
+        "touch_repo_last_queried_at",
+        lambda repo_id: 1,
+    )
+    monkeypatch.setattr(
+        server.jobs,
+        "get_repo_runtime",
+        lambda repo_id: None,
+    )
+    monkeypatch.setattr(
+        server.jobs,
+        "list_stale_repos",
+        lambda **kwargs: [],
     )
 
 
@@ -765,6 +781,191 @@ def test_inventory_query_endpoint_returns_paginated_payload(monkeypatch) -> None
     assert len(payload["items"]) == 1
 
 
+def test_query_endpoint_marks_repo_as_queried_before_delegating(monkeypatch) -> None:
+    """Marca la última consulta del repo cuando /query entra a flujo válido."""
+    from coderag.api import query_service
+
+    touched: list[str] = []
+
+    monkeypatch.setattr(server.jobs, "list_repo_ids", lambda: ["mall"])
+    monkeypatch.setattr(server.jobs, "get_repo_runtime", lambda repo_id: None)
+    monkeypatch.setattr(server.jobs, "touch_repo_last_queried_at", touched.append)
+    monkeypatch.setattr(
+        server,
+        "get_repo_query_status",
+        lambda **kwargs: {
+            "repo_id": "mall",
+            "listed_in_catalog": True,
+            "query_ready": True,
+            "chroma_counts": {
+                "code_symbols": 1,
+                "code_files": 1,
+                "code_modules": 1,
+            },
+            "lexical_loaded": True,
+            "graph_available": True,
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(
+        query_service,
+        "run_query",
+        lambda **kwargs: {"answer": "ok", "citations": [], "diagnostics": {}},
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/query",
+        json={
+            "repo_id": "mall",
+            "query": "hola",
+            "top_n": 5,
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    assert touched == ["mall"]
+
+
+def test_inventory_query_endpoint_marks_repo_as_queried(monkeypatch) -> None:
+    """Marca la última consulta del repo al entrar al flujo de inventario."""
+    from coderag.api import query_service
+
+    touched: list[str] = []
+    monkeypatch.setattr(server.jobs, "touch_repo_last_queried_at", touched.append)
+    monkeypatch.setattr(
+        query_service,
+        "run_inventory_query",
+        lambda **kwargs: {
+            "answer": "ok",
+            "target": "modelo",
+            "module_name": None,
+            "total": 0,
+            "page": 1,
+            "page_size": 5,
+            "items": [],
+            "citations": [],
+            "diagnostics": {},
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/inventory/query",
+        json={
+            "repo_id": "mall",
+            "query": "cuales son todos los modelos",
+            "page": 1,
+            "page_size": 5,
+        },
+    )
+
+    assert response.status_code == 200
+    assert touched == ["mall"]
+
+
+def test_retrieval_query_endpoint_marks_repo_as_queried(monkeypatch) -> None:
+    """Marca la última consulta del repo al entrar a retrieval-only válido."""
+    from coderag.api import query_service
+
+    touched: list[str] = []
+    monkeypatch.setattr(server.jobs, "list_repo_ids", lambda: ["mall"])
+    monkeypatch.setattr(server.jobs, "get_repo_runtime", lambda repo_id: None)
+    monkeypatch.setattr(server.jobs, "touch_repo_last_queried_at", touched.append)
+    monkeypatch.setattr(
+        server,
+        "get_repo_query_status",
+        lambda **kwargs: {
+            "repo_id": "mall",
+            "listed_in_catalog": True,
+            "query_ready": True,
+            "chroma_counts": {
+                "code_symbols": 1,
+                "code_files": 1,
+                "code_modules": 1,
+            },
+            "lexical_loaded": True,
+            "graph_available": True,
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(
+        query_service,
+        "run_retrieval_query",
+        lambda **kwargs: {
+            "mode": "retrieval_only",
+            "answer": "ok",
+            "chunks": [],
+            "citations": [],
+            "statistics": {
+                "total_before_rerank": 0,
+                "total_after_rerank": 0,
+                "graph_nodes_count": 0,
+            },
+            "diagnostics": {},
+            "context": None,
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/query/retrieval",
+        json={
+            "repo_id": "mall",
+            "query": "hola",
+            "top_n": 5,
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    assert touched == ["mall"]
+
+
+def test_list_stale_repos_endpoint_returns_runtime_payload(monkeypatch) -> None:
+    """Expone repositorios stale con el detalle runtime solicitado."""
+    cutoff = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        server.jobs,
+        "list_stale_repos",
+        lambda **kwargs: [
+            {
+                "repo_id": "mall",
+                "organization": "macrozheng",
+                "url": "https://github.com/macrozheng/mall.git",
+                "branch": "main",
+                "local_path": "/workspace/mall",
+                "created_at": datetime(2026, 4, 1, 0, 0, tzinfo=UTC),
+                "updated_at": datetime(2026, 4, 2, 0, 0, tzinfo=UTC),
+                "last_queried_at": None,
+            }
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get(
+        "/repos/last-query/stale",
+        params={"last_queried_on_or_before": cutoff.isoformat()},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["last_queried_on_or_before"] == "2026-05-01T00:00:00Z"
+    assert payload["repositories"] == [
+        {
+            "repo_id": "mall",
+            "organization": "macrozheng",
+            "url": "https://github.com/macrozheng/mall.git",
+            "branch": "main",
+            "local_path": "/workspace/mall",
+            "created_at": "2026-04-01T00:00:00Z",
+            "updated_at": "2026-04-02T00:00:00Z",
+            "last_queried_at": None,
+        }
+    ]
+
+
 def test_storage_health_endpoint_returns_structured_payload() -> None:
     """Retorna estado estructurado de salud de almacenamiento."""
     client = TestClient(app)
@@ -1065,8 +1266,8 @@ def test_retrieval_query_endpoint_blocks_when_storage_preflight_fails(monkeypatc
             "failed_components": ["neo4j"],
             "items": [],
             "cached": False,
+        }
         raise StoragePreflightError(report)
-
     monkeypatch.setattr(server, "ensure_storage_ready", fail_preflight)
     client = TestClient(app)
     response = client.post(

@@ -51,6 +51,7 @@ class MetadataStore(BaseMetadataStore):
                     local_path TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT,
+                    last_queried_at TEXT,
                     embedding_provider TEXT,
                     embedding_model TEXT
                 )
@@ -86,6 +87,7 @@ class MetadataStore(BaseMetadataStore):
         required_columns = {
             "organization": "TEXT",
             "updated_at": "TEXT",
+            "last_queried_at": "TEXT",
             "embedding_provider": "TEXT",
             "embedding_model": "TEXT",
         }
@@ -269,8 +271,9 @@ class MetadataStore(BaseMetadataStore):
                 """
                 INSERT INTO repos (
                     id, organization, url, branch, local_path, created_at,
-                    updated_at, embedding_provider, embedding_model
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    updated_at, last_queried_at, embedding_provider,
+                    embedding_model
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     organization=excluded.organization,
                     url=excluded.url,
@@ -288,6 +291,7 @@ class MetadataStore(BaseMetadataStore):
                     local_path,
                     now,
                     now,
+                    None,
                     embedding_provider,
                     embedding_model,
                 ),
@@ -298,7 +302,7 @@ class MetadataStore(BaseMetadataStore):
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT embedding_provider, embedding_model
+                SELECT embedding_provider, embedding_model, last_queried_at
                 FROM repos
                 WHERE id = ?
                 """,
@@ -309,7 +313,58 @@ class MetadataStore(BaseMetadataStore):
         return {
             "last_embedding_provider": row["embedding_provider"],
             "last_embedding_model": row["embedding_model"],
+            "last_queried_at": row["last_queried_at"],
         }
+
+    def touch_repo_last_queried_at(self, repo_id: str) -> int:
+        """Actualiza la fecha de última consulta del repositorio."""
+        now = datetime.datetime.now(datetime.UTC).isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE repos SET last_queried_at = ? WHERE id = ?",
+                (now, repo_id),
+            )
+            return int(cursor.rowcount or 0)
+
+    def list_stale_repos(
+        self,
+        *,
+        last_queried_on_or_before: datetime.datetime,
+    ) -> list[dict[str, object | None]]:
+        """Lista repositorios con última consulta vencida o inexistente."""
+        cutoff = last_queried_on_or_before.isoformat()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id AS repo_id,
+                    organization,
+                    url,
+                    branch,
+                    local_path,
+                    created_at,
+                    updated_at,
+                    last_queried_at
+                FROM repos
+                WHERE last_queried_at IS NULL OR last_queried_at <= ?
+                ORDER BY id ASC
+                """,
+                (cutoff,),
+            ).fetchall()
+        return [
+            {
+                "repo_id": row["repo_id"],
+                "organization": row["organization"],
+                "url": row["url"],
+                "branch": row["branch"],
+                "local_path": row["local_path"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "last_queried_at": row["last_queried_at"],
+            }
+            for row in rows
+            if row["repo_id"]
+        ]
 
     def delete_repo_runtime(self, repo_id: str) -> int:
         """Elimina metadata runtime del repositorio y devuelve filas afectadas."""

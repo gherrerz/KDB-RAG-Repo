@@ -31,6 +31,8 @@ def test_alembic_ini_exists_with_src_prepend() -> None:
 
     assert "script_location = migrations" in content
     assert "prepend_sys_path = src" in content
+    assert "sqlalchemy.url =\n" in content
+    assert "sqlalchemy.url = postgresql://" not in content
 
 
 def test_alembic_env_prefers_configured_sqlalchemy_url() -> None:
@@ -38,6 +40,8 @@ def test_alembic_env_prefers_configured_sqlalchemy_url() -> None:
     content = Path("migrations/env.py").read_text(encoding="utf-8")
 
     assert 'config.get_main_option("sqlalchemy.url")' in content
+    assert "_has_explicit_sqlalchemy_url" in content
+    assert '"postgresql://"' in content
 
 
 def test_startup_bootstrap_module_exists() -> None:

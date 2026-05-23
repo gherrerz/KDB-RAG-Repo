@@ -38,11 +38,14 @@ def test_repo_model_uses_timestamptz_columns() -> None:
     """La metadata de repos debe persistir timestamps con timezone."""
     created_at_type = RepoRecord.__table__.c["created_at"].type
     updated_at_type = RepoRecord.__table__.c["updated_at"].type
+    last_queried_at_type = RepoRecord.__table__.c["last_queried_at"].type
 
     assert isinstance(created_at_type, TIMESTAMP)
     assert created_at_type.timezone is True
     assert isinstance(updated_at_type, TIMESTAMP)
     assert updated_at_type.timezone is True
+    assert isinstance(last_queried_at_type, TIMESTAMP)
+    assert last_queried_at_type.timezone is True
 
 
 def test_lexical_table_uses_jsonb_tsvector_and_expected_indexes() -> None:
