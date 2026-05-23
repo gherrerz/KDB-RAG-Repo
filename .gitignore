@@ -56,6 +56,7 @@ docker-compose.override.yml
 
 # Benchmark Reports
 benchmark_reports/
+migration_reports/
 
 # Local temporary scripts
 .tmp*.py
