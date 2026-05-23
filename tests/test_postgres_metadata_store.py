@@ -1,74 +1,24 @@
-"""Pruebas unitarias para PostgresMetadataStore.
-
-No requieren base de datos real: psycopg.connect se parchea con MagicMock.
-Si psycopg no está disponible en el entorno de dev se inyecta un stub en
-sys.modules antes de cualquier importación del módulo bajo prueba.
-"""
+"""Pruebas unitarias para PostgresMetadataStore sobre SQLAlchemy."""
 
 from __future__ import annotations
 
 import datetime
-import importlib
-import json
-import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-# ---------------------------------------------------------------------------
-# Stub psycopg solo si el import real no está disponible en el entorno
-# ---------------------------------------------------------------------------
-try:
-    import psycopg  # noqa: F401
-except ModuleNotFoundError:
-    _psycopg_stub = MagicMock()
-    _psycopg_rows_stub = MagicMock()
-    _psycopg_rows_stub.dict_row = MagicMock()
-    _psycopg_stub.OperationalError = RuntimeError
-    _psycopg_stub.rows = _psycopg_rows_stub
-    sys.modules["psycopg"] = _psycopg_stub
-    sys.modules["psycopg.rows"] = _psycopg_rows_stub
-    sys.modules["psycopg.rows.dict_row"] = _psycopg_rows_stub.dict_row
+from sqlalchemy.dialects import postgresql
 
 from coderag.core.models import JobInfo, JobStatus
-from coderag.storage.postgres_table_names import (
-    POSTGRES_JOBS_TABLE,
-    POSTGRES_REPOS_TABLE,
-)
+from coderag.storage.postgres_models import JobRecord
+from coderag.storage.postgres_metadata_store import PostgresMetadataStore
 
 
-# ---------------------------------------------------------------------------
-# Helpers de mocks
-# ---------------------------------------------------------------------------
-
-_PATCH_CONNECT = "coderag.storage.postgres_metadata_store.psycopg.connect"
-
-
-def _cursor(rows=None, rowcount: int = 0) -> MagicMock:
-    c = MagicMock()
-    c.fetchall.return_value = list(rows or [])
-    c.fetchone.return_value = (rows[0] if rows else None)
-    c.rowcount = rowcount
-    return c
-
-
-def _conn(cursor: MagicMock | None = None) -> MagicMock:
-    conn = MagicMock()
-    conn.__enter__.return_value = conn
-    conn.__exit__.return_value = False
-    if cursor is not None:
-        conn.execute.return_value = cursor
-        conn.executemany.return_value = cursor
-    return conn
-
-
-def _make_store():
-    """Crea PostgresMetadataStore con psycopg parcheado."""
-    from coderag.storage.postgres_metadata_store import PostgresMetadataStore
-
-    init_conn = _conn(_cursor())
-    with patch(_PATCH_CONNECT, return_value=init_conn):
-        return PostgresMetadataStore("postgresql://fake/db")
+def _session_factory_mock(session: MagicMock) -> MagicMock:
+    """Construye un session factory mock compatible con context manager."""
+    factory = MagicMock()
+    factory.get_session.return_value.__enter__.return_value = session
+    factory.get_session.return_value.__exit__.return_value = False
+    return factory
 
 
 def _make_job(
@@ -79,411 +29,264 @@ def _make_job(
     return JobInfo(
         id=job_id,
         status=status,
-        progress=0.0,
+        progress=0.25,
         logs=["Inicio"],
         repo_id=repo_id,
         error=None,
-        diagnostics={},
+        diagnostics={"symbols": 3},
     )
 
 
-# ===========================================================================
-# _init_schema
-# ===========================================================================
+def test_constructor_uses_provided_session_factory() -> None:
+    """El store debe respetar un session factory inyectado."""
+    session_factory = MagicMock()
+
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=session_factory,
+    )
+
+    assert store._session_factory is session_factory
 
 
-class TestInitSchema:
-    def test_crea_tablas_jobs_y_repos(self):
-        """_init_schema ejecuta CREATE TABLE para jobs y repos."""
-        init_conn = _conn(_cursor())
-        from coderag.storage.postgres_metadata_store import PostgresMetadataStore
-        with patch(_PATCH_CONNECT, return_value=init_conn):
-            PostgresMetadataStore("postgresql://fake/db")
+def test_constructor_builds_default_session_factory_when_missing() -> None:
+    """Sin inyección explícita, el store crea su propio session factory."""
+    with patch(
+        "coderag.storage.postgres_metadata_store.PostgresSessionFactory"
+    ) as factory_class:
+        factory_instance = MagicMock()
+        factory_class.return_value = factory_instance
 
-        calls_sql = [str(c.args[0]) for c in init_conn.execute.call_args_list]
-        assert any(
-            f"CREATE TABLE IF NOT EXISTS {POSTGRES_JOBS_TABLE}" in s
-            for s in calls_sql
-        )
-        assert any(
-            f"CREATE TABLE IF NOT EXISTS {POSTGRES_REPOS_TABLE}" in s
-            for s in calls_sql
-        )
+        store = PostgresMetadataStore("postgresql://fake/db")
 
-    def test_sanitiza_error_de_conexion_postgres(self):
-        """El error de conexión expone destino sin filtrar credenciales."""
-        import coderag.storage.postgres_metadata_store as store_module
-        store_module = importlib.reload(store_module)
-
-        dsn = "postgresql://coderag:secret@postgres:5432/coderag"
-        def _raise_connect_error(*_args, **_kwargs):
-            raise store_module.psycopg.OperationalError(
-                "[Errno -2] Name or service not known"
-            )
-
-        with patch(_PATCH_CONNECT, side_effect=_raise_connect_error):
-            with pytest.raises(RuntimeError) as exc_info:
-                store_module.PostgresMetadataStore(dsn)
-
-        message = str(exc_info.value)
-        assert "postgres:5432/coderag" in message
-        assert "perfil 'remote'" in message
-        assert "secret" not in message
+    factory_class.assert_called_once_with("postgresql://fake/db")
+    assert store._session_factory is factory_instance
 
 
-# ===========================================================================
-# upsert_job
-# ===========================================================================
+def test_upsert_job_executes_upsert_and_commits() -> None:
+    """upsert_job debe ejecutar un upsert ORM y confirmar la transacción."""
+    session = MagicMock()
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+    job = _make_job()
+    job.logs = ["Línea 1", "Línea 2"]
+
+    store.upsert_job(job)
+
+    statement = session.execute.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert compiled.params["id"] == job.id
+    assert compiled.params["status"] == job.status.value
+    assert compiled.params["logs"] == "Línea 1\nLínea 2"
+    assert compiled.params["diagnostics"] == {"symbols": 3}
+    session.commit.assert_called_once_with()
 
 
-class TestUpsertJob:
-    def test_llama_execute_con_todos_los_campos(self):
-        """upsert_job construye INSERT con los 9 campos del job."""
-        store = _make_store()
-        test_conn = _conn(_cursor())
-        job = _make_job()
+def test_recover_interrupted_jobs_returns_rowcount() -> None:
+    """recover_interrupted_jobs debe propagar rowcount de la actualización."""
+    session = MagicMock()
+    session.execute.return_value = SimpleNamespace(rowcount=3)
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
 
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            store.upsert_job(job)
+    count = store.recover_interrupted_jobs()
 
-        test_conn.execute.assert_called_once()
-        sql, params = test_conn.execute.call_args.args
-        assert f"INSERT INTO {POSTGRES_JOBS_TABLE}" in str(sql)
-        assert job.id in params
-        assert job.status.value in params
-
-    def test_logs_se_unen_con_salto_de_linea(self):
-        """Los logs se serializan uniendo con '\\n' como separador."""
-        store = _make_store()
-        test_conn = _conn(_cursor())
-        job = _make_job()
-        job.logs = ["Línea 1", "Línea 2", "Línea 3"]
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            store.upsert_job(job)
-
-        _, params = test_conn.execute.call_args.args
-        logs_param = params[3]
-        assert logs_param == "Línea 1\nLínea 2\nLínea 3"
-
-    def test_diagnostics_se_serializa_como_json(self):
-        """diagnostics se serializa como JSON string."""
-        store = _make_store()
-        test_conn = _conn(_cursor())
-        job = _make_job()
-        job.diagnostics = {"symbols": 42, "files": 10}
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            store.upsert_job(job)
-
-        _, params = test_conn.execute.call_args.args
-        diag_json = params[6]  # diagnostics es el 7º campo
-        assert json.loads(diag_json) == {"symbols": 42, "files": 10}
+    statement = session.execute.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert "tbl_repository_jobs" in str(compiled)
+    assert count == 3
+    session.commit.assert_called_once_with()
 
 
-# ===========================================================================
-# recover_interrupted_jobs
-# ===========================================================================
+def test_get_job_returns_jobinfo_from_orm_record() -> None:
+    """get_job debe hidratar un JobInfo a partir del modelo ORM."""
+    session = MagicMock()
+    session.get.return_value = JobRecord(
+        id="job-1",
+        status="queued",
+        progress=0.5,
+        logs="a\nb",
+        repo_id="r1",
+        error=None,
+        diagnostics={"k": 1},
+        created_at=datetime.datetime.now(datetime.UTC),
+        updated_at=datetime.datetime.now(datetime.UTC),
+    )
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    job = store.get_job("job-1")
+
+    assert job is not None
+    assert job.id == "job-1"
+    assert job.logs == ["a", "b"]
+    assert job.diagnostics == {"k": 1}
 
 
-class TestRecoverInterruptedJobs:
-    def test_retorna_rowcount(self):
-        """recover_interrupted_jobs devuelve el número de filas actualizadas."""
-        store = _make_store()
-        test_conn = _conn(_cursor(rowcount=3))
+def test_get_job_tolerates_legacy_diagnostics_string() -> None:
+    """get_job debe tolerar rows legacy con diagnostics serializado."""
+    session = MagicMock()
+    session.get.return_value = JobRecord(
+        id="job-1",
+        status="queued",
+        progress=0.5,
+        logs="a",
+        repo_id="r1",
+        error=None,
+        diagnostics='{"legacy": true}',
+        created_at=datetime.datetime.now(datetime.UTC),
+        updated_at=datetime.datetime.now(datetime.UTC),
+    )
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
 
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            count = store.recover_interrupted_jobs()
+    job = store.get_job("job-1")
 
-        assert count == 3
-
-    def test_actualiza_queued_y_running(self):
-        """La UPDATE incluye queued y running en el WHERE."""
-        store = _make_store()
-        test_conn = _conn(_cursor(rowcount=0))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            store.recover_interrupted_jobs()
-
-        sql, params = test_conn.execute.call_args.args
-        assert f"UPDATE {POSTGRES_JOBS_TABLE}" in str(sql)
-        assert "queued" in params
-        assert "running" in params
-
-    def test_retorna_cero_si_rowcount_none(self):
-        """recover_interrupted_jobs devuelve 0 si rowcount es None."""
-        store = _make_store()
-        test_conn = _conn(_cursor(rowcount=None))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            count = store.recover_interrupted_jobs()
-
-        assert count == 0
+    assert job is not None
+    assert job.diagnostics == {"legacy": True}
 
 
-# ===========================================================================
-# get_job
-# ===========================================================================
+def test_list_repo_ids_filters_empty_values() -> None:
+    """list_repo_ids debe omitir valores vacíos o nulos."""
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = [
+        "r1",
+        None,
+        "",
+        "r2",
+    ]
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    repo_ids = store.list_repo_ids()
+
+    assert repo_ids == ["r1", "r2"]
 
 
-class TestGetJob:
-    def _make_row(
-        self,
-        job_id: str = "job-1",
-        status: str = "queued",
-        logs: str = "log1\nlog2",
-        diagnostics: str = '{"k": 1}',
-    ) -> dict:
-        return {
-            "id": job_id,
-            "status": status,
-            "progress": 0.5,
-            "logs": logs,
+def test_list_repo_catalog_returns_expected_shape() -> None:
+    """list_repo_catalog debe conservar el contrato de salida actual."""
+    session = MagicMock()
+    session.execute.return_value.mappings.return_value.all.return_value = [
+        {
             "repo_id": "r1",
-            "error": None,
-            "diagnostics": diagnostics,
-            "created_at": "2026-01-01T00:00:00+00:00",
-            "updated_at": "2026-01-01T00:00:00+00:00",
+            "organization": "org",
+            "url": "https://example.com/repo.git",
+            "branch": "main",
         }
+    ]
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    catalog = store.list_repo_catalog()
+
+    assert catalog == [
+        {
+            "repo_id": "r1",
+            "organization": "org",
+            "url": "https://example.com/repo.git",
+            "branch": "main",
+        }
+    ]
+
+
+def test_list_active_job_ids_supports_repo_filter() -> None:
+    """list_active_job_ids debe poder filtrar por repo_id."""
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = ["j3"]
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    ids = store.list_active_job_ids(repo_id="r2")
+
+    statement = session.execute.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert "r2" in compiled.params.values()
+    assert ids == ["j3"]
+
+
+def test_upsert_repo_runtime_executes_upsert_and_commits() -> None:
+    """upsert_repo_runtime debe ejecutar upsert y confirmar transacción."""
+    session = MagicMock()
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    store.upsert_repo_runtime(
+        repo_id="r1",
+        organization="org",
+        repo_url="https://example.com/repo.git",
+        branch="main",
+        local_path="/tmp/r1",
+        embedding_provider="vertex",
+        embedding_model="text-embedding-005",
+    )
+
+    statement = session.execute.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert compiled.params["id"] == "r1"
+    assert compiled.params["organization"] == "org"
+    assert compiled.params["embedding_provider"] == "vertex"
+    session.commit.assert_called_once_with()
+
+
+def test_get_repo_runtime_returns_expected_keys() -> None:
+    """get_repo_runtime debe preservar las claves públicas actuales."""
+    session = MagicMock()
+    session.execute.return_value.mappings.return_value.one_or_none.return_value = {
+        "embedding_provider": "vertex",
+        "embedding_model": "te-005",
+    }
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    result = store.get_repo_runtime("r1")
+
+    assert result == {
+        "last_embedding_provider": "vertex",
+        "last_embedding_model": "te-005",
+    }
+
+
+def test_delete_repo_data_returns_aggregated_counts() -> None:
+    """delete_repo_data debe agregar correctamente los conteos borrados."""
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(MagicMock()),
+    )
+    store.delete_repo_jobs = MagicMock(return_value=4)
+    store.delete_repo_runtime = MagicMock(return_value=1)
+
+    result = store.delete_repo_data("r1")
+
+    assert result == {"jobs_deleted": 4, "repos_deleted": 1, "total": 5}
+
+
+def test_reset_all_executes_delete_on_both_tables_and_commits() -> None:
+    """reset_all debe borrar jobs y repos dentro de una transacción."""
+    session = MagicMock()
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
 
-    def test_retorna_jobinfo_con_campos_correctos(self):
-        """get_job hidrata correctamente un JobInfo desde la fila de DB."""
-        store = _make_store()
-        row = self._make_row()
-        test_conn = _conn(_cursor(rows=[row]))
+    store.reset_all()
 
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            job = store.get_job("job-1")
-
-        assert job is not None
-        assert job.id == "job-1"
-        assert job.status == JobStatus.queued
-        assert job.progress == 0.5
-        assert job.repo_id == "r1"
-
-    def test_separa_logs_por_salto_de_linea(self):
-        """get_job divide los logs por '\\n'."""
-        store = _make_store()
-        row = self._make_row(logs="a\nb\nc")
-        test_conn = _conn(_cursor(rows=[row]))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            job = store.get_job("job-1")
-
-        assert job.logs == ["a", "b", "c"]
-
-    def test_retorna_none_si_no_existe(self):
-        """get_job devuelve None cuando la fila no existe."""
-        store = _make_store()
-        test_conn = _conn(_cursor(rows=[]))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            job = store.get_job("no-existe")
-
-        assert job is None
-
-    def test_diagnostics_invalidos_retornan_dict_vacio(self):
-        """get_job maneja diagnostics con JSON corrupto."""
-        store = _make_store()
-        row = self._make_row(diagnostics="NOT_JSON{{")
-        test_conn = _conn(_cursor(rows=[row]))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            job = store.get_job("job-1")
-
-        assert job.diagnostics == {}
-
-    def test_logs_vacios_retornan_lista_vacia(self):
-        """get_job con logs='' devuelve logs=[]."""
-        store = _make_store()
-        row = self._make_row(logs="")
-        test_conn = _conn(_cursor(rows=[row]))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            job = store.get_job("job-1")
-
-        assert job.logs == []
-
-
-# ===========================================================================
-# list_repo_ids
-# ===========================================================================
-
-
-class TestListRepoIds:
-    def test_retorna_ids_de_filas(self):
-        """list_repo_ids extrae repo_id de las filas SQL."""
-        store = _make_store()
-        rows = [{"repo_id": "r1"}, {"repo_id": "r2"}]
-        test_conn = _conn(_cursor(rows=rows))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            ids = store.list_repo_ids()
-
-        assert ids == ["r1", "r2"]
-
-    def test_filtra_vacios_y_none(self):
-        """list_repo_ids omite filas con repo_id vacío o None."""
-        store = _make_store()
-        rows = [{"repo_id": "r1"}, {"repo_id": None}, {"repo_id": ""}]
-        test_conn = _conn(_cursor(rows=rows))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            ids = store.list_repo_ids()
-
-        assert "r1" in ids
-        assert None not in ids
-        assert "" not in ids
-
-
-# ===========================================================================
-# delete_repo_data
-# ===========================================================================
-
-
-class TestDeleteRepoData:
-    def test_retorna_conteos_de_jobs_y_repos(self):
-        """delete_repo_data devuelve jobs_deleted, repos_deleted y total."""
-        store = _make_store()
-        cursor_jobs = _cursor(rowcount=4)
-        cursor_repos = _cursor(rowcount=1)
-        test_conn = _conn()
-
-        call_count = {"n": 0}
-
-        def execute_side(sql, params=None):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                return cursor_jobs   # DELETE FROM jobs
-            return cursor_repos       # DELETE FROM repos
-
-        test_conn.execute.side_effect = execute_side
-        test_conn.__enter__.return_value = test_conn
-        test_conn.__exit__.return_value = False
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            result = store.delete_repo_data("r1")
-
-        assert result["jobs_deleted"] == 4
-        assert result["repos_deleted"] == 1
-        assert result["total"] == 5
-
-    def test_total_es_suma_de_jobs_y_repos(self):
-        """total = jobs_deleted + repos_deleted siempre."""
-        store = _make_store()
-        test_conn = _conn(_cursor(rowcount=2))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            result = store.delete_repo_data("r1")
-
-        assert result["total"] == result["jobs_deleted"] + result["repos_deleted"]
-
-
-# ===========================================================================
-# reset_all
-# ===========================================================================
-
-
-class TestResetAll:
-    def test_ejecuta_delete_en_ambas_tablas(self):
-        """reset_all llama DELETE FROM jobs y DELETE FROM repos."""
-        store = _make_store()
-        test_conn = _conn(_cursor())
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            store.reset_all()
-
-        calls_sql = [str(c.args[0]) for c in test_conn.execute.call_args_list]
-        assert any(f"DELETE FROM {POSTGRES_JOBS_TABLE}" in s for s in calls_sql)
-        assert any(
-            f"DELETE FROM {POSTGRES_REPOS_TABLE}" in s for s in calls_sql
-        )
-
-
-# ===========================================================================
-# upsert_repo_runtime / get_repo_runtime / delete_repo_runtime
-# ===========================================================================
-
-
-class TestRepoRuntime:
-    def test_upsert_repo_runtime_llama_insert(self):
-        """upsert_repo_runtime ejecuta INSERT INTO repos."""
-        store = _make_store()
-        test_conn = _conn(_cursor())
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            store.upsert_repo_runtime(
-                repo_id="r1",
-                organization="org",
-                repo_url="https://example.com/repo.git",
-                branch="main",
-                local_path="/tmp/r1",
-                embedding_provider="vertex",
-                embedding_model="text-embedding-005",
-            )
-
-        sql, params = test_conn.execute.call_args.args
-        assert f"INSERT INTO {POSTGRES_REPOS_TABLE}" in str(sql)
-        assert "r1" in params
-
-    def test_get_repo_runtime_retorna_dict(self):
-        """get_repo_runtime hidrata dict con provider y model."""
-        store = _make_store()
-        row = {"embedding_provider": "vertex", "embedding_model": "te-005"}
-        test_conn = _conn(_cursor(rows=[row]))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            result = store.get_repo_runtime("r1")
-
-        assert result is not None
-        assert result["last_embedding_provider"] == "vertex"
-        assert result["last_embedding_model"] == "te-005"
-
-    def test_get_repo_runtime_retorna_none_si_no_existe(self):
-        """get_repo_runtime devuelve None cuando la fila no existe."""
-        store = _make_store()
-        test_conn = _conn(_cursor(rows=[]))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            assert store.get_repo_runtime("no-existe") is None
-
-    def test_delete_repo_runtime_retorna_rowcount(self):
-        """delete_repo_runtime devuelve el número de filas borradas."""
-        store = _make_store()
-        test_conn = _conn(_cursor(rowcount=1))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            count = store.delete_repo_runtime("r1")
-
-        assert count == 1
-
-
-# ===========================================================================
-# list_active_job_ids
-# ===========================================================================
-
-
-class TestListActiveJobIds:
-    def test_sin_repo_id_lista_todos_activos(self):
-        """list_active_job_ids sin repo_id devuelve todos queued/running."""
-        store = _make_store()
-        rows = [{"id": "j1"}, {"id": "j2"}]
-        test_conn = _conn(_cursor(rows=rows))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            ids = store.list_active_job_ids()
-
-        assert ids == ["j1", "j2"]
-
-    def test_con_repo_id_filtra_por_repo(self):
-        """list_active_job_ids con repo_id incluye repo_id en el WHERE."""
-        store = _make_store()
-        rows = [{"id": "j3"}]
-        test_conn = _conn(_cursor(rows=rows))
-
-        with patch(_PATCH_CONNECT, return_value=test_conn):
-            ids = store.list_active_job_ids(repo_id="r2")
-
-        sql, params = test_conn.execute.call_args.args
-        assert "r2" in params
-        assert ids == ["j3"]
+    assert session.execute.call_count == 2
+    session.commit.assert_called_once_with()

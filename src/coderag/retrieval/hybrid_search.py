@@ -1,4 +1,4 @@
-"""Recuperación híbrida que combina similitud de vectores y puntuaciones de BM25."""
+"""Recuperación híbrida que combina similitud vectorial y búsqueda léxica."""
 
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -10,19 +10,19 @@ import unicodedata
 from coderag.core.lexical_index import (
     build_repository_lexical_index,
     ensure_repository_lexical_index_loaded,
+    repository_has_query_ready_lexical_data,
 )
 from coderag.core.models import RetrievalChunk
 from coderag.core.settings import get_settings
 from coderag.core.vector_index import build_managed_vector_index
 from coderag.ingestion.embedding import EmbeddingClient
-from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import ChromaIndex
 
 
 VECTOR_COLLECTIONS = ["code_symbols", "code_files", "code_modules"]
 LOGGER = logging.getLogger(__name__)
 VECTOR_WEIGHT = 0.55
-BM25_WEIGHT = 0.45
+LEXICAL_WEIGHT = 0.45
 _EXACT_IDENTIFIER_QUERY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
 
 
@@ -270,13 +270,15 @@ def hybrid_search(
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
 ) -> list[RetrievalChunk]:
-    """Busque datos de repositorios indexados con vector y fusión BM25."""
+    """Busque datos de repositorios indexados con vector y fusión léxica."""
     candidate_top_n = _candidate_top_n(query=query, top_n=top_n)
     embedder = EmbeddingClient(
         provider=embedding_provider,
         model=embedding_model,
     )
     normalized_query = _normalize_query(query)
+    settings = get_settings()
+    lexical_index = build_repository_lexical_index(settings)
     vector_results: list[dict] = []
     query_embedding: list[float] | None = None
     try:
@@ -298,7 +300,10 @@ def hybrid_search(
             repo_id=repo_id,
             candidate_top_n=candidate_top_n,
         )
-        if _vector_results_empty(vector_results) and GLOBAL_BM25.ensure_repo_loaded(repo_id):
+        if _vector_results_empty(vector_results) and repository_has_query_ready_lexical_data(
+            settings,
+            repo_id,
+        ):
             ChromaIndex.reset_shared_state()
             chroma = build_managed_vector_index()
             vector_results = _run_vector_search(
@@ -310,7 +315,7 @@ def hybrid_search(
     else:
         LOGGER.warning(
             "Consulta sin embedding utilizable para repo=%s; "
-            "se priorizará BM25.",
+            "se priorizará la búsqueda léxica.",
             repo_id,
         )
 
@@ -333,8 +338,6 @@ def hybrid_search(
                 metadata=meta,
             )
 
-    settings = get_settings()
-    lexical_index = build_repository_lexical_index(settings)
     ensure_repository_lexical_index_loaded(lexical_index, repo_id)
     lexical_results = lexical_index.query(
         repo_id=repo_id,
@@ -351,7 +354,7 @@ def hybrid_search(
         normalized_lexical = 0.0
         if max_lexical_score > 0:
             normalized_lexical = lexical_score / max_lexical_score
-        weighted_lexical = normalized_lexical * BM25_WEIGHT
+        weighted_lexical = normalized_lexical * LEXICAL_WEIGHT
         scores[item_id] += weighted_lexical
         fused[item_id] = RetrievalChunk(
             id=item_id,

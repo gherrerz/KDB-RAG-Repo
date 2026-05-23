@@ -76,7 +76,70 @@ POSTGRES_PORT=5432
 POSTGRES_DB=<postgres-db>
 POSTGRES_USER=<postgres-user>
 POSTGRES_PASSWORD=<postgres-password>
+RUNTIME_ENVIRONMENT=development
 ```
+
+Con `RUNTIME_ENVIRONMENT=development` o `test`, la API y el worker aplican
+automaticamente `alembic upgrade head` al iniciar, y si detectan un esquema
+legacy compatible sin versionado lo estampan en `head`. Con
+`RUNTIME_ENVIRONMENT=production`, el proceso no modifica la base: solo valida
+que la revision actual ya este alineada con Alembic y falla si no lo esta.
+
+Para operar Alembic manualmente con la misma resolucion de `POSTGRES_*` del
+runtime, usa el helper del repo:
+
+```powershell
+.\.venv\Scripts\python scripts/postgres_schema_admin.py validate
+.\.venv\Scripts\python scripts/postgres_schema_admin.py current
+.\.venv\Scripts\python scripts/postgres_schema_admin.py upgrade head
+```
+
+Si vienes del esquema PostgreSQL legacy con tablas `jobs`, `repos` y
+`lexical_corpus`, puedes copiar esos datos al esquema actual versionado antes
+de apagar el camino viejo:
+
+```powershell
+.\.venv\Scripts\python scripts/migrate_legacy_postgres_to_alembic.py
+```
+
+El flujo crea o alinea primero las tablas `tbl_repository_*` con Alembic y
+luego migra metadata y corpus lexico con upsert idempotente, dejando intactas
+las tablas source para validacion o rollback manual.
+
+Para una ventana de cutover completa sobre una base representativa o real, usa
+el runner operativo:
+
+```powershell
+.\.venv\Scripts\python scripts/run_postgres_legacy_cutover.py --output-dir migration_reports --report-prefix prod_cutover_candidate --health-url http://127.0.0.1:8000/health
+```
+
+Ese runner ejecuta `current`, migracion legacy, `validate` y exporta evidencia
+JSON + checklist Markdown para revision operativa.
+
+Si quieres cerrar tambien los checks manuales en el mismo artefacto, agrega
+`--confirm-backup`, `--confirm-rollback` y `--confirm-retain-legacy`.
+
+El siguiente bloque de retiro legacy ya queda preparado: con Postgres activo,
+la ingesta ya no usa BM25 ni SQLite como backends soportados y el tooling
+operativo tampoco limpia snapshots BM25 ni `metadata.db`. Cualquier rollback
+posterior al cutover requiere un despliegue controlado de una version previa o
+un procedimiento tecnico separado. La politica completa de salida y rollback
+esta en
+[docs/migration-guides/legacy-storage-retirement.md](docs/migration-guides/legacy-storage-retirement.md).
+
+Para metadata, PostgreSQL es obligatorio en el runtime actual; si no hay
+`POSTGRES_*`, el servicio reporta storage no disponible en vez de volver a
+SQLite.
+
+El reporte de salida incluye una auditoria por tabla legacy con:
+`source_count`, `target_count_before`, `target_count_after`, `matched_after` y
+`missing_after`. Para un cutover seguro, el criterio minimo es
+`matched_after == source_count` y `missing_after == 0` en `jobs`, `repos` y
+`lexical_corpus`.
+
+Si el bootstrap detecta tablas legacy parciales o con columnas faltantes, no
+las estampa automaticamente: el proceso falla y exige una migracion manual o la
+recreacion del esquema.
 
 `project_id` se deriva del JSON Base64 del service account y `location` se deriva
 del host configurado en `VERTEX_API_BASE_URL`. `VERTEX_AI_PROJECT_ID` y
@@ -106,15 +169,13 @@ $env:INGESTION_EXECUTION_MODE = 'rq'
 
 Notas operativas del arranque local:
 
-- `start_compose.ps1` simplifica hoy el arranque de `api + neo4j`, o
-  `api + neo4j + redis + worker` con `-WithRedis`.
-- `docker-compose.yml` tambien define un perfil `remote` con servicios
-  `chroma` y `postgres` para reproducir en local la topologia remota completa.
-- La arquitectura operativa principal del proyecto usa Chroma remoto y
-  Postgres; el helper de arranque no activa hoy ese perfil por defecto.
-- Si no activas el perfil `remote`, deja `POSTGRES_HOST` vacio; el host
-  `postgres` solo existe dentro de la red interna de Compose. Usa `localhost`
-  solo para ejecucion local fuera de contenedor contra un Postgres expuesto.
+- `start_compose.ps1` levanta por defecto `api + neo4j + chroma + postgres`.
+- Con `-WithRedis`, agrega `redis + worker` para ejecucion distribuida.
+- El helper activa el perfil `remote` y espera `GET /health`, no solo la
+  apertura del puerto 8000.
+- Dentro de Compose, API y worker resuelven `postgres`, `chroma`, `neo4j` y
+  `redis` por DNS interno. Usa `localhost` solo cuando la API corra fuera de
+  contenedor contra servicios expuestos en la maquina host.
 
 Alternativa para desarrollo local (API/UI fuera de contenedor):
 
@@ -262,7 +323,7 @@ Atajo de diagnostico:
 - Query directa controlada a Chroma: POST /admin/chroma/query
 
 Nota de contrato: el endpoint de readiness expone `lexical_loaded` como señal
-neutral de la capa léxica activa y mantiene `bm25_loaded` como alias legacy.
+neutral de la capa léxica activa; `bm25_loaded` ya no forma parte del contrato.
 
 Nota operativa: los endpoints de Chroma son de solo lectura y se pensaron para
 soporte y pruebas. Aunque puedan quedar abiertos temporalmente en un entorno
@@ -340,6 +401,7 @@ Invoke-RestMethod -Method Delete -Uri http://127.0.0.1:8000/repos/macrozheng-mal
 - Extractores de simbolos: [docs/SYMBOL_EXTRACTORS.md](docs/SYMBOL_EXTRACTORS.md)
 - Guia de contribucion: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 - Migraciones: [docs/migration-guides/README.md](docs/migration-guides/README.md)
+- Cutover Postgres legacy: [docs/migration-guides/postgres-legacy-cutover.md](docs/migration-guides/postgres-legacy-cutover.md)
 - Historial de cambios: [CHANGELOG.md](CHANGELOG.md)
 
 ## Ejemplos Ejecutables

@@ -27,7 +27,6 @@ from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.embedding import EmbeddingClient
 from coderag.ingestion.git_client import clone_repository
 from coderag.ingestion.graph_builder import GraphBuilder
-from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import ChromaIndex
 from coderag.ingestion.repo_scanner import scan_repository_with_stats
 from coderag.ingestion.semantic_java import extract_java_semantic_relations
@@ -165,7 +164,7 @@ def _repo_has_existing_index_data(repo_id: str, logger: LoggerFn) -> bool:
 
 
 def _purge_repo_indices(repo_id: str, logger: LoggerFn) -> None:
-    """Purga datos indexados previos por repo_id en Chroma, BM25/Lexical y Neo4j."""
+    """Purga datos indexados previos por repo_id en Chroma, Lexical y Neo4j."""
     chroma_deleted = delete_repository_vector_documents(
         build_managed_vector_index(),
         repo_id,
@@ -173,13 +172,7 @@ def _purge_repo_indices(repo_id: str, logger: LoggerFn) -> None:
 
     settings = get_settings()
     lexical_deleted = delete_active_repository_lexical_data(settings, repo_id)
-    if repository_lexical_backend_label(settings) == "lexical":
-        lexical_msg = f"lexical_docs={lexical_deleted['docs_removed']}"
-    else:
-        lexical_msg = (
-            f"bm25_docs={lexical_deleted['docs_removed']}, "
-            f"bm25_snapshot={lexical_deleted['snapshot_removed']}"
-        )
+    lexical_msg = f"lexical_docs={lexical_deleted['docs_removed']}"
 
     graph: GraphBuilder | None = None
     try:
@@ -293,8 +286,8 @@ def ingest_repository(
         logger=logger,
     )
 
-    logger("Construyendo BM25...")
-    _index_bm25(repo_id, scanned_files, symbol_chunks)
+    logger("Construyendo indice lexico...")
+    _index_lexical_backend(repo_id, scanned_files, symbol_chunks)
 
     logger("Construyendo grafo Neo4j...")
     try:
@@ -427,12 +420,12 @@ def _index_vectors(
     )
 
 
-def _index_bm25(
+def _index_lexical_backend(
     repo_id: str,
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
 ) -> None:
-    """Cree un índice BM25 a partir de símbolos, archivos y resúmenes de módulos."""
+    """Indexa el backend léxico activo sobre Postgres."""
     docs: list[str] = [chunk.snippet for chunk in symbols]
     metadatas: list[dict] = [
         {
@@ -481,16 +474,24 @@ def _index_bm25(
     docs.extend(module_docs)
     metadatas.extend(module_meta)
 
-    GLOBAL_BM25.build(repo_id=repo_id, docs=docs, metadatas=metadatas)
-    GLOBAL_BM25.persist_repo(repo_id)
-
     settings = get_settings()
     postgres_dsn = resolve_postgres_dsn(settings)
-    if postgres_dsn:
-        from coderag.storage.lexical_store import LexicalStore
-        LexicalStore(postgres_dsn, settings.lexical_fts_language).index_documents(
-            repo_id=repo_id, docs=docs, metadatas=metadatas
+    if not postgres_dsn:
+        raise RuntimeError(
+            "LexicalStore Postgres es obligatorio para indexar el corpus "
+            "lexico. Configure POSTGRES_* antes de ejecutar la ingesta."
         )
+
+    from coderag.storage.lexical_store import LexicalStore
+    from coderag.storage.postgres_session import PostgresSessionFactory
+
+    LexicalStore(
+        postgres_dsn,
+        settings.lexical_fts_language,
+        session_factory=PostgresSessionFactory.from_settings(settings),
+    ).index_documents(
+        repo_id=repo_id, docs=docs, metadatas=metadatas
+    )
 
 
 def _index_graph(

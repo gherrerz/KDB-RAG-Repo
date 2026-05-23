@@ -34,14 +34,16 @@ Notas operativas:
 
 - Query semántico, retrieval-only e inventario pueden operar sin workspace si
     Chroma, Postgres y Neo4j estan listos.
+- Postgres operativo se está consolidando sobre SQLAlchemy 2 y migraciones
+    Alembic: metadata usa ORM/clases Python y el corpus lexico mantiene SQL
+    FTS especializado sobre el mismo engine compartido.
 - Modo literal sigue dependiendo de workspace local porque devuelve contenido
     vivo del archivo y no usa snapshots persistidos.
 - Neo4j persiste metadata adicional por archivo, incluyendo módulo y
     `purpose_summary`, para soportar discovery e inventory explain sin leer
     archivos locales.
-- SQLite, BM25 local y Chroma embedded siguen existiendo como compatibilidad
-    legacy en algunas rutas del codigo, pero no representan la arquitectura
-    operativa principal documentada aqui.
+- SQLite y BM25 local ya no participan del runtime ni del tooling operativo;
+    la arquitectura soportada queda centrada en Chroma, PostgreSQL y Neo4j.
 
 ## Topología de despliegue
 

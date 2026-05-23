@@ -1,89 +1,136 @@
-"""Almacén léxico remoto en PostgreSQL con full-text search (tsvector + pg_trgm)."""
+"""Almacén léxico remoto en PostgreSQL con full-text search."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import urlsplit
 
-import psycopg
-from psycopg.rows import dict_row
+from sqlalchemy import bindparam, delete, func, literal, literal_column
+from sqlalchemy import select, text as sql_text
+from sqlalchemy.dialects.postgresql import JSONB, insert
 
-from coderag.storage.postgres_table_names import (
-    POSTGRES_LEXICAL_CORPUS_TABLE,
+from coderag.storage.postgres_schema import (
+    POSTGRES_LEXICAL_CORPUS_TABLE_NAME,
+    lexical_corpus_table,
 )
+from coderag.storage.postgres_session import PostgresSessionFactory
 
 
-def _describe_postgres_target(postgres_dsn: str) -> tuple[str, str]:
-    """Resume el destino del DSN sin exponer credenciales."""
-    parsed = urlsplit(postgres_dsn)
-    host = parsed.hostname or "<unknown-host>"
-    port = parsed.port or 5432
-    database = parsed.path.lstrip("/") or "<unknown-db>"
-    return host, f"{host}:{port}/{database}"
+def _build_weighted_fts_vector() -> Any:
+    """Compone el tsvector pesado que prioriza símbolo, path y contenido."""
+    return (
+        func.setweight(
+            func.to_tsvector(
+                bindparam("lang"),
+                func.coalesce(bindparam("symbol_name"), literal("")),
+            ),
+            literal_column("'A'"),
+        )
+        .op("||")(
+            func.setweight(
+                func.to_tsvector(
+                    bindparam("lang"),
+                    func.coalesce(bindparam("path"), literal("")),
+                ),
+                literal_column("'B'"),
+            )
+        )
+        .op("||")(
+            func.setweight(
+                func.to_tsvector(
+                    bindparam("lang"),
+                    func.coalesce(bindparam("doc"), literal("")),
+                ),
+                literal_column("'C'"),
+            )
+        )
+    )
+
+
+def _build_upsert_statement() -> Any:
+    """Construye el upsert batch para el corpus léxico."""
+    insert_stmt = insert(lexical_corpus_table).values(
+        {
+            "id": bindparam("id"),
+            "repo_id": bindparam("repo_id"),
+            "doc": bindparam("doc"),
+            "path": bindparam("path"),
+            "symbol_name": bindparam("symbol_name"),
+            "entity_type": bindparam("entity_type"),
+            "metadata": bindparam("metadata", type_=JSONB),
+            "fts_vector": _build_weighted_fts_vector(),
+        }
+    )
+    return insert_stmt.on_conflict_do_update(
+        index_elements=[
+            lexical_corpus_table.c.repo_id,
+            lexical_corpus_table.c.id,
+        ],
+        set_={
+            "doc": insert_stmt.excluded.doc,
+            "path": insert_stmt.excluded.path,
+            "symbol_name": insert_stmt.excluded.symbol_name,
+            "entity_type": insert_stmt.excluded.entity_type,
+            "metadata": insert_stmt.excluded["metadata"],
+            "fts_vector": insert_stmt.excluded.fts_vector,
+        },
+    )
+
+
+def _coerce_query_metadata(value: Any) -> dict[str, Any]:
+    """Normaliza metadata leída desde JSONB o filas legacy serializadas."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            loaded = json.loads(value)
+        except Exception:
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+    return {}
+
+
+_UPSERT_LEXICAL_DOCUMENTS = _build_upsert_statement()
+
+_QUERY_LEXICAL_DOCUMENTS = sql_text(
+    f"""
+    SELECT
+        id,
+        doc,
+        path,
+        symbol_name,
+        entity_type,
+        metadata,
+        ts_rank_cd(
+            fts_vector,
+            plainto_tsquery(:lang, :text)
+        ) AS score
+    FROM {POSTGRES_LEXICAL_CORPUS_TABLE_NAME}
+    WHERE
+        repo_id = :repo_id
+        AND fts_vector @@ plainto_tsquery(:lang, :text)
+    ORDER BY score DESC
+    LIMIT :top_n
+    """
+)
 
 
 class LexicalStore:
     """Indexación y búsqueda léxica de corpus de código usando PostgreSQL FTS."""
 
-    def __init__(self, postgres_dsn: str, fts_language: str = "english") -> None:
-        """Inicializa el store y garantiza que el esquema existe."""
+    def __init__(
+        self,
+        postgres_dsn: str,
+        fts_language: str = "english",
+        *,
+        session_factory: PostgresSessionFactory | None = None,
+    ) -> None:
+        """Inicializa el store usando la infraestructura compartida."""
         self._url = postgres_dsn
         self._lang = fts_language
-        self._init_schema()
-
-    def _connect(self) -> psycopg.Connection[dict[str, Any]]:
-        """Abre conexión a Postgres con row_factory dict_row."""
-        try:
-            return psycopg.connect(self._url, row_factory=dict_row)
-        except psycopg.OperationalError as exc:
-            host, target = _describe_postgres_target(self._url)
-            compose_hint = ""
-            if host == "postgres":
-                compose_hint = (
-                    " Si usas docker-compose, el host 'postgres' solo existe "
-                    "cuando el perfil 'remote' está activo."
-                )
-            raise RuntimeError(
-                "No se pudo conectar a Postgres para LexicalStore en "
-                f"{target}. Verifica POSTGRES_HOST/POSTGRES_PORT y que el "
-                f"host sea resolvible desde este runtime.{compose_hint} "
-                f"Error original: {exc}"
-            ) from exc
-
-    def _init_schema(self) -> None:
-        """Crea tabla lexical_corpus e índices si no existen."""
-        with self._connect() as conn:
-            # pg_trgm opcional: se activa si la extensión está disponible
-            try:
-                conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-            except Exception:
-                pass
-
-            conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {POSTGRES_LEXICAL_CORPUS_TABLE} (
-                    id TEXT NOT NULL,
-                    repo_id TEXT NOT NULL,
-                    doc TEXT NOT NULL,
-                    path TEXT,
-                    symbol_name TEXT,
-                    entity_type TEXT,
-                    metadata TEXT,
-                    fts_vector tsvector,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    PRIMARY KEY (repo_id, id)
-                )
-                """
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_lexical_fts "
-                f"ON {POSTGRES_LEXICAL_CORPUS_TABLE} USING GIN (fts_vector)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_lexical_repo "
-                f"ON {POSTGRES_LEXICAL_CORPUS_TABLE} (repo_id)"
-            )
+        self._session_factory = session_factory or PostgresSessionFactory(
+            postgres_dsn
+        )
 
     def index_documents(
         self,
@@ -100,52 +147,27 @@ class LexicalStore:
         """
         if not docs:
             return
-        lang = self._lang
-        rows = []
+        rows: list[dict[str, Any]] = []
         for doc, meta in zip(docs, metadatas):
             doc_id = str(meta.get("id", ""))
             path = str(meta.get("path", "") or "")
             symbol_name = str(meta.get("symbol_name", "") or "")
             entity_type = str(meta.get("entity_type", "") or "")
-            rows.append((
-                doc_id,
-                repo_id,
-                doc,
-                path,
-                symbol_name,
-                entity_type,
-                json.dumps(meta, ensure_ascii=True),
-                lang,
-                symbol_name,
-                lang,
-                path,
-                lang,
-                doc,
-            ))
+            rows.append(
+                {
+                    "id": doc_id,
+                    "repo_id": repo_id,
+                    "doc": doc,
+                    "path": path,
+                    "symbol_name": symbol_name,
+                    "entity_type": entity_type,
+                    "metadata": dict(meta),
+                    "lang": self._lang,
+                }
+            )
 
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.executemany(
-                    f"""
-                    INSERT INTO {POSTGRES_LEXICAL_CORPUS_TABLE} (
-                        id, repo_id, doc, path, symbol_name, entity_type,
-                        metadata, fts_vector
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s,
-                        setweight(to_tsvector(%s, coalesce(%s, '')), 'A') ||
-                        setweight(to_tsvector(%s, coalesce(%s, '')), 'B') ||
-                        setweight(to_tsvector(%s, coalesce(%s, '')), 'C')
-                    )
-                    ON CONFLICT (repo_id, id) DO UPDATE SET
-                        doc = EXCLUDED.doc,
-                        path = EXCLUDED.path,
-                        symbol_name = EXCLUDED.symbol_name,
-                        entity_type = EXCLUDED.entity_type,
-                        metadata = EXCLUDED.metadata,
-                        fts_vector = EXCLUDED.fts_vector
-                    """,
-                    rows,
-                )
+        with self._session_factory.get_connection() as connection:
+            connection.execute(_UPSERT_LEXICAL_DOCUMENTS, rows)
 
     def query(
         self,
@@ -155,46 +177,25 @@ class LexicalStore:
     ) -> list[dict]:
         """Devuelve los documentos más relevantes para la consulta usando FTS.
 
-        El shape de retorno es compatible con GLOBAL_BM25.query():
+        El shape de retorno es compatible con el contrato léxico legacy:
         [{"id": ..., "text": ..., "score": ..., "metadata": {...}}]
         """
         if not text.strip():
             return []
-        lang = self._lang
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    id,
-                    doc,
-                    path,
-                    symbol_name,
-                    entity_type,
-                    metadata,
-                    ts_rank_cd(
-                        fts_vector,
-                        plainto_tsquery(%s, %s)
-                    ) AS score
-                FROM {POSTGRES_LEXICAL_CORPUS_TABLE}
-                WHERE
-                    repo_id = %s
-                    AND fts_vector @@ plainto_tsquery(%s, %s)
-                ORDER BY score DESC
-                LIMIT %s
-                """,
-                (lang, text, repo_id, lang, text, top_n),
-            ).fetchall()
+        with self._session_factory.get_connection() as connection:
+            rows = connection.execute(
+                _QUERY_LEXICAL_DOCUMENTS,
+                {
+                    "lang": self._lang,
+                    "text": text,
+                    "repo_id": repo_id,
+                    "top_n": top_n,
+                },
+            ).mappings().all()
 
         results: list[dict] = []
         for row in rows:
-            meta: dict = {}
-            if row.get("metadata"):
-                try:
-                    loaded = json.loads(row["metadata"])
-                    if isinstance(loaded, dict):
-                        meta = loaded
-                except Exception:
-                    meta = {}
+            meta = _coerce_query_metadata(row.get("metadata"))
             results.append(
                 {
                     "id": row["id"],
@@ -207,30 +208,27 @@ class LexicalStore:
 
     def has_corpus(self, repo_id: str) -> bool:
         """Indica si el repositorio tiene documentos indexados."""
-        with self._connect() as conn:
-            row = conn.execute(
-                (
-                    f"SELECT 1 FROM {POSTGRES_LEXICAL_CORPUS_TABLE} "
-                    "WHERE repo_id = %s LIMIT 1"
-                ),
-                (repo_id,),
-            ).fetchone()
+        statement = (
+            select(literal(1))
+            .select_from(lexical_corpus_table)
+            .where(lexical_corpus_table.c.repo_id == repo_id)
+            .limit(1)
+        )
+        with self._session_factory.get_connection() as connection:
+            row = connection.execute(statement).first()
         return row is not None
 
     def delete_repo(self, repo_id: str) -> dict[str, int]:
         """Elimina todos los documentos del repositorio y retorna conteo."""
-        with self._connect() as conn:
-            cursor = conn.execute(
-                (
-                    f"DELETE FROM {POSTGRES_LEXICAL_CORPUS_TABLE} "
-                    "WHERE repo_id = %s"
-                ),
-                (repo_id,),
-            )
-            deleted = int(cursor.rowcount or 0)
+        statement = delete(lexical_corpus_table).where(
+            lexical_corpus_table.c.repo_id == repo_id
+        )
+        with self._session_factory.get_connection() as connection:
+            result = connection.execute(statement)
+            deleted = int(result.rowcount or 0)
         return {"docs_removed": deleted}
 
     def delete_all(self) -> None:
         """Elimina todo el corpus léxico. Usar solo en reset global."""
-        with self._connect() as conn:
-            conn.execute(f"DELETE FROM {POSTGRES_LEXICAL_CORPUS_TABLE}")
+        with self._session_factory.get_connection() as connection:
+            connection.execute(delete(lexical_corpus_table))

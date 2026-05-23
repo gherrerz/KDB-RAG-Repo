@@ -13,7 +13,6 @@ Incidencias frecuentes y acciones sugeridas.
 - Consulta GET /repos/{repo_id}/status.
 - Revisa query_ready, lexical_loaded, chroma_counts y embedding_compatible.
 - `lexical_loaded` es la señal canonica de readiness de la capa lexica.
-- `bm25_loaded` se mantiene como alias legacy por compatibilidad.
 - Si embedding_compatible es false, reingesta con provider/modelo compatible.
 
 ## Fallback en query con LLM

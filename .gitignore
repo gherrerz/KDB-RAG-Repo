@@ -41,7 +41,6 @@ secrets/
 logs/
 
 # Local storage and runtime data
-storage/bm25/
 storage/chroma/
 storage/workspace/
 storage/*.db

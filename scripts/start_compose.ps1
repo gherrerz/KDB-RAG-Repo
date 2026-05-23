@@ -12,35 +12,39 @@ if (-not $env:HEALTH_CHECK_OPENAI) {
     $env:HEALTH_CHECK_OPENAI = "false"
 }
 
-function Wait-Port {
+function Wait-HealthEndpoint {
     param(
-        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][string]$Url,
         [int]$Retries = 45,
         [int]$DelaySeconds = 1
     )
 
     for ($attempt = 1; $attempt -le $Retries; $attempt++) {
-        $ok = Test-NetConnection 127.0.0.1 -Port $Port -WarningAction SilentlyContinue
-        if ($ok.TcpTestSucceeded) {
-            return $true
+        try {
+            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
+            if ($response.StatusCode -eq 200) {
+                return $true
+            }
+        }
+        catch {
         }
         Start-Sleep -Seconds $DelaySeconds
     }
     return $false
 }
 
-Write-Host "[1/3] Levantando stack compose (api + neo4j" -NoNewline
+Write-Host "[1/3] Levantando stack compose (api + neo4j + chroma + postgres" -NoNewline
 if ($WithRedis) {
     Write-Host " + redis + worker)..."
-    & ./scripts/compose_neo4j.ps1 up -WithRedis
+    & ./scripts/compose_neo4j.ps1 up -WithRemote -WithRedis
 } else {
     Write-Host ")..."
-    & ./scripts/compose_neo4j.ps1 up
+    & ./scripts/compose_neo4j.ps1 up -WithRemote
 }
 
-Write-Host "[2/3] Esperando API (8000)..."
-if (-not (Wait-Port -Port 8000 -Retries 45 -DelaySeconds 1)) {
-    throw "API no quedo disponible en 127.0.0.1:8000"
+Write-Host "[2/3] Esperando /health (8000)..."
+if (-not (Wait-HealthEndpoint -Url "http://127.0.0.1:8000/health" -Retries 45 -DelaySeconds 1)) {
+    throw "API no quedo saludable en http://127.0.0.1:8000/health"
 }
 
 Write-Host "[3/3] Stack compose listo."

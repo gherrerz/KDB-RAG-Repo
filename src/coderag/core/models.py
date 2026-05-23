@@ -690,16 +690,10 @@ class RepoQueryStatusResponse(BaseModel):
         default_factory=list,
         description="Colecciones Chroma desalineadas respecto al espacio configurado.",
     )
-    bm25_loaded: bool = Field(
-        description=(
-            "Nombre histórico del indicador de readiness léxico del repo; "
-            "puede representar BM25 local o corpus léxico en Postgres."
-        )
-    )
     lexical_loaded: bool = Field(
         description=(
-            "Indicador neutral del readiness léxico del repo, independiente "
-            "de si el backend activo es BM25 local o LexicalStore en Postgres."
+            "Indicador canónico del readiness léxico del repo, independiente "
+            "del uso de LexicalStore en Postgres como backend operativo."
         )
     )
     graph_available: bool | None = Field(default=None, description="Disponibilidad de grafo para el repo (si pudo evaluarse).")
@@ -741,6 +735,17 @@ class StorageHealthItem(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict, description="Detalle técnico adicional del componente.")
 
 
+class PostgresStartupStatus(BaseModel):
+    """Estado operativo del bootstrap de migraciones PostgreSQL."""
+
+    enabled: bool = Field(description="Indica si PostgreSQL está activo en el runtime.")
+    policy: str = Field(description="Política de arranque aplicada para migraciones.")
+    action: str = Field(description="Acción ejecutada durante el arranque o health más reciente.")
+    current_heads: list[str] = Field(default_factory=list, description="Heads detectados actualmente en la base.")
+    expected_heads: list[str] = Field(default_factory=list, description="Heads esperados según Alembic.")
+    cached: bool = Field(default=False, description="Indica si el estado proviene de caché interna.")
+
+
 class StorageHealthResponse(BaseModel):
     """Estado consolidado de salud para componentes de almacenamiento del RAG."""
 
@@ -752,6 +757,10 @@ class StorageHealthResponse(BaseModel):
     cached: bool = Field(default=False, description="Indica si el resultado proviene de caché.")
     failed_components: list[str] = Field(default_factory=list, description="Lista de componentes fallidos.")
     items: list[StorageHealthItem] = Field(default_factory=list, description="Detalle de salud por componente.")
+    postgres_startup: PostgresStartupStatus | None = Field(
+        default=None,
+        description="Estado del bootstrap de migraciones PostgreSQL, cuando aplica.",
+    )
 
 
 class ScannedFile(BaseModel):
@@ -810,7 +819,7 @@ class FileImportRelation(BaseModel):
 
 
 class RetrievalChunk(BaseModel):
-    """Fragmento devuelto de la recuperación de vector/BM25/gráfico."""
+    """Fragmento devuelto de la recuperación vectorial/léxica/gráfica."""
 
     id: str
     text: str

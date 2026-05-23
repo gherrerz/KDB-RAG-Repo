@@ -8,6 +8,7 @@ from rq.timeouts import TimerDeathPenalty
 
 from coderag.core.logging import configure_logging
 from coderag.core.settings import get_settings
+from coderag.storage.postgres_startup import ensure_postgres_schema_ready
 
 
 class CoderagSimpleWorker(SimpleWorker):
@@ -20,6 +21,7 @@ def run_worker(*, queue_name: str | None = None, burst: bool = False) -> None:
     """Ejecuta un worker RQ ligado a la cola de ingesta configurada."""
     configure_logging()
     settings = get_settings()
+    ensure_postgres_schema_ready(settings)
 
     target_queue = queue_name or settings.ingestion_queue_name
     redis_conn = Redis.from_url(settings.redis_url)

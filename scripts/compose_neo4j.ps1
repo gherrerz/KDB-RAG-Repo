@@ -3,6 +3,7 @@ param(
     [string]$Action = "up",
     [switch]$NoDetach,
     [string[]]$Services = @(),
+    [switch]$WithRemote,
     [switch]$WithRedis
 )
 
@@ -79,35 +80,56 @@ if (-not $canUseNerdctl -and -not $canUseDocker) {
     throw "No compose runtime available. Install Rancher Desktop (nerdctl compose) or Docker Desktop (docker compose)."
 }
 
+$profileArgs = @()
+if ($WithRemote) {
+    $profileArgs += @("--profile", "remote")
+}
+if ($WithRedis) {
+    $profileArgs += @("--profile", "redis")
+}
+
 $actionArgs = @()
 switch ($Action) {
     "up" {
-        $actionArgs = @("up")
+        $actionArgs = $profileArgs + @("up")
         if (-not $NoDetach) {
             $actionArgs += "-d"
         }
-        if ($WithRedis) {
-            $actionArgs = @("--profile", "redis") + $actionArgs
-        }
     }
     "down" {
-        $actionArgs = @("down")
-        if ($WithRedis) {
-            $actionArgs = @("--profile", "redis") + $actionArgs
-        }
+        $actionArgs = $profileArgs + @("down")
     }
     "ps" {
-        $actionArgs = @("ps")
-        if ($WithRedis) {
-            $actionArgs = @("--profile", "redis") + $actionArgs
-        }
+        $actionArgs = $profileArgs + @("ps")
     }
     "logs" {
         if ($Services.Count -gt 0) {
-            $actionArgs = @("logs", "--tail", "200") + $Services
+            $actionArgs = $profileArgs + @("logs", "--tail", "200") + $Services
         } else {
-            if ($WithRedis) {
-                $actionArgs = @(
+            if ($WithRemote -and $WithRedis) {
+                $actionArgs = $profileArgs + @(
+                    "logs",
+                    "--tail",
+                    "200",
+                    "neo4j",
+                    "api",
+                    "chroma",
+                    "postgres",
+                    "redis",
+                    "worker"
+                )
+            } elseif ($WithRemote) {
+                $actionArgs = $profileArgs + @(
+                    "logs",
+                    "--tail",
+                    "200",
+                    "neo4j",
+                    "api",
+                    "chroma",
+                    "postgres"
+                )
+            } elseif ($WithRedis) {
+                $actionArgs = $profileArgs + @(
                     "logs",
                     "--tail",
                     "200",
@@ -117,7 +139,7 @@ switch ($Action) {
                     "worker"
                 )
             } else {
-                $actionArgs = @("logs", "--tail", "200", "neo4j", "api")
+                $actionArgs = $profileArgs + @("logs", "--tail", "200", "neo4j", "api")
             }
         }
     }

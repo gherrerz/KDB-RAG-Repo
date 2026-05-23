@@ -40,3 +40,9 @@ Este directorio contiene guias para cambios incompatibles.
 - Un archivo por cambio incompatible.
 - Enlazar cada guia desde CHANGELOG.md.
 - Incluir ejemplos before/after cuando aplique.
+
+## Guias disponibles
+
+- [postgres-legacy-cutover.md](postgres-legacy-cutover.md)
+- [legacy-storage-retirement.md](legacy-storage-retirement.md)
+- [orm-postgres-legacy-handoff.md](orm-postgres-legacy-handoff.md)

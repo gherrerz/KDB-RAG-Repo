@@ -4,24 +4,29 @@ from __future__ import annotations
 
 from coderag.core.settings import resolve_postgres_dsn
 from coderag.storage.base_metadata_store import BaseMetadataStore
-from coderag.storage.metadata_store import MetadataStore
+from coderag.storage.postgres_session import PostgresSessionFactory
 
 
 def build_metadata_store(settings: object) -> BaseMetadataStore:
-    """Construye el store de metadata adecuado según la configuración."""
+    """Construye el store de metadata operativo soportado."""
     postgres_dsn = resolve_postgres_dsn(settings)
     if postgres_dsn:
         from coderag.storage.postgres_metadata_store import PostgresMetadataStore
 
-        return PostgresMetadataStore(postgres_dsn)
+        return PostgresMetadataStore(
+            postgres_dsn,
+            session_factory=PostgresSessionFactory.from_settings(settings),
+        )
 
-    return MetadataStore(settings.workspace_path.parent / "metadata.db")
+    raise RuntimeError(
+        "Metadata Postgres es obligatorio en el runtime actual. "
+        "Configure POSTGRES_*; SQLite legacy ya no esta soportado como "
+        "backend operativo."
+    )
 
 
 def metadata_backend_label(settings: object) -> str:
     """Devuelve una etiqueta legible del backend de metadata activo."""
-    return (
-        "Metadata Postgres"
-        if resolve_postgres_dsn(settings)
-        else "Metadata SQLite"
-    )
+    if resolve_postgres_dsn(settings):
+        return "Metadata Postgres"
+    return "Metadata unavailable"

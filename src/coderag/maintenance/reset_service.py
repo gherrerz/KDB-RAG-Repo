@@ -13,7 +13,6 @@ from coderag.core.vector_index import (
     reset_managed_vector_storage,
 )
 from coderag.ingestion.graph_builder import GraphBuilder
-from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import COLLECTIONS
 from coderag.storage.base_metadata_store import BaseMetadataStore
 from coderag.storage.metadata_store_factory import (
@@ -49,28 +48,6 @@ def _remove_path(path: Path, retries: int = 3) -> None:
         raise RuntimeError(f"No se pudo eliminar {path}: {last_error}") from last_error
 
 
-def _reset_bm25_storage(settings: object) -> tuple[list[str], list[str]]:
-    """Limpia BM25 en memoria y sus snapshots persistidos."""
-    cleared: list[str] = []
-    warnings: list[str] = []
-
-    GLOBAL_BM25.clear()
-    cleared.append("BM25 en memoria")
-
-    bm25_path = settings.workspace_path.parent / "bm25"
-    try:
-        _remove_path(bm25_path)
-        bm25_path.mkdir(parents=True, exist_ok=True)
-        cleared.append(f"BM25 snapshots ({bm25_path})")
-    except RuntimeError as exc:
-        warnings.append(
-            "No se pudo vaciar carpeta BM25 por lock de archivos: "
-            f"{exc}"
-        )
-
-    return cleared, warnings
-
-
 def _reset_postgres_lexical_storage(settings: object) -> tuple[list[str], list[str]]:
     """Limpia el corpus léxico en Postgres cuando ese backend existe."""
     cleared: list[str] = []
@@ -81,39 +58,18 @@ def _reset_postgres_lexical_storage(settings: object) -> tuple[list[str], list[s
 
     try:
         from coderag.storage.lexical_store import LexicalStore
+        from coderag.storage.postgres_session import PostgresSessionFactory
 
         LexicalStore(
             postgres_dsn,
             getattr(settings, "lexical_fts_language", "english"),
+            session_factory=PostgresSessionFactory.from_settings(settings),
         ).delete_all()
         cleared.append("LexicalStore Postgres")
     except Exception as exc:
         warnings.append(f"No se pudo limpiar LexicalStore Postgres: {exc}")
 
     return cleared, warnings
-
-
-def _delete_repo_bm25_storage(
-    repo_id: str,
-) -> tuple[list[str], list[str], dict[str, int]]:
-    """Elimina los artefactos BM25 de un repositorio puntual."""
-    cleared: list[str] = []
-    warnings: list[str] = []
-    deleted_counts: dict[str, int] = {}
-
-    try:
-        bm25_deleted = GLOBAL_BM25.delete_repo(repo_id)
-        deleted_counts["bm25_docs"] = int(
-            bm25_deleted.get("docs_removed", 0) or 0
-        )
-        deleted_counts["bm25_snapshots"] = int(
-            bm25_deleted.get("snapshot_removed", 0) or 0
-        )
-        cleared.append("BM25")
-    except Exception as exc:
-        warnings.append(f"No se pudo limpiar BM25 para '{repo_id}': {exc}")
-
-    return cleared, warnings, deleted_counts
 
 
 def _delete_repo_postgres_lexical_storage(
@@ -130,10 +86,12 @@ def _delete_repo_postgres_lexical_storage(
 
     try:
         from coderag.storage.lexical_store import LexicalStore
+        from coderag.storage.postgres_session import PostgresSessionFactory
 
         lex_deleted = LexicalStore(
             postgres_dsn,
             getattr(settings, "lexical_fts_language", "english"),
+            session_factory=PostgresSessionFactory.from_settings(settings),
         ).delete_repo(repo_id)
         deleted_counts["lexical_docs"] = int(
             lex_deleted.get("docs_removed", 0) or 0
@@ -151,10 +109,6 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
     cleared: list[str] = []
     warnings: list[str] = []
     postgres_dsn = resolve_postgres_dsn(settings)
-
-    bm25_cleared, bm25_warnings = _reset_bm25_storage(settings)
-    cleared.extend(bm25_cleared)
-    warnings.extend(bm25_warnings)
 
     lexical_cleared, lexical_warnings = _reset_postgres_lexical_storage(settings)
     cleared.extend(lexical_cleared)
@@ -181,11 +135,10 @@ def reset_all_storage() -> tuple[list[str], list[str]]:
         except Exception as exc:
             warnings.append(f"No se pudo limpiar metadata Postgres: {exc}")
     else:
-        metadata_db = settings.workspace_path.parent / "metadata.db"
-        _remove_path(metadata_db)
-        metadata_db.parent.mkdir(parents=True, exist_ok=True)
-        metadata_db.touch(exist_ok=True)
-        cleared.append(f"Metadata ({metadata_db})")
+        warnings.append(
+            "Metadata Postgres no está configurado; no se limpió metadata "
+            "operativa durante el reset."
+        )
 
     try:
         graph = GraphBuilder()
@@ -242,13 +195,6 @@ def delete_repo_storage(
     except Exception as exc:
         warnings.append(f"No se pudo limpiar Chroma para '{normalized_repo_id}': {exc}")
 
-    bm25_cleared, bm25_warnings, bm25_counts = _delete_repo_bm25_storage(
-        normalized_repo_id,
-    )
-    cleared.extend(bm25_cleared)
-    warnings.extend(bm25_warnings)
-    deleted_counts.update(bm25_counts)
-
     lexical_cleared, lexical_warnings, lexical_counts = (
         _delete_repo_postgres_lexical_storage(settings, normalized_repo_id)
     )
@@ -280,8 +226,8 @@ def delete_repo_storage(
     if workspace_removed > 0:
         cleared.append("Workspace")
 
-    metadata_store = _build_metadata_store(settings)
     try:
+        metadata_store = _build_metadata_store(settings)
         metadata_deleted = metadata_store.delete_repo_data(normalized_repo_id)
         deleted_counts["metadata_jobs"] = int(
             metadata_deleted.get("jobs_deleted", 0) or 0
@@ -295,7 +241,7 @@ def delete_repo_storage(
         cleared.append(metadata_backend_label(settings))
     except Exception as exc:
         warnings.append(
-            "No se pudo limpiar metadata para "
+            "No se pudo limpiar metadata operativa para "
             f"'{normalized_repo_id}': {exc}"
         )
 

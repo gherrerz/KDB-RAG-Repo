@@ -10,7 +10,6 @@ from rq.timeouts import TimerDeathPenalty
 
 from coderag.core.models import JobInfo, JobStatus
 from coderag.jobs.worker import run_ingest_job_task
-from coderag.storage.metadata_store import MetadataStore
 
 
 class _TestSimpleWorker(SimpleWorker):
@@ -41,6 +40,7 @@ def test_rq_worker_processes_ingest_job_end_to_end(monkeypatch, tmp_path) -> Non
     class _Settings:
         workspace_path = tmp_path / "workspace"
         ingestion_retry_transient_only = True
+        runtime_environment = "test"
 
     _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
 
@@ -78,8 +78,7 @@ def test_rq_worker_processes_ingest_job_end_to_end(monkeypatch, tmp_path) -> Non
     assert finished is not None
     assert finished.get_status() == "finished"
 
-    metadata_path = _Settings.workspace_path.parent / "metadata.db"
-    store = MetadataStore(metadata_path)
+    store = module._build_metadata_store()
     persisted = store.get_job(job_id)
     assert persisted is not None
     assert persisted.status == JobStatus.completed

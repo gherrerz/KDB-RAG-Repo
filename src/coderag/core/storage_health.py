@@ -13,7 +13,6 @@ from redis import Redis
 
 from coderag.core.lexical_index import (
     repository_has_query_ready_lexical_data,
-    repository_lexical_backend_label,
 )
 from coderag.core.settings import get_settings, resolve_postgres_dsn
 from coderag.core.vector_index import (
@@ -28,7 +27,6 @@ from coderag.ingestion.graph_builder import (
     describe_neo4j_auth_mode,
     describe_neo4j_target,
 )
-from coderag.ingestion.index_bm25 import GLOBAL_BM25
 from coderag.ingestion.index_chroma import (
     ChromaIndex,
     build_remote_chroma_error_message,
@@ -213,7 +211,9 @@ def _error_code(component: str, message: str) -> str:
         ):
             return "chroma_unreachable"
         return "chroma_unavailable"
-    if component == "metadata_sqlite":
+    if component in {"metadata_sqlite", "metadata_legacy_sqlite", "metadata_postgres"}:
+        return "metadata_unavailable"
+    if component == "metadata_unconfigured":
         return "metadata_unavailable"
     if component == "workspace":
         return "workspace_not_writable"
@@ -223,8 +223,8 @@ def _error_code(component: str, message: str) -> str:
         return "openai_unavailable"
     if component == "redis":
         return "redis_unavailable"
-    if component == "bm25":
-        return "bm25_repo_missing"
+    if component == "lexical":
+        return "lexical_unavailable"
     return f"{component}_failed"
 
 
@@ -290,8 +290,15 @@ def _build_metadata_check(settings: object) -> tuple[str, Any]:
     if postgres_dsn:
         return "metadata_postgres", lambda: _check_metadata_postgres(postgres_dsn)
 
-    metadata_path = settings.workspace_path.parent / "metadata.db"
-    return "metadata_sqlite", lambda: _check_metadata_sqlite(metadata_path)
+    return (
+        "metadata_postgres",
+        lambda: (_ for _ in ()).throw(
+            RuntimeError(
+                "Metadata Postgres no está configurado. Configure POSTGRES_*; "
+                "SQLite legacy ya no está soportado como backend operativo."
+            )
+        ),
+    )
 
 
 def _check_chroma() -> dict[str, Any]:
@@ -376,27 +383,17 @@ def _check_neo4j(timeout_seconds: float) -> dict[str, Any]:
         driver.close()
 
 
-def _check_bm25(context: str, repo_id: str | None) -> dict[str, Any]:
-    """Valida estado BM25 global o por repositorio según contexto."""
-    if context in {"query", "inventory_query"}:
-        if not repo_id:
-            raise RuntimeError(
-                "repo_id es requerido para validar BM25 en consulta."
-            )
-        loaded = GLOBAL_BM25.ensure_repo_loaded(repo_id)
-        if not loaded:
-            raise RuntimeError(
-                f"No hay índice BM25 cargado para repo '{repo_id}'."
-            )
-        return {"repo_id": repo_id, "indexed": True}
-    return {"indexed_repos": GLOBAL_BM25.repo_count()}
-
-
 def _check_lexical_store(context: str, repo_id: str | None, postgres_dsn: str) -> dict[str, Any]:
     """Valida estado del LexicalStore en Postgres cuando el backend está activo."""
     from coderag.storage.lexical_store import LexicalStore
+    from coderag.storage.postgres_session import PostgresSessionFactory
+
     settings = get_settings()
-    store = LexicalStore(postgres_dsn, settings.lexical_fts_language)
+    store = LexicalStore(
+        postgres_dsn,
+        settings.lexical_fts_language,
+        session_factory=PostgresSessionFactory.from_settings(settings),
+    )
     if context in {"query", "inventory_query"}:
         if not repo_id:
             raise RuntimeError(
@@ -419,14 +416,18 @@ def _build_lexical_check(
 ) -> tuple[str, Any]:
     """Construye el check léxico apropiado según el backend activo."""
     postgres_dsn = resolve_postgres_dsn(settings)
-    label = repository_lexical_backend_label(settings)
-    if label == "lexical":
-        return label, lambda: _check_lexical_store(
+    if postgres_dsn:
+        return "lexical", lambda: _check_lexical_store(
             context=context,
             repo_id=repo_id,
             postgres_dsn=postgres_dsn,
         )
-    return label, lambda: _check_bm25(context=context, repo_id=repo_id)
+    return "lexical", lambda: (_ for _ in ()).throw(
+        RuntimeError(
+            "LexicalStore Postgres no está configurado. Configure POSTGRES_*; "
+            "BM25 legacy ya no está soportado como backend activo."
+        )
+    )
 
 
 def _check_openai(timeout_seconds: float) -> dict[str, Any]:
@@ -713,13 +714,9 @@ def get_repo_query_status(
     chroma_spaces: dict[str, str | None] = {}
     chroma_space_mismatched_collections: list[str] = []
 
-    lexical_backend = repository_lexical_backend_label(settings)
     lexical_loaded = repository_has_query_ready_lexical_data(settings, repo_id)
     if not lexical_loaded:
-        if lexical_backend == "lexical":
-            warnings.append(f"No hay corpus léxico en Postgres para repo '{repo_id}'.")
-        else:
-            warnings.append(f"No hay indice BM25 en memoria para repo '{repo_id}'.")
+        warnings.append(f"No hay corpus léxico en Postgres para repo '{repo_id}'.")
 
     try:
         chroma_counts = _count_query_collections_for_repo(repo_id)
@@ -790,7 +787,6 @@ def get_repo_query_status(
         "chroma_hnsw_space_detected": chroma_spaces,
         "chroma_hnsw_space_compatible": chroma_space_compatible,
         "chroma_hnsw_space_mismatched_collections": chroma_space_mismatched_collections,
-        "bm25_loaded": lexical_loaded,
         "lexical_loaded": lexical_loaded,
         "graph_available": graph_available,
         "embedding_compatible": embedding_compatible,

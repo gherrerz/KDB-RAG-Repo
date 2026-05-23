@@ -140,11 +140,12 @@ BENCH_CODE = dedent(
 
     def bench_hybrid_search(iterations: int = 14) -> dict[str, float]:
         import coderag.retrieval.hybrid_search as hs
-        from coderag.core.models import RetrievalChunk
 
         original_embedder = hs.EmbeddingClient
-        original_chroma = hs.ChromaIndex
-        original_bm25 = hs.GLOBAL_BM25
+        original_build_vector_index = hs.build_managed_vector_index
+        original_build_lexical_index = hs.build_repository_lexical_index
+        original_ensure_loaded = hs.ensure_repository_lexical_index_loaded
+        original_query_ready = hs.repository_has_query_ready_lexical_data
 
         class FakeEmbeddingClient:
             def __init__(self, *args, **kwargs):
@@ -153,10 +154,7 @@ BENCH_CODE = dedent(
             def embed_texts(self, texts):
                 return [[0.1] * 4 for _ in texts]
 
-        class FakeChromaIndex:
-            def __init__(self, *args, **kwargs):
-                return None
-
+        class FakeVectorIndex:
             def query(self, collection_name, query_embedding, top_n, where=None):
                 sleep(0.05)
                 return {
@@ -166,25 +164,32 @@ BENCH_CODE = dedent(
                     "distances": [[0.2]],
                 }
 
-        class FakeBM25:
-            def ensure_repo_loaded(self, repo_id):
-                return None
-
+        class FakeLexicalIndex:
             def query(self, repo_id, text, top_n=50):
+                del repo_id, text, top_n
                 sleep(0.04)
                 return [
                     {
-                        "id": "bm25-1",
+                        "id": "lexical-1",
                         "text": "doc",
                         "score": 1.0,
                         "metadata": {"path": "src/b.py", "start_line": 1, "end_line": 2},
                     }
                 ]
 
+        def fake_build_vector_index():
+            return FakeVectorIndex()
+
+        def fake_build_lexical_index(settings):
+            del settings
+            return FakeLexicalIndex()
+
         try:
             hs.EmbeddingClient = FakeEmbeddingClient
-            hs.ChromaIndex = FakeChromaIndex
-            hs.GLOBAL_BM25 = FakeBM25()
+            hs.build_managed_vector_index = fake_build_vector_index
+            hs.build_repository_lexical_index = fake_build_lexical_index
+            hs.ensure_repository_lexical_index_loaded = lambda index, repo_id: None
+            hs.repository_has_query_ready_lexical_data = lambda settings, repo_id: True
 
             latencies = []
             for _ in range(iterations):
@@ -194,8 +199,10 @@ BENCH_CODE = dedent(
             return stats(latencies)
         finally:
             hs.EmbeddingClient = original_embedder
-            hs.ChromaIndex = original_chroma
-            hs.GLOBAL_BM25 = original_bm25
+            hs.build_managed_vector_index = original_build_vector_index
+            hs.build_repository_lexical_index = original_build_lexical_index
+            hs.ensure_repository_lexical_index_loaded = original_ensure_loaded
+            hs.repository_has_query_ready_lexical_data = original_query_ready
 
 
     def bench_storage_preflight(iterations: int = 12) -> dict[str, float]:
@@ -208,6 +215,11 @@ BENCH_CODE = dedent(
             health_check_openai = True
             health_check_redis = True
             workspace_path = Path("./storage/workspace")
+            postgres_host = "localhost"
+            postgres_port = 5432
+            postgres_db = "coderag"
+            postgres_user = "coderag"
+            postgres_password = "coderag"
             redis_url = "redis://localhost:6379/0"
             openai_api_key = "x"
             neo4j_uri = "bolt://127.0.0.1:7687"
@@ -216,10 +228,10 @@ BENCH_CODE = dedent(
 
         original_get_settings = sh.get_settings
         original_workspace = sh._check_workspace
-        original_metadata = sh._check_metadata_sqlite
+        original_metadata = sh._check_metadata_postgres
         original_chroma = sh._check_chroma
         original_neo4j = sh._check_neo4j
-        original_bm25 = sh._check_bm25
+        original_lexical = sh._check_lexical_store
         original_openai = sh._check_openai
         original_redis = sh._check_redis
 
@@ -232,10 +244,10 @@ BENCH_CODE = dedent(
         try:
             sh.get_settings = lambda: FakeSettings()
             sh._check_workspace = sleepy("workspace")
-            sh._check_metadata_sqlite = sleepy("metadata")
+            sh._check_metadata_postgres = sleepy("metadata_postgres")
             sh._check_chroma = sleepy("chroma")
             sh._check_neo4j = sleepy("neo4j")
-            sh._check_bm25 = sleepy("bm25")
+            sh._check_lexical_store = sleepy("lexical")
             sh._check_openai = sleepy("openai")
             sh._check_redis = sleepy("redis")
             sh._CACHE.clear()
@@ -249,10 +261,10 @@ BENCH_CODE = dedent(
         finally:
             sh.get_settings = original_get_settings
             sh._check_workspace = original_workspace
-            sh._check_metadata_sqlite = original_metadata
+            sh._check_metadata_postgres = original_metadata
             sh._check_chroma = original_chroma
             sh._check_neo4j = original_neo4j
-            sh._check_bm25 = original_bm25
+            sh._check_lexical_store = original_lexical
             sh._check_openai = original_openai
             sh._check_redis = original_redis
 

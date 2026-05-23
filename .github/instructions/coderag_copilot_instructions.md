@@ -30,8 +30,7 @@ interfaz grafica y API HTTP que permita:
     habilitan.
 - Generar embeddings con providers activos del runtime: OpenAI, Gemini o Vertex.
 - Construir un grafo de conocimiento en Neo4j.
-- Indexar evidencia vectorial en Chroma y evidencia lexical en Postgres o BM25
-    local de compatibilidad.
+- Indexar evidencia vectorial en Chroma y evidencia lexical en Postgres.
 
 ### Consulta
 
@@ -55,8 +54,8 @@ UI Desktop (PySide6)\
 Backend HTTP (FastAPI)\
 Vector Store (Chroma, remoto por defecto)\
 Graph Database (Neo4j)\
-Lexical Store (Postgres FTS con fallback BM25 local)\
-Metadata Store (Postgres con fallback SQLite)\
+Lexical Store (Postgres FTS)\
+Metadata Store (Postgres)\
 LLM Clients multi-provider (OpenAI, Gemini, Vertex)\
 Jobs backend (thread por defecto, Redis + RQ opcional)
 
@@ -103,7 +102,6 @@ La estructura real relevante hoy es:
         |  |- summarizer.py
         |  |- embedding.py
         |  |- index_chroma.py
-        |  |- index_bm25.py
         |  |- graph_builder.py
         |  |- pipeline.py
         |  |- module_resolver.py
@@ -155,8 +153,8 @@ La estructura real relevante hoy es:
 
 Notas:
 
-- metadata.db sigue existiendo como fallback SQLite cuando Postgres no esta
-    configurado, pero ya no representa la arquitectura operativa principal.
+- metadata.db solo sobrevive como artefacto de pruebas aisladas; ya no existe
+    fallback SQLite en el runtime soportado.
 - El backend real de consulta depende de query_service y servicios auxiliares,
     no solo de server.py.
 
@@ -349,10 +347,7 @@ Notas:
 
 # 7. Capa lexical
 
-La recuperacion exacta usa dos caminos compatibles:
-
-- Lexical Store sobre Postgres FTS cuando Postgres esta configurado.
-- BM25 local con rank-bm25 como fallback o compatibilidad legacy.
+La recuperacion exacta usa Lexical Store sobre Postgres FTS.
 
 Casos de uso tipicos:
 
@@ -361,10 +356,6 @@ Casos de uso tipicos:
 - flags
 - identificadores
 - claves de configuracion
-
-Biblioteca BM25 activa en fallback:
-
-rank-bm25
 
 Whoosh no forma parte de la implementacion activa actual.
 
@@ -407,7 +398,7 @@ Detalles importantes del runtime:
 - La UI de consulta inicia en 80 para top_n.
 - El sistema puede ampliar candidate_top_n automaticamente para queries de
     identificadores exactos.
-- La capa lexical activa puede ser Postgres FTS o BM25 local.
+- La capa lexical activa es Postgres FTS.
 
 ------------------------------------------------------------------------
 
@@ -641,7 +632,7 @@ Contratos importantes:
 - /query y /query/retrieval exigen repo query_ready.
 - La API devuelve 422 cuando hay incompatibilidad de embeddings o readiness
     insuficiente.
-- /repos/{repo_id}/status expone query_ready, lexical_loaded, bm25_loaded,
+- /repos/{repo_id}/status expone query_ready, lexical_loaded,
     graph_available y embedding_compatible.
 
 ------------------------------------------------------------------------

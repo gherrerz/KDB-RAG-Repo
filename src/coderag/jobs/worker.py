@@ -227,7 +227,6 @@ class JobManager:
     def __init__(self) -> None:
         """Inicialice el administrador con almacenamiento de metadatos."""
         settings = get_settings()
-        self._metadata_path = settings.workspace_path.parent / "metadata.db"
         self._workspace_path = settings.workspace_path
         self._retain_workspace_after_ingest = getattr(
             settings,

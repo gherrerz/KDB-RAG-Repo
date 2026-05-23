@@ -12,6 +12,20 @@ from coderag.jobs.worker import (
     JobManager,
     run_ingest_job_task,
 )
+from coderag.storage.metadata_store import MetadataStore
+
+
+@pytest.fixture(autouse=True)
+def patch_job_manager_metadata_store(monkeypatch, tmp_path) -> None:
+    """Usa un store persistente de prueba sin depender del runtime Postgres."""
+    import coderag.jobs.worker as module
+
+    metadata_path = tmp_path / "metadata.db"
+    monkeypatch.setattr(
+        module,
+        "_build_metadata_store",
+        lambda: MetadataStore(metadata_path),
+    )
 
 
 def test_job_manager_marks_partial_when_repo_not_query_ready(

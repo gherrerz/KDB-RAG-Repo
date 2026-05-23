@@ -63,13 +63,14 @@ Compatibilidad temporal de naming:
 
 ### Storage, metadata, lexical y workspace
 
-- `POSTGRES_HOST`: host del backend operativo de Postgres para metadata y store lexico. Cuando esta configurado, el runtime usa Postgres en lugar de SQLite/BM25 local. Default: vacio.
+- `POSTGRES_HOST`: host del backend operativo de Postgres para metadata y store lexico. El runtime soportado usa Postgres versionado como backend obligatorio. Default: vacio.
 - `POSTGRES_PORT`: puerto TCP de Postgres. Default: `5432`.
 - `POSTGRES_DB`: nombre de base para despliegues locales o Compose que levanten Postgres gestionado por este repo. Default: `coderag`.
 - `POSTGRES_USER`: usuario de Postgres para despliegues locales o Compose. Default: `coderag`.
 - `POSTGRES_PASSWORD`: password de Postgres para despliegues locales o Compose. Default: `coderag`.
 - `POSTGRES_POOL_SIZE`: tamano de pool para conexiones Postgres. Default: `5`.
 - `POSTGRES_POOL_TIMEOUT`: timeout de pool Postgres. Default: `30`.
+- `RUNTIME_ENVIRONMENT`: politica de migraciones de startup para Postgres. `development` y `test` aplican `alembic upgrade head`; `production` solo valida que la base ya este migrada. Default: `development`.
 - `LEXICAL_FTS_LANGUAGE`: lenguaje de FTS para Postgres lexical. Default: `english`.
 - `WORKSPACE_PATH`: ruta de clones temporales y archivos operativos. Default: `/app/storage/workspace`.
 - `RETAIN_WORKSPACE_AFTER_INGEST`: conserva el clone local tras la ingesta. Si se configura en `false`, el worker elimina el workspace del repo al finalizar y `literal` queda no disponible para ese repo. Default del codigo: `false`.
@@ -81,12 +82,36 @@ Compatibilidad temporal de naming:
 Notas operativas de storage:
 
 - Arquitectura operativa principal: Chroma remoto + Postgres + Neo4j.
-- Si `POSTGRES_HOST` esta vacio, el codigo aun puede caer en compatibilidad legacy con SQLite para metadata y BM25 local para lexical.
-- Si `POSTGRES_HOST` esta configurado, el runtime crea y usa las tablas Postgres
-  `tbl_repository_jobs`, `tbl_repository_repos` y
-  `tbl_repository_lexical_corpus`; una base existente con tablas legacy
-  `jobs`, `repos` y `lexical_corpus` requiere limpieza o recreacion si no se
-  aplica una migracion manual.
+- El runtime soportado ya no admite fallback SQLite/BM25; `POSTGRES_*` es obligatorio para metadata y corpus lexico operativos.
+- Los artefactos legacy que aun puedan existir en disco o en tablas retenidas quedan reservados para limpieza fisica posterior; la politica de retiro queda documentada en [migration-guides/legacy-storage-retirement.md](migration-guides/legacy-storage-retirement.md).
+- Si `POSTGRES_HOST` esta configurado, el runtime usa migraciones Alembic para
+  alinear `tbl_repository_jobs`, `tbl_repository_repos` y
+  `tbl_repository_lexical_corpus`. En `development` y `test` la alineacion se
+  auto-aplica al iniciar; en `production` debes ejecutar Alembic por fuera del
+  proceso antes del arranque.
+- Para esa operacion externa, el repo incluye
+  `python scripts/postgres_schema_admin.py {validate|current|upgrade|stamp}`,
+  que reutiliza la misma resolucion de `POSTGRES_*` del runtime.
+- Si la base aun conserva las tablas PostgreSQL legacy `jobs`, `repos` y
+  `lexical_corpus`, puedes mover esos datos al esquema actual con
+  `python scripts/migrate_legacy_postgres_to_alembic.py`. El flujo primero
+  ejecuta `upgrade head` y luego copia datos al esquema versionado con upsert.
+- Ese script devuelve una auditoria de conteos source/target por tabla. Antes
+  de hacer cutover, valida al menos que `matched_after == source_count` y que
+  `missing_after == 0` para `jobs`, `repos` y `lexical_corpus`.
+- Puedes exportar el reporte con `--output-dir` y `--report-prefix`; el equipo
+  puede adjuntar el JSON/CSV generado como evidencia de cutover.
+- Para ejecutar la secuencia completa de cutover con pre-check y post-check,
+  usa `python scripts/run_postgres_legacy_cutover.py`; el script exporta JSON
+  y checklist Markdown y puede consultar `/health` con `--health-url`.
+- `--report-profile` permite estandarizar el tipo de artefacto exportado;
+  `cutover` usa por defecto `legacy_postgres_cutover_run` y
+  `observation-exit` usa `legacy_observation_exit`.
+- El mismo runner permite cerrar checks manuales del checklist con
+  `--confirm-backup`, `--confirm-rollback` y `--confirm-retain-legacy`.
+- Si existen tablas legacy parciales o con columnas faltantes, el bootstrap no
+  las estampa automaticamente en `head`: falla con mensaje explicito para evitar
+  marcar como valida una base incompatible.
 - Si `CHROMA_MODE=embedded`, `CHROMA_PATH` vuelve a ser relevante, pero ese modo no es el default del runtime.
 - En modo remoto, usa exactamente uno de estos mecanismos: `CHROMA_TOKEN` o `CHROMA_USERNAME` + `CHROMA_PASSWORD`.
 - Si el write-path remoto de Chroma corta conexiones durante ingesta, puedes reducir `CHROMA_REMOTE_BATCH_SIZE_OVERRIDE` de forma gradual; recomendacion operativa: `1000`, luego `500`, luego `250` solo si el fallo persiste.
@@ -241,10 +266,10 @@ puedes usar `CHROMA_MODE=embedded` y omitir `POSTGRES_HOST`, pero ese camino no
 representa la arquitectura operativa principal.
 
 Si ejecutas la API dentro de Docker Compose con el perfil `remote`, usa
-`POSTGRES_HOST=postgres` para resolver el servicio por DNS interno. Si arrancas
-sin ese perfil, deja `POSTGRES_HOST` vacío para no forzar un backend operativo
-que no existe. Usa `localhost` solo cuando la API corra fuera de contenedor y
-tu Postgres esté expuesto en la máquina host.
+`POSTGRES_HOST=postgres`, `CHROMA_HOST=chroma` y `CHROMA_PORT=8000` para
+resolver servicios por DNS interno. `scripts/start_compose.ps1` ya activa ese
+perfil por defecto. Usa `localhost` solo cuando la API corra fuera de
+contenedor y tus servicios estén expuestos en la máquina host.
 
 Cuando uses Chroma remoto autenticado, el mismo mecanismo se aplica a ingesta,
 query, health y reset, porque el runtime comparte el mismo cliente HTTP.
@@ -286,8 +311,8 @@ query, health y reset, porque el runtime comparte el mismo cliente HTTP.
 - Storage persistente de API se monta en `/app/storage`.
 - Redis se activa con perfil `redis` y puede hacerse visible en preflight con
   `HEALTH_CHECK_REDIS=true`.
-- El helper `scripts/start_compose.ps1` no activa hoy el perfil `remote` por
-  defecto; esa diferencia debe tenerse en cuenta al seguir guias de arranque.
+- `scripts/start_compose.ps1` activa el perfil `remote` por defecto y espera
+  `GET /health` antes de marcar el stack como listo.
 
 Variables relevantes en Compose:
 

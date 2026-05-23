@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 from coderag.core.settings import resolve_postgres_dsn
-from coderag.ingestion.index_bm25 import GLOBAL_BM25
+from coderag.storage.postgres_session import PostgresSessionFactory
 
 
 @runtime_checkable
@@ -20,22 +20,27 @@ class RepositoryLexicalIndex(Protocol):
 
 
 def build_repository_lexical_index(settings: object) -> RepositoryLexicalIndex:
-    """Selecciona el backend léxico activo según configuración."""
+    """Selecciona el backend léxico operativo soportado."""
     postgres_dsn = resolve_postgres_dsn(settings)
-    if postgres_dsn:
-        from coderag.storage.lexical_store import LexicalStore
-
-        return LexicalStore(
-            postgres_dsn,
-            getattr(settings, "lexical_fts_language", "english"),
+    if not postgres_dsn:
+        raise RuntimeError(
+            "LexicalStore Postgres es obligatorio en el runtime actual. "
+            "Configure POSTGRES_*; BM25 legacy ya no esta soportado como "
+            "backend activo."
         )
 
-    return GLOBAL_BM25
+    from coderag.storage.lexical_store import LexicalStore
+
+    return LexicalStore(
+        postgres_dsn,
+        getattr(settings, "lexical_fts_language", "english"),
+        session_factory=PostgresSessionFactory.from_settings(settings),
+    )
 
 
 def repository_lexical_backend_label(settings: object) -> str:
     """Devuelve la etiqueta del backend léxico activo."""
-    return "lexical" if resolve_postgres_dsn(settings) else "bm25"
+    return "lexical" if resolve_postgres_dsn(settings) else "lexical_unavailable"
 
 
 def repository_lexical_index_has_data(index: object, repo_id: str) -> bool:

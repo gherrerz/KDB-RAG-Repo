@@ -4,9 +4,17 @@ from types import SimpleNamespace
 
 from coderag.core.models import RetrievalChunk, ScannedFile
 from coderag.ingestion.chunker import extract_symbol_chunks
-from coderag.ingestion.index_bm25 import BM25Index, tokenize
 from coderag.retrieval.context_assembler import assemble_context
 import coderag.retrieval.hybrid_search as hybrid_search_module
+
+
+class _FakeLexicalIndex:
+    def __init__(self, results: list[dict]) -> None:
+        self._results = results
+
+    def query(self, repo_id: str, text: str, top_n: int = 50) -> list[dict]:
+        del repo_id, text
+        return self._results[:top_n]
 
 
 def test_extract_symbol_chunks_java_class_method_constructor() -> None:
@@ -258,81 +266,6 @@ def test_extract_symbol_chunks_detects_next_route_handlers_by_http_verb() -> Non
     assert "POST" in names
 
 
-def test_bm25_returns_ranked_documents() -> None:
-    """Devuelve el documento principal que coincide exactamente con los términos de la consulta."""
-    index = BM25Index()
-    index.build(
-        repo_id="r1",
-        docs=["def process_payment(order)", "class UserRepository"],
-        metadatas=[{"id": "a"}, {"id": "b"}],
-    )
-    result = index.query(repo_id="r1", text="payment", top_n=1)
-    assert result
-    assert result[0]["id"] == "a"
-
-
-def test_bm25_persist_and_load_roundtrip(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    """Persiste y recarga BM25 para mantener capacidad tras reinicio."""
-    index = BM25Index()
-
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-
-    (_Settings.workspace_path).mkdir(parents=True, exist_ok=True)
-
-    import coderag.ingestion.index_bm25 as module
-
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
-
-    index.build(
-        repo_id="r1",
-        docs=["alpha beta", "gamma"],
-        metadatas=[{"id": "a"}, {"id": "b"}],
-    )
-    assert index.persist_repo("r1") is True
-
-    other = BM25Index()
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
-    assert other.ensure_repo_loaded("r1") is True
-    result = other.query(repo_id="r1", text="alpha", top_n=1)
-    assert result
-    assert result[0]["id"] == "a"
-
-
-def test_tokenize_splits_identifiers_and_normalizes_accents() -> None:
-    """Tokeniza camel/snake/kebab y normaliza acentos para matching estable."""
-    tokens = tokenize("DependencyManager parse_requirements archivo-dependencias")
-
-    assert "dependencymanager" in tokens
-    assert "dependency" in tokens
-    assert "manager" in tokens
-    assert "parse_requirements" in tokens
-    assert "parse" in tokens
-    assert "requirements" in tokens
-    assert "archivo-dependencias" in tokens
-    assert "dependencias" in tokens
-
-
-def test_bm25_query_expands_spanish_technical_terms() -> None:
-    """Consulta en español recupera documentos en inglés vía expansión ES/EN genérica."""
-    index = BM25Index()
-    index.build(
-        repo_id="r2",
-        docs=[
-            "Project dependencies are declared in requirements.txt",
-            "Authentication service handles login",
-        ],
-        metadatas=[{"id": "dep"}, {"id": "auth"}],
-    )
-
-    result = index.query(repo_id="r2", text="dependencias del proyecto", top_n=1)
-    assert result
-    assert result[0]["id"] == "dep"
-
-
 def test_hybrid_search_boosts_exact_config_key_over_test_chunks(
     monkeypatch,
 ) -> None:
@@ -346,7 +279,7 @@ def test_hybrid_search_boosts_exact_config_key_over_test_chunks(
             del texts
             return []
 
-    bm25_results = [
+    lexical_results = [
         {
             "id": "worker-code",
             "text": (
@@ -403,14 +336,14 @@ def test_hybrid_search_boosts_exact_config_key_over_test_chunks(
         lambda: SimpleNamespace(postgres_host=""),
     )
     monkeypatch.setattr(
-        hybrid_search_module.GLOBAL_BM25,
-        "ensure_repo_loaded",
-        lambda repo_id: True,
+        hybrid_search_module,
+        "build_repository_lexical_index",
+        lambda settings: _FakeLexicalIndex(lexical_results),
     )
     monkeypatch.setattr(
-        hybrid_search_module.GLOBAL_BM25,
-        "query",
-        lambda repo_id, text, top_n: bm25_results[:top_n],
+        hybrid_search_module,
+        "ensure_repository_lexical_index_loaded",
+        lambda index, repo_id: None,
     )
 
     ranked = hybrid_search_module.hybrid_search(
@@ -437,7 +370,7 @@ def test_hybrid_search_boosts_exact_code_symbol_over_generic_chunks(
             del texts
             return []
 
-    bm25_results = [
+    lexical_results = [
         {
             "id": "test-helper",
             "text": (
@@ -489,14 +422,14 @@ def test_hybrid_search_boosts_exact_code_symbol_over_generic_chunks(
         lambda: SimpleNamespace(postgres_host=""),
     )
     monkeypatch.setattr(
-        hybrid_search_module.GLOBAL_BM25,
-        "ensure_repo_loaded",
-        lambda repo_id: True,
+        hybrid_search_module,
+        "build_repository_lexical_index",
+        lambda settings: _FakeLexicalIndex(lexical_results),
     )
     monkeypatch.setattr(
-        hybrid_search_module.GLOBAL_BM25,
-        "query",
-        lambda repo_id, text, top_n: bm25_results[:top_n],
+        hybrid_search_module,
+        "ensure_repository_lexical_index_loaded",
+        lambda index, repo_id: None,
     )
 
     ranked = hybrid_search_module.hybrid_search(
@@ -523,7 +456,7 @@ def test_hybrid_search_boosts_identifier_inside_natural_query(
             del texts
             return []
 
-    bm25_results = [
+    lexical_results = [
         {
             "id": "workspace",
             "text": "WORKSPACE_PATH: /app/storage/workspace",
@@ -557,14 +490,14 @@ def test_hybrid_search_boosts_identifier_inside_natural_query(
         lambda: SimpleNamespace(postgres_host=""),
     )
     monkeypatch.setattr(
-        hybrid_search_module.GLOBAL_BM25,
-        "ensure_repo_loaded",
-        lambda repo_id: True,
+        hybrid_search_module,
+        "build_repository_lexical_index",
+        lambda settings: _FakeLexicalIndex(lexical_results),
     )
     monkeypatch.setattr(
-        hybrid_search_module.GLOBAL_BM25,
-        "query",
-        lambda repo_id, text, top_n: bm25_results[:top_n],
+        hybrid_search_module,
+        "ensure_repository_lexical_index_loaded",
+        lambda index, repo_id: None,
     )
 
     ranked = hybrid_search_module.hybrid_search(
@@ -634,14 +567,24 @@ def test_hybrid_search_refreshes_stale_chroma_results_once(
     )
     monkeypatch.setattr(hybrid_search_module, "ChromaIndex", _FakeChroma)
     monkeypatch.setattr(
-        hybrid_search_module.GLOBAL_BM25,
-        "ensure_repo_loaded",
-        lambda repo_id: True,
+        hybrid_search_module,
+        "get_settings",
+        lambda: SimpleNamespace(postgres_host=""),
     )
     monkeypatch.setattr(
-        hybrid_search_module.GLOBAL_BM25,
-        "query",
-        lambda repo_id, text, top_n: [],
+        hybrid_search_module,
+        "repository_has_query_ready_lexical_data",
+        lambda settings, repo_id: True,
+    )
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "build_repository_lexical_index",
+        lambda settings: _FakeLexicalIndex([]),
+    )
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "ensure_repository_lexical_index_loaded",
+        lambda index, repo_id: None,
     )
 
     ranked = hybrid_search_module.hybrid_search(

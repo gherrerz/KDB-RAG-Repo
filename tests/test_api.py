@@ -11,6 +11,7 @@ from coderag.core.models import JobInfo, JobStatus
 from coderag.core.storage_health import StoragePreflightError
 from coderag.jobs.worker import IngestionConflictError, JobManager
 from coderag.llm.model_discovery import ModelDiscoveryResult
+from coderag.storage.metadata_store import MetadataStore
 
 app = main.app
 
@@ -50,6 +51,18 @@ def bypass_storage_preflight(monkeypatch):
 
     monkeypatch.setattr(server, "ensure_storage_ready", fake_ensure_storage_ready)
     monkeypatch.setattr(server, "run_storage_preflight", fake_run_storage_preflight)
+    monkeypatch.setattr(
+        server,
+        "ensure_postgres_schema_ready",
+        lambda settings: {
+            "enabled": False,
+            "policy": "auto_upgrade",
+            "action": "skipped",
+            "current_heads": [],
+            "expected_heads": [],
+            "cached": False,
+        },
+    )
 
 
 def test_lifespan_startup_succeeds_with_non_critical_neo4j(
@@ -98,12 +111,28 @@ def test_lifespan_startup_succeeds_with_non_critical_neo4j(
         }
 
     monkeypatch.setattr(server, "ensure_storage_ready", fake_ensure_storage_ready)
+    observed_bootstrap_calls: list[object] = []
+    monkeypatch.setattr(
+        server,
+        "ensure_postgres_schema_ready",
+        lambda settings: observed_bootstrap_calls.append(settings) or {
+            "enabled": False,
+            "policy": "auto_upgrade",
+            "action": "skipped",
+            "current_heads": [],
+            "expected_heads": [],
+            "cached": False,
+        },
+    )
 
     with TestClient(app) as client:
         response = client.get("/repos")
         assert response.status_code == 200
+        assert len(observed_bootstrap_calls) == 1
         assert observed_contexts[0] == "startup"
         startup_health = client.app.state.storage_health
+        assert client.app.state.postgres_startup["action"] == "skipped"
+        assert startup_health["postgres_startup"]["action"] == "skipped"
         assert startup_health["ok"] is True
         assert startup_health["context"] == "startup"
         assert startup_health["failed_components"] == []
@@ -452,6 +481,11 @@ def test_api_end_to_end_ingest_cleanup_then_status_and_query(
     from coderag.api import query_service
 
     monkeypatch.setattr(worker_module, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        worker_module,
+        "_build_metadata_store",
+        lambda: MetadataStore(tmp_path / "metadata.db"),
+    )
     manager = JobManager()
     monkeypatch.setattr(server, "jobs", manager)
 
@@ -494,7 +528,6 @@ def test_api_end_to_end_ingest_cleanup_then_status_and_query(
                 "code_files": 1,
                 "code_modules": 1,
             },
-            "bm25_loaded": True,
             "lexical_loaded": True,
             "graph_available": True,
             "embedding_compatible": True,
@@ -662,45 +695,10 @@ def test_repo_status_endpoint_returns_structured_repo_readiness(monkeypatch) -> 
     assert payload["workspace_available"] is False
     assert payload["query_ready"] is True
     assert payload["lexical_loaded"] is True
-    assert payload["bm25_loaded"] is True
+    assert "bm25_loaded" not in payload
     assert payload["chroma_counts"]["code_symbols"] == 10
     assert payload["last_embedding_provider"] == "gemini"
     assert payload["last_embedding_model"] == "text-embedding-004"
-
-
-def test_repo_status_endpoint_backfills_legacy_bm25_field_from_lexical_loaded(
-    monkeypatch,
-) -> None:
-    """Mantiene bm25_loaded cuando un proveedor interno ya sólo expone lexical_loaded."""
-
-    monkeypatch.setattr(server.jobs, "list_repo_ids", lambda: ["mall"])
-    monkeypatch.setattr(server.jobs, "get_repo_runtime", lambda repo_id: None)
-    monkeypatch.setattr(
-        server,
-        "get_repo_query_status",
-        lambda **kwargs: {
-            "repo_id": "mall",
-            "listed_in_catalog": True,
-            "workspace_available": False,
-            "query_ready": True,
-            "chroma_counts": {
-                "code_symbols": 1,
-                "code_files": 1,
-                "code_modules": 1,
-            },
-            "lexical_loaded": True,
-            "graph_available": True,
-            "warnings": [],
-        },
-    )
-
-    client = TestClient(app)
-    response = client.get("/repos/mall/status")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["lexical_loaded"] is True
-    assert payload["bm25_loaded"] is True
 
 
 def test_inventory_query_endpoint_returns_paginated_payload(monkeypatch) -> None:
@@ -777,6 +775,8 @@ def test_storage_health_endpoint_returns_structured_payload() -> None:
     assert payload["strict"] is True
     assert payload["context"] == "health"
     assert payload["cached"] is True
+    assert payload["postgres_startup"]["action"] == "skipped"
+    assert payload["postgres_startup"]["policy"] == "auto_upgrade"
 
 
 def test_query_endpoint_forwards_optional_provider_fields(monkeypatch) -> None:
@@ -808,7 +808,7 @@ def test_query_endpoint_forwards_optional_provider_fields(monkeypatch) -> None:
                 "code_files": 3,
                 "code_modules": 2,
             },
-            "bm25_loaded": True,
+            "lexical_loaded": True,
             "graph_available": True,
             "warnings": [],
         }
@@ -866,7 +866,7 @@ def test_retrieval_query_endpoint_returns_structured_payload(monkeypatch) -> Non
                 "code_files": 5,
                 "code_modules": 2,
             },
-            "bm25_loaded": True,
+            "lexical_loaded": True,
             "graph_available": True,
             "warnings": [],
         }
@@ -962,7 +962,7 @@ def test_retrieval_query_endpoint_forwards_embedding_and_context_flags(monkeypat
                 "code_files": 3,
                 "code_modules": 2,
             },
-            "bm25_loaded": True,
+            "lexical_loaded": True,
             "graph_available": True,
             "warnings": [],
         }
@@ -1023,9 +1023,10 @@ def test_retrieval_query_endpoint_returns_422_when_repo_not_ready(monkeypatch) -
                 "code_files": 0,
                 "code_modules": 0,
             },
-            "bm25_loaded": False,
             "graph_available": None,
-            "warnings": ["No hay indice BM25 en memoria para repo 'mall'."],
+            "warnings": [
+                "No hay corpus léxico en Postgres para repo 'mall'."
+            ],
         }
 
     monkeypatch.setattr(server.jobs, "list_repo_ids", fake_list_repo_ids)
@@ -1064,7 +1065,6 @@ def test_retrieval_query_endpoint_blocks_when_storage_preflight_fails(monkeypatc
             "failed_components": ["neo4j"],
             "items": [],
             "cached": False,
-        }
         raise StoragePreflightError(report)
 
     monkeypatch.setattr(server, "ensure_storage_ready", fail_preflight)
@@ -1197,7 +1197,9 @@ def test_query_endpoint_returns_422_when_repo_is_not_ready(monkeypatch) -> None:
             },
             "lexical_loaded": False,
             "graph_available": None,
-            "warnings": ["No hay indice BM25 en memoria para repo 'mall'."],
+            "warnings": [
+                "No hay corpus léxico en Postgres para repo 'mall'."
+            ],
         }
 
     monkeypatch.setattr(server.jobs, "list_repo_ids", fake_list_repo_ids)
@@ -1218,7 +1220,7 @@ def test_query_endpoint_returns_422_when_repo_is_not_ready(monkeypatch) -> None:
     assert payload["detail"]["code"] == "repo_not_ready"
     assert payload["detail"]["repo_status"]["query_ready"] is False
     assert payload["detail"]["repo_status"]["lexical_loaded"] is False
-    assert payload["detail"]["repo_status"]["bm25_loaded"] is False
+    assert "bm25_loaded" not in payload["detail"]["repo_status"]
 
 
 def test_query_endpoint_returns_422_when_embedding_is_incompatible(monkeypatch) -> None:
@@ -1256,7 +1258,7 @@ def test_query_endpoint_returns_422_when_embedding_is_incompatible(monkeypatch) 
                 "code_files": 10,
                 "code_modules": 4,
             },
-            "bm25_loaded": True,
+            "lexical_loaded": True,
             "graph_available": True,
             "embedding_compatible": False,
             "compatibility_reason": "embedding_dimension_mismatch",

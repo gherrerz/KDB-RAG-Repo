@@ -13,6 +13,7 @@ def _fake_settings() -> SimpleNamespace:
     """Construye configuración mínima para pruebas de preflight."""
     return SimpleNamespace(
         workspace_path=Path("./storage/workspace"),
+        resolve_postgres_dsn=lambda: "postgresql://fake/db",
         chroma_mode="remote",
         chroma_host="localhost",
         chroma_port=8001,
@@ -317,7 +318,11 @@ def test_get_repo_query_status_blocks_ready_on_embedding_mismatch(
         "_count_chroma_documents_for_repo",
         lambda **kwargs: 5,
     )
-    monkeypatch.setattr(storage_health.GLOBAL_BM25, "ensure_repo_loaded", lambda repo_id: True)
+    monkeypatch.setattr(
+        storage_health,
+        "repository_has_query_ready_lexical_data",
+        lambda settings, repo_id: True,
+    )
     monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
     monkeypatch.setattr(
         storage_health,
@@ -360,7 +365,11 @@ def test_get_repo_query_status_blocks_ready_on_hnsw_space_mismatch(
         "_count_chroma_documents_for_repo",
         lambda **kwargs: 5,
     )
-    monkeypatch.setattr(storage_health.GLOBAL_BM25, "ensure_repo_loaded", lambda repo_id: True)
+    monkeypatch.setattr(
+        storage_health,
+        "repository_has_query_ready_lexical_data",
+        lambda settings, repo_id: True,
+    )
     monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
     monkeypatch.setattr(
         storage_health,
@@ -422,9 +431,9 @@ def test_get_repo_query_status_reports_workspace_availability(
         lambda **kwargs: 5,
     )
     monkeypatch.setattr(
-        storage_health.GLOBAL_BM25,
-        "ensure_repo_loaded",
-        lambda repo_id: True,
+        storage_health,
+        "repository_has_query_ready_lexical_data",
+        lambda settings, repo_id: True,
     )
     monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
     monkeypatch.setattr(
@@ -475,9 +484,9 @@ def test_get_repo_query_status_refreshes_chroma_when_counts_start_empty(
 
     monkeypatch.setattr(storage_health, "_count_chroma_documents_for_repo", fake_count)
     monkeypatch.setattr(
-        storage_health.GLOBAL_BM25,
-        "ensure_repo_loaded",
-        lambda repo_id: True,
+        storage_health,
+        "repository_has_query_ready_lexical_data",
+        lambda settings, repo_id: True,
     )
     monkeypatch.setattr(storage_health, "_check_repo_graph_available", lambda **kwargs: True)
     monkeypatch.setattr(
@@ -533,18 +542,22 @@ def test_check_chroma_raises_on_hnsw_space_mismatch(
         storage_health._check_chroma()
 
 
-def test_check_bm25_raises_when_repo_not_loaded_in_query_context(
+def test_build_lexical_check_requires_postgres_when_runtime_is_unconfigured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Lanza error cuando BM25 no está cargado para el repo en contexto query."""
-    monkeypatch.setattr(
-        storage_health.GLOBAL_BM25,
-        "ensure_repo_loaded",
-        lambda repo_id: False,
+    """El healthcheck debe fallar explícitamente cuando falta Postgres."""
+    settings = _fake_settings()
+    settings.resolve_postgres_dsn = lambda: ""
+
+    name, check_fn = storage_health._build_lexical_check(
+        settings,
+        context="query",
+        repo_id="mall",
     )
 
-    with pytest.raises(RuntimeError, match="No hay índice BM25 cargado"):
-        storage_health._check_bm25(context="query", repo_id="mall")
+    assert name == "lexical"
+    with pytest.raises(RuntimeError, match="LexicalStore Postgres no está configurado"):
+        check_fn()
 
 
 def test_count_chroma_documents_for_repo_uses_managed_vector_helper(
@@ -659,7 +672,6 @@ def test_get_repo_query_status_warns_when_postgres_lexical_corpus_is_missing(
         listed_in_catalog=True,
     )
 
-    assert status["bm25_loaded"] is False
     assert status["lexical_loaded"] is False
     assert status["query_ready"] is False
     assert status["warnings"] == [
@@ -667,17 +679,17 @@ def test_get_repo_query_status_warns_when_postgres_lexical_corpus_is_missing(
     ]
 
 
-def test_run_storage_preflight_marks_bm25_as_non_critical_failure(
+def test_run_storage_preflight_marks_lexical_as_non_critical_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reporta BM25 como fallo no crítico cuando falta índice en query."""
+    """Reporta ausencia de corpus léxico como fallo no crítico en query."""
     storage_health._CACHE.clear()
     monkeypatch.setattr(storage_health, "get_settings", _fake_settings)
     monkeypatch.setattr(storage_health, "_check_workspace", lambda path: {"path": str(path)})
     monkeypatch.setattr(
         storage_health,
-        "_check_metadata_sqlite",
-        lambda db_path: {"db_path": str(db_path)},
+        "_check_metadata_postgres",
+        lambda postgres_dsn: {"backend": "postgres", "dsn": postgres_dsn},
     )
     monkeypatch.setattr(storage_health, "_check_chroma", lambda: {"collection_count": 0})
     monkeypatch.setattr(
@@ -691,9 +703,11 @@ def test_run_storage_preflight_marks_bm25_as_non_critical_failure(
         lambda timeout_seconds: {"model_probe": "dummy"},
     )
     monkeypatch.setattr(
-        storage_health.GLOBAL_BM25,
-        "ensure_repo_loaded",
-        lambda repo_id: False,
+        storage_health,
+        "_check_lexical_store",
+        lambda context, repo_id, postgres_dsn: (_ for _ in ()).throw(
+            RuntimeError("No hay corpus léxico en Postgres para repo 'mall'.")
+        ),
     )
 
     report = storage_health.run_storage_preflight(
@@ -702,12 +716,16 @@ def test_run_storage_preflight_marks_bm25_as_non_critical_failure(
         force=True,
     )
 
-    bm25_item = next(item for item in report["items"] if item["name"] == "bm25")
+    lexical_item = next(
+        item
+        for item in report["items"]
+        if item["name"] == "lexical"
+    )
     assert report["ok"] is True
     assert report["failed_components"] == []
-    assert bm25_item["ok"] is False
-    assert bm25_item["critical"] is False
-    assert bm25_item["code"] == "bm25_repo_missing"
+    assert lexical_item["ok"] is False
+    assert lexical_item["critical"] is False
+    assert lexical_item["code"] == "lexical_unavailable"
 
 
 def test_run_storage_preflight_treats_neo4j_as_non_critical_on_startup(
@@ -719,8 +737,8 @@ def test_run_storage_preflight_treats_neo4j_as_non_critical_on_startup(
     monkeypatch.setattr(storage_health, "_check_workspace", lambda path: {"path": str(path)})
     monkeypatch.setattr(
         storage_health,
-        "_check_metadata_sqlite",
-        lambda db_path: {"db_path": str(db_path)},
+        "_check_metadata_postgres",
+        lambda postgres_dsn: {"backend": "postgres", "dsn": postgres_dsn},
     )
     monkeypatch.setattr(storage_health, "_check_chroma", lambda: {"collection_count": 0})
     monkeypatch.setattr(
@@ -752,8 +770,8 @@ def test_run_storage_preflight_keeps_neo4j_critical_in_query(
     monkeypatch.setattr(storage_health, "_check_workspace", lambda path: {"path": str(path)})
     monkeypatch.setattr(
         storage_health,
-        "_check_metadata_sqlite",
-        lambda db_path: {"db_path": str(db_path)},
+        "_check_metadata_postgres",
+        lambda postgres_dsn: {"backend": "postgres", "dsn": postgres_dsn},
     )
     monkeypatch.setattr(storage_health, "_check_chroma", lambda: {"collection_count": 0})
     monkeypatch.setattr(
@@ -767,9 +785,9 @@ def test_run_storage_preflight_keeps_neo4j_critical_in_query(
         lambda timeout_seconds: {"model_probe": "dummy"},
     )
     monkeypatch.setattr(
-        storage_health.GLOBAL_BM25,
-        "ensure_repo_loaded",
-        lambda repo_id: True,
+        storage_health,
+        "_check_lexical_store",
+        lambda context, repo_id, postgres_dsn: {"repo_id": repo_id, "indexed": True},
     )
 
     report = storage_health.run_storage_preflight(
@@ -798,8 +816,8 @@ def test_run_storage_preflight_treats_workspace_as_non_critical_in_query(
     )
     monkeypatch.setattr(
         storage_health,
-        "_check_metadata_sqlite",
-        lambda db_path: {"db_path": str(db_path)},
+        "_check_metadata_postgres",
+        lambda postgres_dsn: {"backend": "postgres", "dsn": postgres_dsn},
     )
     monkeypatch.setattr(storage_health, "_check_chroma", lambda: {"collection_count": 0})
     monkeypatch.setattr(storage_health, "_check_neo4j", lambda timeout_seconds: {"uri": "bolt://localhost:7687"})
@@ -809,9 +827,9 @@ def test_run_storage_preflight_treats_workspace_as_non_critical_in_query(
         lambda timeout_seconds: {"model_probe": "dummy"},
     )
     monkeypatch.setattr(
-        storage_health.GLOBAL_BM25,
-        "ensure_repo_loaded",
-        lambda repo_id: True,
+        storage_health,
+        "_check_lexical_store",
+        lambda context, repo_id, postgres_dsn: {"repo_id": repo_id, "indexed": True},
     )
 
     report = storage_health.run_storage_preflight(

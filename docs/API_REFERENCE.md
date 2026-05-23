@@ -103,8 +103,8 @@ Notas de comportamiento:
   estan disponibles.
 - `workspace_available=false` no bloquea query semántico, retrieval-only ni
   inventory query, pero sí implica que modo literal quedará rechazado.
-- El payload expone `lexical_loaded` como nombre neutral de readiness léxico y
-  mantiene `bm25_loaded` como alias legacy compatible.
+- El payload expone `lexical_loaded` como único indicador público de readiness
+  léxico.
 
 Notas de catálogo:
 
@@ -134,6 +134,10 @@ Retorna catálogo de modelos por provider y kind.
 #### GET /health
 
 Retorna reporte consolidado de salud de storage.
+
+Incluye además el bloque top-level `postgres_startup` cuando el runtime tiene
+Postgres operativo habilitado, para exponer la política y el resultado del
+bootstrap de migraciones Alembic.
 
 - Response schema: `StorageHealthResponse`
 
@@ -236,9 +240,9 @@ Limpia todo el estado indexado.
 Notas operativas de storage:
 
 - Arquitectura operativa principal: Chroma remoto + Postgres + Neo4j.
-- SQLite y BM25 local pueden seguir apareciendo como compatibilidad legacy en
-  algunas rutas cuando Postgres no esta configurado, pero no son el
-  backend principal documentado aqui.
+- SQLite y BM25 local ya no forman parte del runtime ni del tooling soportado;
+  el contrato documentado aqui asume Postgres versionado y LexicalStore
+  Postgres.
 
 ### Enum: JobStatus
 
@@ -562,7 +566,6 @@ Notas de interpretación:
 | `chroma_hnsw_space_compatible` | `bool \| null` | no |
 | `chroma_hnsw_space_mismatched_collections` | `list[str]` | no |
 | `lexical_loaded` | `bool` | sí |
-| `bm25_loaded` | `bool` | sí |
 | `graph_available` | `bool \| null` | no |
 | `last_embedding_provider` | `str \| null` | no |
 | `last_embedding_model` | `str \| null` | no |
@@ -572,11 +575,8 @@ Notas de interpretación:
 
 Notas:
 
-- `lexical_loaded` es el campo recomendado para consumidores nuevos y refleja
-  readiness de la capa léxica activa, ya sea BM25 local o LexicalStore en
-  Postgres.
-- `bm25_loaded` conserva un nombre historico por compatibilidad y replica el
-  mismo valor de `lexical_loaded`.
+- `lexical_loaded` es el campo canónico y refleja readiness de la capa léxica
+  activa sobre LexicalStore en Postgres.
 
 ### StorageHealthItem
 
@@ -602,6 +602,18 @@ Notas:
 | `cached` | `bool` | no | `false` |
 | `failed_components` | `list[str]` | no | `[]` |
 | `items` | `list[StorageHealthItem]` | no | `[]` |
+| `postgres_startup` | `PostgresStartupStatus \| null` | no | `null` |
+
+### PostgresStartupStatus
+
+| Field | Type | Requerido | Default |
+| --- | --- | --- | --- |
+| `enabled` | `bool` | sí | - |
+| `policy` | `str` | sí | - |
+| `action` | `str` | sí | - |
+| `current_heads` | `list[str]` | no | `[]` |
+| `expected_heads` | `list[str]` | no | `[]` |
+| `cached` | `bool` | no | `false` |
 
 ### ResetResponse
 

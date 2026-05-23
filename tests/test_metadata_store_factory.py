@@ -16,17 +16,32 @@ from coderag.storage.metadata_store_factory import (
 )
 
 
-def test_build_metadata_store_returns_sqlite_store_by_default(
+def test_build_metadata_store_rejects_legacy_sqlite_even_when_flag_is_present(
     tmp_path: Path,
 ) -> None:
-    """Sin DSN de Postgres, la factory debe devolver MetadataStore."""
-    settings = SimpleNamespace(workspace_path=tmp_path / "workspace")
+    """SQLite legacy ya no debe reactivarse aunque el setting siga presente."""
+    settings = SimpleNamespace(
+        workspace_path=tmp_path / "workspace",
+        runtime_environment="development",
+        metadata_legacy_sqlite_fallback=True,
+    )
 
-    store = build_metadata_store(settings)
+    with pytest.raises(RuntimeError, match="Metadata Postgres es obligatorio"):
+        build_metadata_store(settings)
 
-    assert isinstance(store, BaseMetadataStore)
-    assert isinstance(store, MetadataStore)
-    assert metadata_backend_label(settings) == "Metadata SQLite"
+
+def test_build_metadata_store_raises_without_postgres_or_legacy_fallback(
+    tmp_path: Path,
+) -> None:
+    """Sin Postgres configurado, el runtime debe rechazar metadata local."""
+    settings = SimpleNamespace(
+        workspace_path=tmp_path / "workspace",
+        runtime_environment="development",
+        metadata_legacy_sqlite_fallback=False,
+    )
+
+    with pytest.raises(RuntimeError, match="Metadata Postgres es obligatorio"):
+        build_metadata_store(settings)
 
 
 def test_build_metadata_store_returns_postgres_store_when_dsn_exists(
@@ -38,9 +53,10 @@ def test_build_metadata_store_returns_postgres_store_when_dsn_exists(
     class FakePostgresMetadataStore(BaseMetadataStore):
         """Stub mínimo para verificar selección de backend Postgres."""
 
-        def __init__(self, dsn: str) -> None:
+        def __init__(self, dsn: str, session_factory=None) -> None:
             """Guarda la DSN recibida para inspección del test."""
             self.dsn = dsn
+            self.session_factory = session_factory
 
         def upsert_job(self, job) -> None:
             del job
@@ -116,4 +132,18 @@ def test_build_metadata_store_returns_postgres_store_when_dsn_exists(
 
     assert isinstance(store, FakePostgresMetadataStore)
     assert store.dsn == "postgresql://fake/db"
+    assert store.session_factory is not None
     assert metadata_backend_label(settings) == "Metadata Postgres"
+
+
+def test_metadata_backend_label_reports_unavailable_without_postgres(
+    tmp_path: Path,
+) -> None:
+    """La etiqueta debe dejar claro cuando metadata operativa no está configurada."""
+    settings = SimpleNamespace(
+        workspace_path=tmp_path / "workspace",
+        runtime_environment="development",
+        metadata_legacy_sqlite_fallback=True,
+    )
+
+    assert metadata_backend_label(settings) == "Metadata unavailable"

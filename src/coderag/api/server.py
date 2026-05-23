@@ -37,6 +37,7 @@ from coderag.core.storage_health import (
     run_storage_preflight,
 )
 from coderag.core.settings import get_settings
+from coderag.storage.postgres_startup import ensure_postgres_schema_ready
 from coderag.core.vector_index import build_managed_vector_index
 from coderag.jobs.worker import IngestionConflictError, JobManager
 from coderag.llm.model_discovery import discover_models
@@ -48,9 +49,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     if hasattr(settings, "decode_vertex_service_account_b64"):
         settings.decode_vertex_service_account_b64()
+    app.state.postgres_startup = ensure_postgres_schema_ready(settings)
     app.state.job_manager = jobs
     report = ensure_storage_ready(context="startup", force=True)
-    app.state.storage_health = report
+    app.state.storage_health = _attach_postgres_startup_status(report)
     yield
 
 
@@ -88,19 +90,18 @@ def get_job_manager() -> JobManager:
 def _normalize_repo_query_status_payload(
     status_payload: dict[str, object],
 ) -> dict[str, object]:
-    """Completa indicadores léxicos nuevos y legacy para compatibilidad."""
-    normalized = dict(status_payload)
+    """Normaliza readiness léxico al contrato público actual."""
+    return dict(status_payload)
 
-    lexical_loaded = normalized.get("lexical_loaded")
-    bm25_loaded = normalized.get("bm25_loaded")
 
-    if lexical_loaded is None and bm25_loaded is not None:
-        lexical_loaded = bm25_loaded
-        normalized["lexical_loaded"] = lexical_loaded
-
-    if bm25_loaded is None and lexical_loaded is not None:
-        normalized["bm25_loaded"] = lexical_loaded
-
+def _attach_postgres_startup_status(
+    report: dict[str, object],
+) -> dict[str, object]:
+    """Adjunta el estado de bootstrap Postgres al payload si existe."""
+    normalized = dict(report)
+    postgres_startup = getattr(app.state, "postgres_startup", None)
+    if postgres_startup is not None:
+        normalized["postgres_startup"] = postgres_startup
     return normalized
 
 
@@ -396,7 +397,6 @@ def get_job(
                                     "code_files": 0,
                                     "code_modules": 0,
                                 },
-                                "bm25_loaded": False,
                                 "lexical_loaded": False,
                                 "graph_available": None,
                                 "warnings": [
@@ -634,7 +634,9 @@ def repo_status(
 )
 def storage_health() -> StorageHealthResponse:
     """Devuelve estado de salud de componentes de almacenamiento del RAG."""
-    report = run_storage_preflight(context="health", force=True)
+    report = _attach_postgres_startup_status(
+        run_storage_preflight(context="health", force=True)
+    )
     app.state.storage_health = report
     return StorageHealthResponse(**report)
 

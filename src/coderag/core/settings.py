@@ -24,6 +24,7 @@ IngestionExecutionMode = Literal["thread", "rq"]
 VertexAuthMode = Literal["service_account"]
 GitSshStrictHostKeyChecking = Literal["yes", "accept-new", "no"]
 ChromaMode = Literal["embedded", "remote"]
+RuntimeEnvironment = Literal["development", "test", "production"]
 
 
 class Settings(BaseSettings):
@@ -140,6 +141,10 @@ class Settings(BaseSettings):
     postgres_password: str = Field(default="", alias="POSTGRES_PASSWORD")
     postgres_pool_size: int = Field(default=5, alias="POSTGRES_POOL_SIZE")
     postgres_pool_timeout: float = Field(default=30.0, alias="POSTGRES_POOL_TIMEOUT")
+    runtime_environment: RuntimeEnvironment = Field(
+        default="development",
+        alias="RUNTIME_ENVIRONMENT",
+    )
     lexical_fts_language: str = Field(default="english", alias="LEXICAL_FTS_LANGUAGE")
     neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")
     neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
@@ -432,6 +437,12 @@ class Settings(BaseSettings):
             f"postgresql://{user}:{password}@{host_part}:"
             f"{self.postgres_port}/{db_part}"
         )
+
+    def resolve_postgres_startup_policy(self) -> Literal["auto_upgrade", "validate"]:
+        """Selecciona la política de migración/validación según el entorno."""
+        if self.runtime_environment == "production":
+            return "validate"
+        return "auto_upgrade"
 
     def resolve_embedding_provider(self, override: str | None = None) -> ProviderName:
         """Resuelve el proveedor de embeddings con prioridad override > env."""

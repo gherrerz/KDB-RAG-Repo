@@ -4,144 +4,90 @@ from __future__ import annotations
 
 import datetime
 import json
-from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlsplit
 
-import psycopg
-from psycopg.rows import dict_row
+from sqlalchemy import case, delete, literal, select, update, union
+from sqlalchemy.dialects.postgresql import insert
 
 from coderag.core.models import JobInfo, JobStatus
 from coderag.storage.base_metadata_store import BaseMetadataStore
-from coderag.storage.postgres_table_names import (
-    POSTGRES_JOBS_TABLE,
-    POSTGRES_REPOS_TABLE,
-)
+from coderag.storage.postgres_models import JobRecord, RepoRecord
+from coderag.storage.postgres_session import PostgresSessionFactory
 
 
-def _describe_postgres_target(postgres_dsn: str) -> tuple[str, str]:
-    """Resume el destino del DSN sin exponer credenciales."""
-    parsed = urlsplit(postgres_dsn)
-    host = parsed.hostname or "<unknown-host>"
-    port = parsed.port or 5432
-    database = parsed.path.lstrip("/") or "<unknown-db>"
-    return host, f"{host}:{port}/{database}"
-
-
-def _coerce_mapping_row(
-    row: Any,
-    *,
-    required_keys: tuple[str, ...],
-) -> dict[str, Any] | None:
-    """Normaliza filas psycopg reales y descarta mocks vacíos o inválidos."""
-    if row is None:
-        return None
-
-    normalized_row: dict[str, Any] | None = None
-    if isinstance(row, Mapping):
-        normalized_row = dict(row)
-    else:
+def _coerce_diagnostics(value: Any) -> dict[str, Any]:
+    """Normaliza diagnostics para filas JSONB y datos legacy serializados."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
         try:
-            normalized_row = dict(row)
+            loaded = json.loads(value)
         except Exception:
-            return None
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+    return {}
 
-    if not all(key in normalized_row for key in required_keys):
-        return None
-    return normalized_row
+
+def _job_record_to_job_info(record: JobRecord) -> JobInfo:
+    """Convierte un registro ORM de jobs al modelo de dominio expuesto."""
+    logs = record.logs.splitlines() if record.logs else []
+    diagnostics = _coerce_diagnostics(record.diagnostics)
+    return JobInfo(
+        id=record.id,
+        status=JobStatus(record.status),
+        progress=float(record.progress),
+        logs=logs,
+        repo_id=record.repo_id,
+        error=record.error,
+        diagnostics=diagnostics,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
 
 
 class PostgresMetadataStore(BaseMetadataStore):
-    """Implementación de BaseMetadataStore usando PostgreSQL vía psycopg3."""
+    """Implementación de BaseMetadataStore usando SQLAlchemy sobre PostgreSQL."""
 
-    def __init__(self, postgres_dsn: str) -> None:
-        """Crea la instancia y garantiza que el esquema existe."""
+    def __init__(
+        self,
+        postgres_dsn: str,
+        *,
+        session_factory: PostgresSessionFactory | None = None,
+    ) -> None:
+        """Crea la instancia usando un factory de sesiones reutilizable."""
         self._url = postgres_dsn
-        self._init_schema()
-
-    def _connect(self) -> psycopg.Connection[dict[str, Any]]:
-        """Abre conexión a Postgres con row_factory dict_row."""
-        try:
-            return psycopg.connect(self._url, row_factory=dict_row)
-        except psycopg.OperationalError as exc:
-            host, target = _describe_postgres_target(self._url)
-            compose_hint = ""
-            if host == "postgres":
-                compose_hint = (
-                    " Si usas docker-compose, el host 'postgres' solo existe "
-                    "cuando el perfil 'remote' está activo."
-                )
-            raise RuntimeError(
-                "No se pudo conectar a Postgres para metadata en "
-                f"{target}. Verifica POSTGRES_HOST/POSTGRES_PORT y que el "
-                f"host sea resolvible desde este runtime.{compose_hint} "
-                f"Error original: {exc}"
-            ) from exc
-
-    def _init_schema(self) -> None:
-        """Crea las tablas requeridas si no existen."""
-        with self._connect() as conn:
-            conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {POSTGRES_JOBS_TABLE} (
-                    id TEXT PRIMARY KEY,
-                    status TEXT NOT NULL,
-                    progress REAL NOT NULL,
-                    logs TEXT NOT NULL,
-                    repo_id TEXT,
-                    error TEXT,
-                    diagnostics TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {POSTGRES_REPOS_TABLE} (
-                    id TEXT PRIMARY KEY,
-                    organization TEXT,
-                    url TEXT NOT NULL,
-                    branch TEXT NOT NULL,
-                    local_path TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT,
-                    embedding_provider TEXT,
-                    embedding_model TEXT
-                )
-                """
-            )
+        self._session_factory = session_factory or PostgresSessionFactory(
+            postgres_dsn
+        )
 
     def upsert_job(self, job: JobInfo) -> None:
-        """Inserta o reemplaza la instantánea del trabajo."""
-        with self._connect() as conn:
-            conn.execute(
-                f"""
-                INSERT INTO {POSTGRES_JOBS_TABLE} (
-                    id, status, progress, logs, repo_id, error,
-                    diagnostics, created_at, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    status = EXCLUDED.status,
-                    progress = EXCLUDED.progress,
-                    logs = EXCLUDED.logs,
-                    repo_id = EXCLUDED.repo_id,
-                    error = EXCLUDED.error,
-                    diagnostics = EXCLUDED.diagnostics,
-                    updated_at = EXCLUDED.updated_at
-                """,
-                (
-                    job.id,
-                    job.status.value,
-                    job.progress,
-                    "\n".join(job.logs),
-                    job.repo_id,
-                    job.error,
-                    json.dumps(job.diagnostics, ensure_ascii=True),
-                    job.created_at.isoformat(),
-                    job.updated_at.isoformat(),
-                ),
-            )
+        """Inserta o actualiza la instantánea persistida del trabajo."""
+        insert_stmt = insert(JobRecord).values(
+            id=job.id,
+            status=job.status.value,
+            progress=job.progress,
+            logs="\n".join(job.logs),
+            repo_id=job.repo_id,
+            error=job.error,
+            diagnostics=job.diagnostics or {},
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
+        statement = insert_stmt.on_conflict_do_update(
+            index_elements=[JobRecord.id],
+            set_={
+                "status": insert_stmt.excluded.status,
+                "progress": insert_stmt.excluded.progress,
+                "logs": insert_stmt.excluded.logs,
+                "repo_id": insert_stmt.excluded.repo_id,
+                "error": insert_stmt.excluded.error,
+                "diagnostics": insert_stmt.excluded.diagnostics,
+                "updated_at": insert_stmt.excluded.updated_at,
+            },
+        )
+        with self._session_factory.get_session() as session:
+            session.execute(statement)
+            session.commit()
 
     def recover_interrupted_jobs(self) -> int:
         """Marca jobs queued/running como failed tras reinicio inesperado."""
@@ -149,110 +95,64 @@ class PostgresMetadataStore(BaseMetadataStore):
             "Job interrumpido por reinicio del servicio. "
             "Reintenta la ingesta."
         )
-        now = datetime.datetime.now(datetime.UTC).isoformat()
-        with self._connect() as conn:
-            cursor = conn.execute(
-                f"""
-                UPDATE {POSTGRES_JOBS_TABLE}
-                SET
-                    status = %s,
-                    error = CASE
-                        WHEN error IS NULL OR error = '' THEN %s
-                        ELSE error
-                    END,
-                    logs = CASE
-                        WHEN logs IS NULL OR logs = '' THEN %s
-                        ELSE logs || chr(10) || %s
-                    END,
-                    updated_at = %s
-                WHERE status IN (%s, %s)
-                """,
-                (
-                    JobStatus.failed.value,
-                    reason,
-                    reason,
-                    reason,
-                    now,
-                    JobStatus.queued.value,
-                    JobStatus.running.value,
-                ),
+        now = datetime.datetime.now(datetime.UTC)
+        statement = (
+            update(JobRecord)
+            .where(
+                JobRecord.status.in_(
+                    [JobStatus.queued.value, JobStatus.running.value]
+                )
             )
-            return int(cursor.rowcount or 0)
+            .values(
+                status=JobStatus.failed.value,
+                error=case(
+                    (JobRecord.error.is_(None), literal(reason)),
+                    (JobRecord.error == "", literal(reason)),
+                    else_=JobRecord.error,
+                ),
+                logs=case(
+                    (JobRecord.logs.is_(None), literal(reason)),
+                    (JobRecord.logs == "", literal(reason)),
+                    else_=JobRecord.logs + literal("\n") + literal(reason),
+                ),
+                updated_at=now,
+            )
+        )
+        with self._session_factory.get_session() as session:
+            result = session.execute(statement)
+            session.commit()
+        return int(result.rowcount or 0)
 
     def get_job(self, job_id: str) -> JobInfo | None:
         """Lee la instantánea del trabajo por identificador."""
-        with self._connect() as conn:
-            row = conn.execute(
-                f"SELECT * FROM {POSTGRES_JOBS_TABLE} WHERE id = %s",
-                (job_id,),
-            ).fetchone()
-        normalized_row = _coerce_mapping_row(
-            row,
-            required_keys=(
-                "id",
-                "status",
-                "progress",
-                "logs",
-                "repo_id",
-                "error",
-                "diagnostics",
-                "created_at",
-                "updated_at",
-            ),
-        )
-        if normalized_row is None:
+        with self._session_factory.get_session() as session:
+            record = session.get(JobRecord, job_id)
+        if record is None:
             return None
-
-        logs = (
-            normalized_row["logs"].splitlines()
-            if normalized_row["logs"]
-            else []
-        )
-        diagnostics: dict = {}
-        if normalized_row.get("diagnostics"):
-            try:
-                loaded = json.loads(normalized_row["diagnostics"])
-                if isinstance(loaded, dict):
-                    diagnostics = loaded
-            except Exception:
-                diagnostics = {}
-
-        return JobInfo(
-            id=normalized_row["id"],
-            status=JobStatus(normalized_row["status"]),
-            progress=float(normalized_row["progress"]),
-            logs=logs,
-            repo_id=normalized_row["repo_id"],
-            error=normalized_row["error"],
-            diagnostics=diagnostics,
-            created_at=normalized_row["created_at"],
-            updated_at=normalized_row["updated_at"],
-        )
+        return _job_record_to_job_info(record)
 
     def list_repo_ids(self) -> list[str]:
         """Lista ids de repositorio conocidos desde tablas de jobs y repos."""
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT DISTINCT id AS repo_id FROM {POSTGRES_REPOS_TABLE}
-                UNION
-                SELECT DISTINCT repo_id FROM {POSTGRES_JOBS_TABLE}
-                WHERE repo_id IS NOT NULL AND repo_id <> ''
-                ORDER BY repo_id ASC
-                """
-            ).fetchall()
-        return [str(row["repo_id"]) for row in rows if row["repo_id"]]
+        repo_statement = select(RepoRecord.id.label("repo_id"))
+        jobs_statement = select(JobRecord.repo_id.label("repo_id")).where(
+            JobRecord.repo_id.is_not(None),
+            JobRecord.repo_id != "",
+        )
+        statement = union(repo_statement, jobs_statement).order_by("repo_id")
+        with self._session_factory.get_session() as session:
+            repo_ids = session.execute(statement).scalars().all()
+        return [str(repo_id) for repo_id in repo_ids if repo_id]
 
     def list_repo_catalog(self) -> list[dict[str, str | None]]:
         """Retorna catálogo de repos persistidos con metadata de ingesta."""
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT id AS repo_id, organization, url, branch
-                FROM {POSTGRES_REPOS_TABLE}
-                ORDER BY id ASC
-                """
-            ).fetchall()
+        statement = select(
+            RepoRecord.id.label("repo_id"),
+            RepoRecord.organization,
+            RepoRecord.url,
+            RepoRecord.branch,
+        ).order_by(RepoRecord.id.asc())
+        with self._session_factory.get_session() as session:
+            rows = session.execute(statement).mappings().all()
         return [
             {
                 "repo_id": str(row["repo_id"]),
@@ -272,28 +172,19 @@ class PostgresMetadataStore(BaseMetadataStore):
 
     def list_active_job_ids(self, repo_id: str | None = None) -> list[str]:
         """Lista jobs activos (queued/running), opcionalmente filtrados por repo."""
+        statement = select(JobRecord.id).where(
+            JobRecord.status.in_(
+                [JobStatus.queued.value, JobStatus.running.value]
+            )
+        )
         normalized_repo_id = (repo_id or "").strip()
         if normalized_repo_id:
-            with self._connect() as conn:
-                rows = conn.execute(
-                    f"""
-                    SELECT id FROM {POSTGRES_JOBS_TABLE}
-                    WHERE status IN (%s, %s) AND repo_id = %s
-                    ORDER BY created_at ASC
-                    """,
-                    (JobStatus.queued.value, JobStatus.running.value, normalized_repo_id),
-                ).fetchall()
-        else:
-            with self._connect() as conn:
-                rows = conn.execute(
-                    f"""
-                    SELECT id FROM {POSTGRES_JOBS_TABLE}
-                    WHERE status IN (%s, %s)
-                    ORDER BY created_at ASC
-                    """,
-                    (JobStatus.queued.value, JobStatus.running.value),
-                ).fetchall()
-        return [str(row["id"]) for row in rows if row["id"]]
+            statement = statement.where(JobRecord.repo_id == normalized_repo_id)
+        statement = statement.order_by(JobRecord.created_at.asc())
+
+        with self._session_factory.get_session() as session:
+            job_ids = session.execute(statement).scalars().all()
+        return [str(job_id) for job_id in job_ids if job_id]
 
     def upsert_repo_runtime(
         self,
@@ -307,75 +198,64 @@ class PostgresMetadataStore(BaseMetadataStore):
         embedding_model: str | None,
     ) -> None:
         """Inserta o actualiza metadata runtime por repositorio."""
-        now = datetime.datetime.now(datetime.UTC).isoformat()
-        with self._connect() as conn:
-            conn.execute(
-                f"""
-                INSERT INTO {POSTGRES_REPOS_TABLE} (
-                    id, organization, url, branch, local_path, created_at,
-                    updated_at, embedding_provider, embedding_model
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    organization = EXCLUDED.organization,
-                    url = EXCLUDED.url,
-                    branch = EXCLUDED.branch,
-                    local_path = EXCLUDED.local_path,
-                    updated_at = EXCLUDED.updated_at,
-                    embedding_provider = EXCLUDED.embedding_provider,
-                    embedding_model = EXCLUDED.embedding_model
-                """,
-                (
-                    repo_id,
-                    organization,
-                    repo_url,
-                    branch,
-                    local_path,
-                    now,
-                    now,
-                    embedding_provider,
-                    embedding_model,
-                ),
-            )
+        now = datetime.datetime.now(datetime.UTC)
+        insert_stmt = insert(RepoRecord).values(
+            id=repo_id,
+            organization=organization,
+            url=repo_url,
+            branch=branch,
+            local_path=local_path,
+            created_at=now,
+            updated_at=now,
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
+        )
+        statement = insert_stmt.on_conflict_do_update(
+            index_elements=[RepoRecord.id],
+            set_={
+                "organization": insert_stmt.excluded.organization,
+                "url": insert_stmt.excluded.url,
+                "branch": insert_stmt.excluded.branch,
+                "local_path": insert_stmt.excluded.local_path,
+                "updated_at": insert_stmt.excluded.updated_at,
+                "embedding_provider": insert_stmt.excluded.embedding_provider,
+                "embedding_model": insert_stmt.excluded.embedding_model,
+            },
+        )
+        with self._session_factory.get_session() as session:
+            session.execute(statement)
+            session.commit()
 
     def get_repo_runtime(self, repo_id: str) -> dict[str, str | None] | None:
         """Obtiene metadata runtime almacenada para un repositorio."""
-        with self._connect() as conn:
-            row = conn.execute(
-                f"""
-                SELECT embedding_provider, embedding_model
-                FROM {POSTGRES_REPOS_TABLE}
-                WHERE id = %s
-                """,
-                (repo_id,),
-            ).fetchone()
-        normalized_row = _coerce_mapping_row(
-            row,
-            required_keys=("embedding_provider", "embedding_model"),
-        )
-        if normalized_row is None:
+        statement = select(
+            RepoRecord.embedding_provider,
+            RepoRecord.embedding_model,
+        ).where(RepoRecord.id == repo_id)
+        with self._session_factory.get_session() as session:
+            row = session.execute(statement).mappings().one_or_none()
+        if row is None:
             return None
         return {
-            "last_embedding_provider": normalized_row["embedding_provider"],
-            "last_embedding_model": normalized_row["embedding_model"],
+            "last_embedding_provider": row["embedding_provider"],
+            "last_embedding_model": row["embedding_model"],
         }
 
     def delete_repo_runtime(self, repo_id: str) -> int:
         """Elimina metadata runtime del repositorio y devuelve filas afectadas."""
-        with self._connect() as conn:
-            cursor = conn.execute(
-                f"DELETE FROM {POSTGRES_REPOS_TABLE} WHERE id = %s",
-                (repo_id,),
-            )
-            return int(cursor.rowcount or 0)
+        statement = delete(RepoRecord).where(RepoRecord.id == repo_id)
+        with self._session_factory.get_session() as session:
+            result = session.execute(statement)
+            session.commit()
+        return int(result.rowcount or 0)
 
     def delete_repo_jobs(self, repo_id: str) -> int:
         """Elimina historial de jobs asociados al repositorio y devuelve filas."""
-        with self._connect() as conn:
-            cursor = conn.execute(
-                f"DELETE FROM {POSTGRES_JOBS_TABLE} WHERE repo_id = %s",
-                (repo_id,),
-            )
-            return int(cursor.rowcount or 0)
+        statement = delete(JobRecord).where(JobRecord.repo_id == repo_id)
+        with self._session_factory.get_session() as session:
+            result = session.execute(statement)
+            session.commit()
+        return int(result.rowcount or 0)
 
     def delete_repo_data(self, repo_id: str) -> dict[str, int]:
         """Elimina metadata de repositorio y jobs, retornando conteos por tabla."""
@@ -389,6 +269,7 @@ class PostgresMetadataStore(BaseMetadataStore):
 
     def reset_all(self) -> None:
         """Elimina todos los jobs y repos. Usar solo en reset global."""
-        with self._connect() as conn:
-            conn.execute(f"DELETE FROM {POSTGRES_JOBS_TABLE}")
-            conn.execute(f"DELETE FROM {POSTGRES_REPOS_TABLE}")
+        with self._session_factory.get_session() as session:
+            session.execute(delete(JobRecord))
+            session.execute(delete(RepoRecord))
+            session.commit()

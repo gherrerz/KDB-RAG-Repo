@@ -1,12 +1,111 @@
 """Pruebas para el comportamiento de orquestación de la canalización de ingesta."""
 
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from coderag.core.models import FileImportRelation, RepoAuthConfig
 from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
 from coderag.ingestion import pipeline
+
+
+def test_index_lexical_backend_uses_postgres_when_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Con Postgres activo, indexa solo el backend léxico soportado."""
+    scanned = [ScannedFile(path="a.py", language="python", content="print('ok')")]
+    symbols = [
+        SymbolChunk(
+            id="s1",
+            repo_id="r1",
+            path="a.py",
+            language="python",
+            symbol_name="main",
+            symbol_type="function",
+            start_line=1,
+            end_line=1,
+            snippet="print('ok')",
+        )
+    ]
+    lexical_calls: list[dict[str, object]] = []
+    class FakeLexicalStore:
+        def __init__(self, dsn: str, language: str, session_factory=None) -> None:
+            self.dsn = dsn
+            self.language = language
+            self.session_factory = session_factory
+
+        def index_documents(
+            self,
+            *,
+            repo_id: str,
+            docs: list[str],
+            metadatas: list[dict],
+        ) -> None:
+            lexical_calls.append(
+                {
+                    "repo_id": repo_id,
+                    "docs": docs,
+                    "metadatas": metadatas,
+                }
+            )
+
+    fake_module = ModuleType("coderag.storage.lexical_store")
+    fake_module.LexicalStore = FakeLexicalStore
+    monkeypatch.setitem(sys.modules, "coderag.storage.lexical_store", fake_module)
+
+    import coderag.storage.postgres_session as postgres_session
+
+    monkeypatch.setattr(
+        postgres_session.PostgresSessionFactory,
+        "from_settings",
+        lambda settings: "fake-session-factory",
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "get_settings",
+        lambda: SimpleNamespace(
+            lexical_fts_language="spanish",
+            resolve_postgres_dsn=lambda: "postgresql://fake/db",
+        ),
+    )
+
+    pipeline._index_lexical_backend("r1", scanned, symbols)
+
+    assert len(lexical_calls) == 1
+    assert lexical_calls[0]["repo_id"] == "r1"
+
+
+def test_index_lexical_backend_requires_postgres(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sin Postgres configurado la ingesta debe fallar antes de indexar."""
+    scanned = [ScannedFile(path="a.py", language="python", content="print('ok')")]
+    symbols = [
+        SymbolChunk(
+            id="s1",
+            repo_id="r1",
+            path="a.py",
+            language="python",
+            symbol_name="main",
+            symbol_type="function",
+            start_line=1,
+            end_line=1,
+            snippet="print('ok')",
+        )
+    ]
+    monkeypatch.setattr(
+        pipeline,
+        "get_settings",
+        lambda: SimpleNamespace(
+            lexical_fts_language="spanish",
+            resolve_postgres_dsn=lambda: "",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="LexicalStore Postgres es obligatorio"):
+        pipeline._index_lexical_backend("r1", scanned, symbols)
 
 
 def _patch_pipeline_settings(
@@ -17,6 +116,7 @@ def _patch_pipeline_settings(
     """Aplica settings de prueba comunes para orquestación de ingesta."""
     defaults = {
         "workspace_path": tmp_path,
+        "resolve_postgres_dsn": lambda: "postgresql://fake/db",
         "scan_max_file_size_bytes": 12345,
         "scan_excluded_dirs": ".git,node_modules",
         "scan_excluded_extensions": ".png,.zip",
@@ -109,7 +209,7 @@ def test_ingest_repository_continues_on_graph_failure(
     )
     monkeypatch.setattr(
         pipeline,
-        "_index_bm25",
+        "_index_lexical_backend",
         lambda repo_id, scanned_files, chunks: None,
     )
     monkeypatch.setattr(
@@ -235,8 +335,8 @@ def test_ingest_repository_purges_existing_repo_before_reindex(
     )
     monkeypatch.setattr(
         pipeline,
-        "_index_bm25",
-        lambda repo_id, scanned_files, chunks: call_order.append("index_bm25"),
+        "_index_lexical_backend",
+        lambda repo_id, scanned_files, chunks: call_order.append("index_lexical"),
     )
     monkeypatch.setattr(
         pipeline,
@@ -256,7 +356,7 @@ def test_ingest_repository_purges_existing_repo_before_reindex(
         logger=logs.append,
     )
 
-    assert call_order == ["purge", "index_vectors", "index_bm25", "index_graph"]
+    assert call_order == ["purge", "index_vectors", "index_lexical", "index_graph"]
     assert any("Repositorio existente detectado" in item for item in logs)
     assert any("Observabilidad símbolos:" in item for item in logs)
 
@@ -309,12 +409,12 @@ def test_repo_has_existing_index_data_uses_active_lexical_helper(
     assert captured["repo_id"] == "r1"
 
 
-def test_purge_repo_indices_formats_bm25_counts_from_active_backend(
+def test_purge_repo_indices_formats_lexical_counts_from_active_backend(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     patch_module_settings,
 ) -> None:
-    """Reporta conteos BM25 cuando ese es el backend léxico activo."""
+    """Reporta conteos lexicales del backend activo soportado."""
 
     class FakeChromaIndex:
         def delete_by_repo_id(self, repo_id: str) -> dict[str, int]:
@@ -341,16 +441,11 @@ def test_purge_repo_indices_formats_bm25_counts_from_active_backend(
         "delete_active_repository_lexical_data",
         lambda settings, repo_id: {"docs_removed": 2, "snapshot_removed": 1},
     )
-    monkeypatch.setattr(
-        pipeline,
-        "repository_lexical_backend_label",
-        lambda settings: "bm25",
-    )
 
     logs: list[str] = []
     pipeline._purge_repo_indices("r1", logs.append)
 
-    assert "bm25_docs=2, bm25_snapshot=1" in logs[0]
+    assert "lexical_docs=2" in logs[0]
     assert "chroma_total=5" in logs[0]
     assert "neo4j_nodes=4" in logs[0]
 
@@ -492,7 +587,7 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
     )
     monkeypatch.setattr(
         pipeline,
-        "_index_bm25",
+        "_index_lexical_backend",
         lambda repo_id, scanned_files, chunks: None,
     )
     monkeypatch.setattr(
@@ -601,7 +696,7 @@ def test_ingest_repository_forwards_explicit_auth_payload_to_clone(
     )
     monkeypatch.setattr(
         pipeline,
-        "_index_bm25",
+        "_index_lexical_backend",
         lambda repo_id, scanned_files, chunks: None,
     )
     monkeypatch.setattr(

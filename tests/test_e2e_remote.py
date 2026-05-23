@@ -196,8 +196,8 @@ class TestLexicalStoreE2E:
             store.delete_repo(repo_id)
 
     @_skip_no_postgres
-    def test_query_shape_compatible_con_bm25(self):
-        """El shape de resultado es idéntico al de GLOBAL_BM25.query()."""
+    def test_query_shape_respeta_contrato_lexico_estable(self):
+        """El shape de resultado respeta el contrato léxico público actual."""
         from coderag.storage.lexical_store import LexicalStore
 
         store = LexicalStore(_POSTGRES_DSN)

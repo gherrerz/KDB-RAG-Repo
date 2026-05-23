@@ -8,32 +8,6 @@ import pytest
 from coderag.maintenance import reset_service
 
 
-def test_reset_bm25_storage_clears_memory_and_snapshots(
-    patch_module_settings,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Limpia el índice BM25 en memoria y recrea la carpeta de snapshots."""
-    import coderag.ingestion.index_bm25 as bm25_module
-
-    settings = patch_module_settings(bm25_module)
-    repo_id = "repo-1"
-    reset_service.GLOBAL_BM25.build(
-        repo_id=repo_id,
-        docs=["alpha beta"],
-        metadatas=[{"id": "repo-1:1"}],
-    )
-    assert reset_service.GLOBAL_BM25.persist_repo(repo_id) is True
-
-    cleared, warnings = reset_service._reset_bm25_storage(settings)
-
-    assert warnings == []
-    assert cleared[0] == "BM25 en memoria"
-    assert cleared[1].startswith("BM25 snapshots (")
-    assert reset_service.GLOBAL_BM25.has_repo(repo_id) is False
-    assert reset_service.GLOBAL_BM25.has_repo_snapshot(repo_id) is False
-    assert (settings.workspace_path.parent / "bm25").exists()
-
-
 def test_reset_postgres_lexical_storage_skips_when_no_dsn(
     make_test_settings,
 ) -> None:
@@ -46,31 +20,6 @@ def test_reset_postgres_lexical_storage_skips_when_no_dsn(
     assert warnings == []
 
 
-def test_delete_repo_bm25_storage_returns_counts(
-    patch_module_settings,
-) -> None:
-    """Expone conteos de documentos y snapshots al borrar un repo BM25."""
-    import coderag.ingestion.index_bm25 as bm25_module
-
-    settings = patch_module_settings(bm25_module)
-    repo_id = "repo-1"
-    reset_service.GLOBAL_BM25.build(
-        repo_id=repo_id,
-        docs=["alpha beta", "gamma delta"],
-        metadatas=[{"id": "repo-1:1"}, {"id": "repo-1:2"}],
-    )
-    assert reset_service.GLOBAL_BM25.persist_repo(repo_id) is True
-
-    cleared, warnings, counts = reset_service._delete_repo_bm25_storage(repo_id)
-
-    assert warnings == []
-    assert cleared == ["BM25"]
-    assert counts == {"bm25_docs": 2, "bm25_snapshots": 1}
-    assert reset_service.GLOBAL_BM25.has_repo(repo_id) is False
-    assert reset_service.GLOBAL_BM25.has_repo_snapshot(repo_id) is False
-    assert settings.workspace_path.parent.exists()
-
-
 def test_delete_repo_postgres_lexical_storage_uses_lexical_store(
     make_test_settings,
     monkeypatch: pytest.MonkeyPatch,
@@ -80,8 +29,14 @@ def test_delete_repo_postgres_lexical_storage_uses_lexical_store(
     calls: list[tuple[str, str, str]] = []
 
     class FakeLexicalStore:
-        def __init__(self, dsn: str, language: str) -> None:
+        def __init__(
+            self,
+            dsn: str,
+            language: str,
+            session_factory=None,
+        ) -> None:
             calls.append(("init", dsn, language))
+            assert session_factory is not None
 
         def delete_repo(self, repo_id: str) -> dict[str, int]:
             calls.append(("delete_repo", repo_id, ""))
@@ -125,7 +80,6 @@ def test_reset_all_storage_uses_vector_helper(
 
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(reset_service, "_reset_bm25_storage", lambda settings: ([], []))
     monkeypatch.setattr(
         reset_service,
         "_reset_postgres_lexical_storage",
@@ -140,6 +94,108 @@ def test_reset_all_storage_uses_vector_helper(
             or (True, ["warning vectorial"])
         ),
     )
+    monkeypatch.setattr(
+        reset_service,
+        "resolve_postgres_dsn",
+        lambda active_settings: "postgresql://fake/db",
+    )
+
+    class FakeGraphBuilder:
+        def clear_graph(self) -> int:
+            return 0
+
+        def close(self) -> None:
+            return None
+
+    class FakePostgresMetadataStore:
+        def reset_all(self) -> None:
+            return None
+
+    fake_module = ModuleType("coderag.storage.postgres_metadata_store")
+    fake_module.PostgresMetadataStore = lambda dsn: FakePostgresMetadataStore()
+    monkeypatch.setitem(
+        sys.modules,
+        "coderag.storage.postgres_metadata_store",
+        fake_module,
+    )
+    monkeypatch.setattr(reset_service, "GraphBuilder", FakeGraphBuilder)
+
+    cleared, warnings = reset_service.reset_all_storage()
+
+    assert "Chroma" in cleared
+    assert "Grafo Neo4j" in cleared
+    assert warnings == ["warning vectorial"]
+    assert captured["settings"] is settings
+    assert callable(captured["remove_path"])
+
+
+def test_reset_all_storage_skips_bm25_cleanup_when_postgres_is_primary(
+    make_test_settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Con Postgres activo, el reset no expone limpieza de artefactos legacy."""
+    settings = make_test_settings(
+        resolve_postgres_dsn=lambda: "postgresql://fake/db",
+    )
+
+    monkeypatch.setattr(reset_service, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        reset_service,
+        "_reset_postgres_lexical_storage",
+        lambda active_settings: (["LexicalStore Postgres"], []),
+    )
+    monkeypatch.setattr(
+        reset_service,
+        "reset_managed_vector_storage",
+        lambda active_settings, remove_path: (False, []),
+    )
+    monkeypatch.setattr(reset_service, "_remove_path", lambda path: None)
+
+    class FakeGraphBuilder:
+        def clear_graph(self) -> int:
+            return 0
+
+        def close(self) -> None:
+            return None
+
+    class FakePostgresMetadataStore:
+        def reset_all(self) -> None:
+            return None
+
+    fake_module = ModuleType("coderag.storage.postgres_metadata_store")
+    fake_module.PostgresMetadataStore = lambda dsn: FakePostgresMetadataStore()
+    monkeypatch.setitem(
+        sys.modules,
+        "coderag.storage.postgres_metadata_store",
+        fake_module,
+    )
+    monkeypatch.setattr(reset_service, "GraphBuilder", FakeGraphBuilder)
+
+    cleared, warnings = reset_service.reset_all_storage()
+
+    assert "LexicalStore Postgres" in cleared
+    assert warnings == []
+
+
+def test_reset_all_storage_warns_when_postgres_metadata_is_missing(
+    make_test_settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sin Postgres configurado, el reset no debe volver a metadata.db."""
+    settings = make_test_settings(resolve_postgres_dsn=lambda: "")
+
+    monkeypatch.setattr(reset_service, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        reset_service,
+        "_reset_postgres_lexical_storage",
+        lambda active_settings: ([], []),
+    )
+    monkeypatch.setattr(
+        reset_service,
+        "reset_managed_vector_storage",
+        lambda active_settings, remove_path: (False, []),
+    )
+    monkeypatch.setattr(reset_service, "_remove_path", lambda path: None)
 
     class FakeGraphBuilder:
         def clear_graph(self) -> int:
@@ -152,11 +208,10 @@ def test_reset_all_storage_uses_vector_helper(
 
     cleared, warnings = reset_service.reset_all_storage()
 
-    assert "Chroma" in cleared
-    assert "Grafo Neo4j" in cleared
-    assert warnings == ["warning vectorial"]
-    assert captured["settings"] is settings
-    assert callable(captured["remove_path"])
+    assert all("SQLite" not in item for item in cleared)
+    assert warnings == [
+        "Metadata Postgres no está configurado; no se limpió metadata operativa durante el reset."
+    ]
 
 
 def test_reset_all_storage_warns_when_neo4j_cleanup_fails(
@@ -172,7 +227,6 @@ def test_reset_all_storage_warns_when_neo4j_cleanup_fails(
         chroma_mode="local",
     )
 
-    monkeypatch.setattr(reset_service, "_reset_bm25_storage", lambda settings: ([], []))
     monkeypatch.setattr(
         reset_service,
         "_reset_postgres_lexical_storage",
@@ -183,6 +237,11 @@ def test_reset_all_storage_warns_when_neo4j_cleanup_fails(
         reset_service,
         "reset_managed_vector_storage",
         lambda active_settings, remove_path: (True, []),
+    )
+    monkeypatch.setattr(
+        reset_service,
+        "resolve_postgres_dsn",
+        lambda active_settings: "postgresql://fake/db",
     )
 
     class FakeGraphBuilder:
@@ -195,6 +254,17 @@ def test_reset_all_storage_warns_when_neo4j_cleanup_fails(
         def close(self) -> None:
             return None
 
+    class FakePostgresMetadataStore:
+        def reset_all(self) -> None:
+            return None
+
+    fake_module = ModuleType("coderag.storage.postgres_metadata_store")
+    fake_module.PostgresMetadataStore = lambda dsn: FakePostgresMetadataStore()
+    monkeypatch.setitem(
+        sys.modules,
+        "coderag.storage.postgres_metadata_store",
+        fake_module,
+    )
     monkeypatch.setattr(reset_service, "GraphBuilder", FakeGraphBuilder)
 
     cleared, warnings = reset_service.reset_all_storage()
@@ -238,11 +308,6 @@ def test_delete_repo_storage_uses_vector_helper(
     )
     monkeypatch.setattr(
         reset_service,
-        "_delete_repo_bm25_storage",
-        lambda repo_id: ([], [], {}),
-    )
-    monkeypatch.setattr(
-        reset_service,
         "_delete_repo_postgres_lexical_storage",
         lambda settings, repo_id: ([], [], {}),
     )
@@ -261,7 +326,11 @@ def test_delete_repo_storage_uses_vector_helper(
     monkeypatch.setattr(reset_service, "GraphBuilder", FakeGraphBuilder)
     monkeypatch.setattr(reset_service, "_workspace_repo_paths", lambda root, repo_id: [])
     monkeypatch.setattr(reset_service, "_build_metadata_store", lambda settings: FakeMetadataStore())
-    monkeypatch.setattr(reset_service, "metadata_backend_label", lambda settings: "Metadata SQLite")
+    monkeypatch.setattr(
+        reset_service,
+        "metadata_backend_label",
+        lambda settings: "Metadata Postgres",
+    )
 
     cleared, warnings, counts = reset_service.delete_repo_storage("repo-1")
 
@@ -271,3 +340,49 @@ def test_delete_repo_storage_uses_vector_helper(
     assert counts["chroma_total"] == 5
     assert counts["chroma_code_symbols"] == 3
     assert counts["chroma_code_files"] == 2
+
+
+def test_delete_repo_storage_warns_when_metadata_backend_is_unavailable(
+    make_test_settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El borrado por repo no debe volver a metadata.db cuando falta Postgres."""
+    settings = make_test_settings(resolve_postgres_dsn=lambda: "")
+
+    monkeypatch.setattr(reset_service, "get_settings", lambda: settings)
+    monkeypatch.setattr(reset_service, "build_managed_vector_index", lambda: "fake-index")
+    monkeypatch.setattr(
+        reset_service,
+        "delete_repository_vector_documents",
+        lambda index, repo_id: {"total": 1},
+    )
+    monkeypatch.setattr(
+        reset_service,
+        "_delete_repo_postgres_lexical_storage",
+        lambda active_settings, repo_id: (["LexicalStore"], [], {"lexical_docs": 3}),
+    )
+
+    class FakeGraphBuilder:
+        def delete_repo_subgraph(self, repo_id: str) -> int:
+            return 0
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(reset_service, "GraphBuilder", FakeGraphBuilder)
+    monkeypatch.setattr(reset_service, "_workspace_repo_paths", lambda root, repo_id: [])
+    monkeypatch.setattr(
+        reset_service,
+        "_build_metadata_store",
+        lambda active_settings: (_ for _ in ()).throw(
+            RuntimeError("Metadata Postgres es obligatorio en el runtime actual.")
+        ),
+    )
+
+    cleared, warnings, counts = reset_service.delete_repo_storage("repo-1")
+
+    assert "LexicalStore" in cleared
+    assert "metadata_total" not in counts
+    assert warnings == [
+        "No se pudo limpiar metadata operativa para 'repo-1': Metadata Postgres es obligatorio en el runtime actual."
+    ]

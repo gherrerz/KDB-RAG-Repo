@@ -61,11 +61,10 @@ $env:INGESTION_EXECUTION_MODE = "rq"
 
 Notas operativas del compose local:
 
-- `start_compose.ps1` levanta por defecto `api + neo4j`.
+- `start_compose.ps1` levanta por defecto `api + neo4j + chroma + postgres`.
 - Con `-WithRedis`, agrega `redis + worker` para ejecucion distribuida.
-- `docker-compose.yml` tambien define un perfil `remote` con `chroma` y
-  `postgres` para probar localmente la topologia remota completa.
-- El helper actual no activa ese perfil `remote` por defecto.
+- El helper activa el perfil `remote` y espera `GET /health` antes de dar el
+  stack por listo.
 
 1. Levantar UI (opcional, desktop local).
 
