@@ -24,9 +24,15 @@ from coderag.storage.postgres_session import (
 
 
 PostgresStartupPolicy = Literal["auto_upgrade", "validate"]
-LegacySchemaState = Literal["absent", "compatible", "incompatible"]
+LegacySchemaState = Literal[
+    "absent",
+    "compatible",
+    "upgradeable_missing_last_queried_at",
+    "incompatible",
+]
 
 _BOOTSTRAP_CACHE: dict[tuple[str, PostgresStartupPolicy], dict[str, Any]] = {}
+_REPO_LAST_QUERIED_AT_BASE_REVISION = "0002_drop_legacy_postgres_tables"
 _REQUIRED_COLUMNS_BY_TABLE: dict[str, set[str]] = {
     POSTGRES_JOBS_TABLE_NAME: {
         "id",
@@ -103,15 +109,31 @@ def _classify_legacy_schema(factory: PostgresSessionFactory) -> LegacySchemaStat
         if existing_tables != required_tables:
             return "incompatible"
 
+        missing_columns_by_table: dict[str, set[str]] = {}
         for table_name, required_columns in _REQUIRED_COLUMNS_BY_TABLE.items():
             actual_columns = {
                 str(column["name"]).strip().lower()
                 for column in inspector.get_columns(table_name)
             }
-            if not required_columns.issubset(actual_columns):
-                return "incompatible"
+            missing_columns_by_table[table_name] = required_columns - actual_columns
 
-        return "compatible"
+        if all(
+            not missing_columns
+            for missing_columns in missing_columns_by_table.values()
+        ):
+            return "compatible"
+
+        repo_missing_columns = missing_columns_by_table[POSTGRES_REPOS_TABLE_NAME]
+        if (
+            repo_missing_columns == {"last_queried_at"}
+            and not missing_columns_by_table[POSTGRES_JOBS_TABLE_NAME]
+            and not missing_columns_by_table[
+                POSTGRES_LEXICAL_CORPUS_TABLE_NAME
+            ]
+        ):
+            return "upgradeable_missing_last_queried_at"
+
+        return "incompatible"
 
 
 def _resolve_startup_policy(settings: object) -> PostgresStartupPolicy:
@@ -196,6 +218,13 @@ def ensure_postgres_schema_ready(
         if not current_heads and legacy_state == "compatible":
             command.stamp(config, "head")
             action = "stamped_legacy_schema"
+        elif (
+            not current_heads
+            and legacy_state == "upgradeable_missing_last_queried_at"
+        ):
+            command.stamp(config, _REPO_LAST_QUERIED_AT_BASE_REVISION)
+            command.upgrade(config, "head")
+            action = "upgraded_unversioned_schema"
         elif not current_heads and legacy_state == "incompatible":
             raise _build_incompatible_legacy_schema_error()
         elif current_heads != expected_heads:

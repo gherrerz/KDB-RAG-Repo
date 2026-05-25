@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import pytest
+from conftest import build_test_postgres_dsn
 
 from coderag.storage import postgres_startup
 
@@ -13,7 +14,7 @@ from coderag.storage import postgres_startup
 def _settings(
     *,
     runtime_environment: str = "development",
-    dsn: str = "postgresql://user:pass@localhost:5432/db",
+    dsn: str = build_test_postgres_dsn(POSTGRES_DB="db"),
 ) -> SimpleNamespace:
     """Construye settings mínimos para el bootstrap de Postgres."""
     return SimpleNamespace(
@@ -111,6 +112,51 @@ def test_development_stamps_legacy_schema_without_upgrade(
     assert result["action"] == "stamped_legacy_schema"
     upgrade_mock.assert_not_called()
     stamp_mock.assert_called_once()
+
+
+def test_development_upgrades_unversioned_schema_missing_last_queried_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Una base sin versionar equivalente a 0002 debe avanzar a head."""
+    settings = _settings(runtime_environment="development")
+    factory = MagicMock()
+    monkeypatch.setattr(
+        postgres_startup.PostgresSessionFactory,
+        "from_settings",
+        lambda value: factory,
+    )
+    monkeypatch.setattr(
+        postgres_startup,
+        "_read_database_heads",
+        MagicMock(
+            side_effect=[set(), {"0003_add_repo_last_queried_at"}]
+        ),
+    )
+    monkeypatch.setattr(
+        postgres_startup,
+        "_classify_legacy_schema",
+        lambda value: "upgradeable_missing_last_queried_at",
+    )
+    monkeypatch.setattr(
+        postgres_startup.ScriptDirectory,
+        "from_config",
+        lambda config: SimpleNamespace(
+            get_heads=lambda: ["0003_add_repo_last_queried_at"]
+        ),
+    )
+    upgrade_mock = MagicMock()
+    stamp_mock = MagicMock()
+    monkeypatch.setattr(postgres_startup.command, "upgrade", upgrade_mock)
+    monkeypatch.setattr(postgres_startup.command, "stamp", stamp_mock)
+
+    result = postgres_startup.ensure_postgres_schema_ready(settings, force=True)
+
+    assert result["action"] == "upgraded_unversioned_schema"
+    stamp_mock.assert_called_once_with(
+        ANY,
+        "0002_drop_legacy_postgres_tables",
+    )
+    upgrade_mock.assert_called_once_with(ANY, "head")
 
 
 def test_development_rejects_incompatible_legacy_schema(

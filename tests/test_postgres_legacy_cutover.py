@@ -5,7 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from conftest import build_test_postgres_dsn, build_test_postgres_target
+
 from coderag.storage import postgres_legacy_cutover
+
+
+_CUTOVER_DSN = build_test_postgres_dsn(POSTGRES_DB="db")
+_CUTOVER_TARGET = build_test_postgres_target(POSTGRES_DB="db")
+_DEFAULT_TARGET = build_test_postgres_target()
 
 
 def test_resolve_cutover_report_profile_uses_stage_default_prefix() -> None:
@@ -24,7 +31,7 @@ def test_run_cutover_marks_ready_when_audit_and_validate_match(monkeypatch) -> N
     monkeypatch.setattr(
         postgres_legacy_cutover,
         "resolve_postgres_dsn",
-        lambda settings: "postgresql://user:pass@localhost:5432/db",
+        lambda settings: _CUTOVER_DSN,
     )
     monkeypatch.setattr(
         postgres_legacy_cutover,
@@ -74,7 +81,7 @@ def test_run_cutover_marks_ready_when_audit_and_validate_match(monkeypatch) -> N
     assert report["automatic_cutover_ready"] is True
     assert report["manual_checks_complete"] is True
     assert report["cutover_ready"] is True
-    assert report["postgres_target"] == "localhost:5432/db"
+    assert report["postgres_target"] == _CUTOVER_TARGET
     assert len(report["audit_rows"]) == 1
     assert any(item["automatic"] for item in report["checklist"])
     assert any(
@@ -91,7 +98,7 @@ def test_run_cutover_keeps_manual_checks_pending_by_default(monkeypatch) -> None
     monkeypatch.setattr(
         postgres_legacy_cutover,
         "resolve_postgres_dsn",
-        lambda settings: "postgresql://user:pass@localhost:5432/db",
+        lambda settings: _CUTOVER_DSN,
     )
     monkeypatch.setattr(
         postgres_legacy_cutover,
@@ -140,7 +147,7 @@ def test_run_cutover_marks_observation_exit_ready_when_approved(
     monkeypatch.setattr(
         postgres_legacy_cutover,
         "resolve_postgres_dsn",
-        lambda settings: "postgresql://user:pass@localhost:5432/db",
+        lambda settings: _CUTOVER_DSN,
     )
     monkeypatch.setattr(
         postgres_legacy_cutover,
@@ -205,7 +212,7 @@ def test_write_cutover_reports_creates_json_and_markdown(tmp_path: Path) -> None
         "generated_at": "2026-05-21T22:00:00+00:00",
         "report_profile": "observation-exit",
         "report_prefix": "legacy_observation_exit",
-        "postgres_target": "localhost:5432/coderag",
+        "postgres_target": _DEFAULT_TARGET,
         "automatic_cutover_ready": True,
         "manual_checks_complete": True,
         "cutover_ready": True,

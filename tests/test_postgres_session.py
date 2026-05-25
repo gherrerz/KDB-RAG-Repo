@@ -6,9 +6,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from conftest import build_test_postgres_dsn, build_test_postgres_target
 from sqlalchemy.exc import OperationalError as SqlAlchemyOperationalError
 
-from coderag.storage.postgres_session import PostgresSessionFactory
+from coderag.storage.postgres_session import (
+    PostgresSessionFactory,
+    to_sqlalchemy_postgres_url,
+)
 
 
 _PATCH_CREATE_ENGINE = "coderag.storage.postgres_session.create_engine"
@@ -24,8 +28,9 @@ def _fake_engine() -> MagicMock:
 
 def test_from_settings_uses_resolved_dsn_and_pool_values() -> None:
     """El factory debe consumir DSN y settings de pool del objeto settings."""
+    postgres_dsn = build_test_postgres_dsn(POSTGRES_DB="db")
     settings = SimpleNamespace(
-        resolve_postgres_dsn=lambda: "postgresql://user:pass@localhost:5432/db",
+        resolve_postgres_dsn=lambda: postgres_dsn,
         postgres_pool_size=11,
         postgres_pool_timeout=42.5,
     )
@@ -36,7 +41,7 @@ def test_from_settings_uses_resolved_dsn_and_pool_values() -> None:
 
     assert factory.engine is engine
     create_engine_mock.assert_called_once_with(
-        "postgresql+psycopg://user:pass@localhost:5432/db",
+        to_sqlalchemy_postgres_url(postgres_dsn),
         pool_pre_ping=True,
         pool_size=11,
         pool_timeout=42.5,
@@ -56,16 +61,17 @@ def test_from_settings_raises_when_dsn_is_empty() -> None:
 def test_invalid_pool_values_fall_back_to_safe_defaults() -> None:
     """Valores inválidos de pool deben normalizarse a defaults seguros."""
     engine = _fake_engine()
+    postgres_dsn = build_test_postgres_dsn(POSTGRES_DB="db")
 
     with patch(_PATCH_CREATE_ENGINE, return_value=engine) as create_engine_mock:
         PostgresSessionFactory(
-            "postgresql://user:pass@localhost:5432/db",
+            postgres_dsn,
             pool_size=0,
             pool_timeout=-1,
         )
 
     create_engine_mock.assert_called_once_with(
-        "postgresql+psycopg://user:pass@localhost:5432/db",
+        to_sqlalchemy_postgres_url(postgres_dsn),
         pool_pre_ping=True,
         pool_size=5,
         pool_timeout=30.0,
@@ -74,27 +80,32 @@ def test_invalid_pool_values_fall_back_to_safe_defaults() -> None:
 
 def test_sqlalchemy_url_uses_psycopg_driver() -> None:
     """La DSN legacy debe adaptarse al driver explícito requerido por SQLAlchemy."""
-    from coderag.storage.postgres_session import to_sqlalchemy_postgres_url
+    postgres_dsn = build_test_postgres_dsn(POSTGRES_DB="db")
+    sqlalchemy_dsn = to_sqlalchemy_postgres_url(postgres_dsn)
 
-    assert (
-        to_sqlalchemy_postgres_url("postgresql://user:pass@localhost:5432/db")
-        == "postgresql+psycopg://user:pass@localhost:5432/db"
-    )
-    assert (
-        to_sqlalchemy_postgres_url("postgres://user:pass@localhost:5432/db")
-        == "postgresql+psycopg://user:pass@localhost:5432/db"
+    assert sqlalchemy_dsn == postgres_dsn.replace(
+        "postgresql://",
+        "postgresql+psycopg://",
+        1,
     )
     assert (
         to_sqlalchemy_postgres_url(
-            "postgresql+psycopg://user:pass@localhost:5432/db"
+            postgres_dsn.replace("postgresql://", "postgres://", 1)
         )
-        == "postgresql+psycopg://user:pass@localhost:5432/db"
+        == sqlalchemy_dsn
     )
+    assert to_sqlalchemy_postgres_url(sqlalchemy_dsn) == sqlalchemy_dsn
 
 
 def test_get_connection_wraps_operational_error_without_credentials() -> None:
     """Errores operativos deben sanear credenciales y mantener destino."""
     engine = _fake_engine()
+    postgres_dsn = build_test_postgres_dsn(
+        POSTGRES_HOST="postgres",
+        POSTGRES_DB="coderag",
+        POSTGRES_USER="coderag",
+        POSTGRES_PASSWORD="secret",
+    )
     engine.begin.side_effect = SqlAlchemyOperationalError(
         statement=None,
         params=None,
@@ -102,16 +113,22 @@ def test_get_connection_wraps_operational_error_without_credentials() -> None:
     )
 
     with patch(_PATCH_CREATE_ENGINE, return_value=engine):
-        factory = PostgresSessionFactory(
-            "postgresql://coderag:secret@postgres:5432/coderag"
-        )
+        factory = PostgresSessionFactory(postgres_dsn)
 
     with pytest.raises(RuntimeError) as exc_info:
         with factory.get_connection():
             pass
 
     message = str(exc_info.value)
-    assert "postgres:5432/coderag" in message
+    assert (
+        build_test_postgres_target(
+            POSTGRES_HOST="postgres",
+            POSTGRES_DB="coderag",
+            POSTGRES_USER="coderag",
+            POSTGRES_PASSWORD="secret",
+        )
+        in message
+    )
     assert "perfil 'remote'" in message
     assert "secret" not in message
 
@@ -121,9 +138,7 @@ def test_get_session_closes_session_after_use() -> None:
     engine = _fake_engine()
 
     with patch(_PATCH_CREATE_ENGINE, return_value=engine):
-        factory = PostgresSessionFactory(
-            "postgresql://user:pass@localhost:5432/db"
-        )
+        factory = PostgresSessionFactory(build_test_postgres_dsn(POSTGRES_DB="db"))
 
     with patch.object(factory, "_session_factory") as session_factory_mock:
         session = MagicMock()

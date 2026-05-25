@@ -5,12 +5,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from conftest import build_test_postgres_dsn
+
 from coderag.storage import postgres_schema_admin
 
 
 def _settings() -> SimpleNamespace:
     return SimpleNamespace(
-        resolve_postgres_dsn=lambda: "postgresql://user:pass@localhost:5432/db",
+        resolve_postgres_dsn=lambda: build_test_postgres_dsn(POSTGRES_DB="db"),
         postgres_pool_size=5,
         postgres_pool_timeout=30.0,
     )
@@ -121,7 +123,7 @@ def test_validate_reuses_startup_validation_policy(monkeypatch) -> None:
 
     assert captured == {
         "policy": "validate",
-        "dsn": "postgresql://user:pass@localhost:5432/db",
+        "dsn": build_test_postgres_dsn(POSTGRES_DB="db"),
         "force": True,
     }
     assert result == {

@@ -4,8 +4,11 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 import pytest
+
+from coderag.core.settings import Settings
 
 
 _RUN_REMOTE_E2E = os.environ.get("RUN_REMOTE_E2E", "").strip().lower() in {
@@ -34,6 +37,43 @@ if not _RUN_REMOTE_E2E:
         "REDIS_URL",
     ):
         os.environ.pop(env_var, None)
+
+
+def _test_postgres_env(name: str, default: str) -> str:
+    """Resuelve valores Postgres de prueba con fallback estable."""
+    value = os.environ.get(name, default).strip()
+    return value or default
+
+
+def build_test_postgres_settings(**overrides: Any) -> Settings:
+    """Crea Settings mínimos para derivar DSN de Postgres en pruebas."""
+    values: dict[str, Any] = {
+        "POSTGRES_HOST": _test_postgres_env("POSTGRES_HOST", "localhost"),
+        "POSTGRES_PORT": int(_test_postgres_env("POSTGRES_PORT", "5432")),
+        "POSTGRES_DB": _test_postgres_env("POSTGRES_DB", "coderag"),
+        "POSTGRES_USER": _test_postgres_env("POSTGRES_USER", "coderag"),
+        "POSTGRES_PASSWORD": _test_postgres_env(
+            "POSTGRES_PASSWORD",
+            "coderag",
+        ),
+        "_env_file": None,
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
+def build_test_postgres_dsn(**overrides: Any) -> str:
+    """Construye una DSN PostgreSQL a partir de POSTGRES_* para tests."""
+    return build_test_postgres_settings(**overrides).resolve_postgres_dsn()
+
+
+def build_test_postgres_target(**overrides: Any) -> str:
+    """Devuelve el destino saneado host:puerto/base derivado de la DSN."""
+    parsed = urlsplit(build_test_postgres_dsn(**overrides))
+    host = parsed.hostname or ""
+    port = parsed.port or 5432
+    database = unquote(parsed.path.lstrip("/"))
+    return f"{host}:{port}/{database}"
 
 
 @pytest.fixture

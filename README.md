@@ -81,7 +81,10 @@ RUNTIME_ENVIRONMENT=development
 
 Con `RUNTIME_ENVIRONMENT=development` o `test`, la API y el worker aplican
 automaticamente `alembic upgrade head` al iniciar, y si detectan un esquema
-legacy compatible sin versionado lo estampan en `head`. Con
+legacy compatible sin versionado lo estampan en `head`. Si detectan un
+esquema sin versionar equivalente a la revision `0002` al que solo le falta
+`last_queried_at` en `tbl_repository_repos`, lo estampan en `0002` y aplican
+la migracion pendiente automaticamente. Con
 `RUNTIME_ENVIRONMENT=production`, el proceso no modifica la base: solo valida
 que la revision actual ya este alineada con Alembic y falla si no lo esta.
 

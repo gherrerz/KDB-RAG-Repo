@@ -8,13 +8,14 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from conftest import build_test_postgres_dsn
 
 from coderag.storage import postgres_legacy_migration
 
 
 def _settings() -> SimpleNamespace:
     return SimpleNamespace(
-        resolve_postgres_dsn=lambda: "postgresql://user:pass@localhost:5432/db",
+        resolve_postgres_dsn=lambda: build_test_postgres_dsn(POSTGRES_DB="db"),
         postgres_pool_size=5,
         postgres_pool_timeout=30.0,
         lexical_fts_language="english",
