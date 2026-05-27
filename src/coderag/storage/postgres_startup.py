@@ -33,6 +33,7 @@ LegacySchemaState = Literal[
 
 _BOOTSTRAP_CACHE: dict[tuple[str, PostgresStartupPolicy], dict[str, Any]] = {}
 _REPO_LAST_QUERIED_AT_BASE_REVISION = "0002_drop_legacy_postgres_tables"
+_DEFAULT_ALEMBIC_VERSION_TABLE = "alembic_version_repo"
 _REQUIRED_COLUMNS_BY_TABLE: dict[str, set[str]] = {
     POSTGRES_JOBS_TABLE_NAME: {
         "id",
@@ -83,13 +84,18 @@ def _build_alembic_config(postgres_dsn: str) -> Config:
         "sqlalchemy.url",
         to_sqlalchemy_postgres_url(postgres_dsn),
     )
+    if not (config.get_main_option("version_table") or "").strip():
+        config.set_main_option("version_table", _DEFAULT_ALEMBIC_VERSION_TABLE)
     return config
 
 
 def _read_database_heads(factory: PostgresSessionFactory) -> set[str]:
     """Lee las revisiones aplicadas actualmente en la base activa."""
     with factory.get_connection() as connection:
-        context = MigrationContext.configure(connection)
+        context = MigrationContext.configure(
+            connection,
+            opts={"version_table": _DEFAULT_ALEMBIC_VERSION_TABLE},
+        )
         return set(context.get_current_heads())
 
 

@@ -20,6 +20,14 @@ if config.config_file_name is not None:
 target_metadata = POSTGRES_SCHEMA_METADATA
 
 
+def _get_alembic_version_table() -> str:
+    """Resuelve la tabla de versionado Alembic usada por este proyecto."""
+    configured_table = (config.get_main_option("version_table") or "").strip()
+    if configured_table:
+        return configured_table
+    return "alembic_version_repo"
+
+
 def _has_explicit_sqlalchemy_url(configured_url: str) -> bool:
     """Indica si la URL configurada apunta a un destino utilizable."""
     normalized = configured_url.strip()
@@ -58,6 +66,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        version_table=_get_alembic_version_table(),
     )
 
     with context.begin_transaction():
@@ -80,6 +89,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            version_table=_get_alembic_version_table(),
         )
 
         with context.begin_transaction():

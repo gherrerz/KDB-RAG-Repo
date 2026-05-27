@@ -135,3 +135,42 @@ def test_validate_reuses_startup_validation_policy(monkeypatch) -> None:
         "cached": False,
         "command": "validate",
     }
+
+
+def test_read_database_heads_uses_repo_version_table(monkeypatch) -> None:
+    """Schema admin debe leer heads desde la tabla Alembic del repo."""
+    captured: dict[str, object] = {}
+
+    class _FakeMigrationContext:
+        def get_current_heads(self) -> list[str]:
+            return ["0001_initial_postgres_schema"]
+
+    def _fake_configure(
+        connection: object,
+        opts: dict[str, object] | None = None,
+    ) -> _FakeMigrationContext:
+        captured["opts"] = opts or {}
+        return _FakeMigrationContext()
+
+    class _ConnectionContext:
+        def __enter__(self) -> object:
+            return object()
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            tb: object,
+        ) -> bool:
+            return False
+
+    factory = SimpleNamespace(get_connection=lambda: _ConnectionContext())
+
+    import alembic.runtime.migration as migration_module
+
+    monkeypatch.setattr(migration_module.MigrationContext, "configure", _fake_configure)
+
+    heads = postgres_schema_admin._read_database_heads(factory)
+
+    assert heads == {"0001_initial_postgres_schema"}
+    assert captured["opts"] == {"version_table": "alembic_version_repo"}

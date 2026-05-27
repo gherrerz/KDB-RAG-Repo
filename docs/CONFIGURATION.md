@@ -92,6 +92,12 @@ Notas operativas de storage:
 - Para esa operacion externa, el repo incluye
   `python scripts/postgres_schema_admin.py {validate|current|upgrade|stamp}`,
   que reutiliza la misma resolucion de `POSTGRES_*` del runtime.
+- Si KDB-RAG-Repo y KDB-RAG-Docs comparten la misma base Postgres,
+  cada aplicacion debe mantener su tabla Alembic aislada:
+  `alembic_version_repo` para Repo y `alembic_version_docs` para Docs.
+  No reutilices `alembic_version` por defecto en ese escenario.
+- Runbook operativo de Fase 6:
+  [migration-guides/alembic-shared-db-cutover.md](migration-guides/alembic-shared-db-cutover.md).
 - Si la base aun conserva las tablas PostgreSQL legacy `jobs`, `repos` y
   `lexical_corpus`, puedes mover esos datos al esquema actual con
   `python scripts/migrate_legacy_postgres_to_alembic.py`. El flujo primero

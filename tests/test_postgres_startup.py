@@ -241,3 +241,41 @@ def test_production_validate_succeeds_when_heads_match(
 
     assert result["policy"] == "validate"
     assert result["action"] == "validated"
+
+
+def test_read_database_heads_uses_repo_version_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La lectura de heads debe usar la tabla Alembic aislada del repo."""
+    captured: dict[str, object] = {}
+
+    class _FakeMigrationContext:
+        def get_current_heads(self) -> list[str]:
+            return ["0001_initial_postgres_schema"]
+
+    def _fake_configure(
+        connection: object,
+        opts: dict[str, object] | None = None,
+    ) -> _FakeMigrationContext:
+        captured["opts"] = opts or {}
+        return _FakeMigrationContext()
+
+    class _ConnectionContext:
+        def __enter__(self) -> object:
+            return object()
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            tb: object,
+        ) -> bool:
+            return False
+
+    factory = SimpleNamespace(get_connection=lambda: _ConnectionContext())
+    monkeypatch.setattr(postgres_startup.MigrationContext, "configure", _fake_configure)
+
+    heads = postgres_startup._read_database_heads(factory)
+
+    assert heads == {"0001_initial_postgres_schema"}
+    assert captured["opts"] == {"version_table": "alembic_version_repo"}

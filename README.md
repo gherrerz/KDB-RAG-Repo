@@ -88,6 +88,11 @@ la migracion pendiente automaticamente. Con
 `RUNTIME_ENVIRONMENT=production`, el proceso no modifica la base: solo valida
 que la revision actual ya este alineada con Alembic y falla si no lo esta.
 
+Cuando este servicio comparte la misma base Postgres con KDB-RAG-Docs,
+Alembic queda aislado por aplicacion: KDB-RAG-Repo usa
+`alembic_version_repo` y KDB-RAG-Docs usa `alembic_version_docs`.
+No mezcles cadenas de revision entre esas dos tablas.
+
 Para operar Alembic manualmente con la misma resolucion de `POSTGRES_*` del
 runtime, usa el helper del repo:
 
@@ -118,6 +123,10 @@ el runner operativo:
 
 Ese runner ejecuta `current`, migracion legacy, `validate` y exporta evidencia
 JSON + checklist Markdown para revision operativa.
+
+Para el flujo de Fase 6 en base Postgres compartida con KDB-RAG-Docs,
+consulta tambien la guia operativa:
+[docs/migration-guides/alembic-shared-db-cutover.md](docs/migration-guides/alembic-shared-db-cutover.md).
 
 Si quieres cerrar tambien los checks manuales en el mismo artefacto, agrega
 `--confirm-backup`, `--confirm-rollback` y `--confirm-retain-legacy`.

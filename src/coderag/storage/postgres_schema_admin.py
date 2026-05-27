@@ -21,6 +21,7 @@ from coderag.storage.postgres_startup import ensure_postgres_schema_ready
 
 
 SchemaAdminCommand = Literal["current", "upgrade", "stamp", "validate"]
+_DEFAULT_ALEMBIC_VERSION_TABLE = "alembic_version_repo"
 
 
 class _ValidationSettingsProxy:
@@ -62,6 +63,8 @@ def _build_alembic_config(postgres_dsn: str) -> Config:
         "sqlalchemy.url",
         to_sqlalchemy_postgres_url(postgres_dsn),
     )
+    if not (config.get_main_option("version_table") or "").strip():
+        config.set_main_option("version_table", _DEFAULT_ALEMBIC_VERSION_TABLE)
     return config
 
 
@@ -70,7 +73,10 @@ def _read_database_heads(factory: PostgresSessionFactory) -> set[str]:
     with factory.get_connection() as connection:
         from alembic.runtime.migration import MigrationContext
 
-        context = MigrationContext.configure(connection)
+        context = MigrationContext.configure(
+            connection,
+            opts={"version_table": _DEFAULT_ALEMBIC_VERSION_TABLE},
+        )
         return set(context.get_current_heads())
 
 

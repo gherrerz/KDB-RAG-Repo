@@ -56,9 +56,22 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Tracking operativo `last_queried_at` por repositorio en metadata runtime y
     nuevo endpoint `GET /repos/last-query/stale` para listar repositorios sin
     consultas recientes o nunca consultados.
+- Nueva guia operativa de Fase 6 para cutover Alembic en base Postgres
+    compartida con KDB-RAG-Docs:
+    `docs/migration-guides/alembic-shared-db-cutover.md`.
+- Politica de retiro controlado para la tabla `alembic_version` legacy,
+    con ventana minima de observacion, validaciones previas y estrategia
+    reversible rename-then-drop en la guia de cutover compartido.
 
 ### Changed
 
+- El versionado Alembic queda aislado por aplicacion cuando KDB-RAG-Repo y
+    KDB-RAG-Docs comparten la misma base Postgres: Repo usa
+    `alembic_version_repo` y Docs usa `alembic_version_docs`, evitando
+    colisiones en `alembic_version`.
+- Se agregan guardrails de CI para bloquear regresiones hacia
+    `alembic_version` default en rutas criticas de migracion y bootstrap
+    (`tests/test_alembic_version_contract.py`).
 - Se elimina la variable monolitica legacy de conexion Postgres del contrato de configuracion; el runtime, Compose,
   Kubernetes y scripts pasan a usar `POSTGRES_HOST`, `POSTGRES_PORT`,
   `POSTGRES_DB`, `POSTGRES_USER` y `POSTGRES_PASSWORD`.
