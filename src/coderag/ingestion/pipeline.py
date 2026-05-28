@@ -31,7 +31,9 @@ from coderag.ingestion.index_chroma import ChromaIndex
 from coderag.ingestion.repo_scanner import scan_repository_with_stats
 from coderag.ingestion.semantic_java import extract_java_semantic_relations
 from coderag.ingestion.semantic_javascript import extract_javascript_semantic_relations
+from coderag.ingestion.semantic_kotlin import extract_kotlin_semantic_relations
 from coderag.ingestion.semantic_python import extract_python_semantic_relations
+from coderag.ingestion.semantic_swift import extract_swift_semantic_relations
 from coderag.ingestion.semantic_typescript import extract_typescript_semantic_relations
 from coderag.ingestion.summarizer import summarize_file, summarize_modules
 
@@ -513,6 +515,12 @@ def _index_graph(
     typescript_semantic_enabled = bool(
         getattr(settings, "semantic_graph_typescript_enabled", False)
     )
+    kotlin_semantic_enabled = bool(
+        getattr(settings, "semantic_graph_kotlin_enabled", False)
+    )
+    swift_semantic_enabled = bool(
+        getattr(settings, "semantic_graph_swift_enabled", False)
+    )
     semantic_relations: list[SemanticRelation] = []
     file_import_relations: list[FileImportRelation] = []
 
@@ -524,6 +532,8 @@ def _index_graph(
         java_resolution_source_counts: dict[str, int] = {}
         javascript_resolution_source_counts: dict[str, int] = {}
         typescript_resolution_source_counts: dict[str, int] = {}
+        kotlin_resolution_source_counts: dict[str, int] = {}
+        swift_resolution_source_counts: dict[str, int] = {}
         try:
             python_relations = extract_python_semantic_relations(
                 repo_id=repo_id,
@@ -558,6 +568,22 @@ def _index_graph(
                     resolution_stats_sink=typescript_resolution_source_counts,
                 )
                 semantic_relations.extend(typescript_relations)
+            if kotlin_semantic_enabled:
+                kotlin_relations = extract_kotlin_semantic_relations(
+                    repo_id=repo_id,
+                    scanned_files=scanned_files,
+                    symbols=symbols,
+                    resolution_stats_sink=kotlin_resolution_source_counts,
+                )
+                semantic_relations.extend(kotlin_relations)
+            if swift_semantic_enabled:
+                swift_relations = extract_swift_semantic_relations(
+                    repo_id=repo_id,
+                    scanned_files=scanned_files,
+                    symbols=symbols,
+                    resolution_stats_sink=swift_resolution_source_counts,
+                )
+                semantic_relations.extend(swift_relations)
         except Exception as exc:
             extraction_failed = True
             extraction_error = str(exc)
@@ -599,6 +625,22 @@ def _index_graph(
             and symbol_path_by_id.get(item.target_symbol_id, item.path) != item.path
         ]
         typescript_cross_file_resolved_count = len(typescript_cross_file_relations)
+        kotlin_cross_file_relations = [
+            item
+            for item in semantic_relations
+            if item.language == "kotlin"
+            and item.target_symbol_id is not None
+            and symbol_path_by_id.get(item.target_symbol_id, item.path) != item.path
+        ]
+        kotlin_cross_file_resolved_count = len(kotlin_cross_file_relations)
+        swift_cross_file_relations = [
+            item
+            for item in semantic_relations
+            if item.language == "swift"
+            and item.target_symbol_id is not None
+            and symbol_path_by_id.get(item.target_symbol_id, item.path) != item.path
+        ]
+        swift_cross_file_resolved_count = len(swift_cross_file_relations)
         (
             python_top_level_file_import_count,
             python_top_level_file_import_internal_count,
@@ -629,6 +671,8 @@ def _index_graph(
                 f"java_cross_file_resolved_by_type={java_cross_file_resolved_by_type}, "
                 f"javascript_cross_file_resolved_count={javascript_cross_file_resolved_count}, "
                 f"typescript_cross_file_resolved_count={typescript_cross_file_resolved_count}, "
+                f"kotlin_cross_file_resolved_count={kotlin_cross_file_resolved_count}, "
+                f"swift_cross_file_resolved_count={swift_cross_file_resolved_count}, "
                 f"python_resolution_source_counts={python_resolution_source_counts}, "
                 f"python_top_level_file_import_count={python_top_level_file_import_count}, "
                 "python_top_level_file_import_internal_count="
@@ -638,6 +682,8 @@ def _index_graph(
                 f"java_resolution_source_counts={java_resolution_source_counts}, "
                 f"javascript_resolution_source_counts={javascript_resolution_source_counts}, "
                 f"typescript_resolution_source_counts={typescript_resolution_source_counts}, "
+                f"kotlin_resolution_source_counts={kotlin_resolution_source_counts}, "
+                f"swift_resolution_source_counts={swift_resolution_source_counts}, "
                 f"unresolved_count={unresolved_count}, "
                 f"unresolved_by_type={unresolved_by_type}, "
                 f"unresolved_ratio={unresolved_ratio}, "
@@ -659,6 +705,12 @@ def _index_graph(
                 "typescript_cross_file_resolved_count": (
                     typescript_cross_file_resolved_count
                 ),
+                "kotlin_cross_file_resolved_count": (
+                    kotlin_cross_file_resolved_count
+                ),
+                "swift_cross_file_resolved_count": (
+                    swift_cross_file_resolved_count
+                ),
                 "python_resolution_source_counts": python_resolution_source_counts,
                 "python_top_level_file_import_count": (
                     python_top_level_file_import_count
@@ -676,6 +728,8 @@ def _index_graph(
                 "typescript_resolution_source_counts": (
                     typescript_resolution_source_counts
                 ),
+                "kotlin_resolution_source_counts": kotlin_resolution_source_counts,
+                "swift_resolution_source_counts": swift_resolution_source_counts,
                 "unresolved_count": unresolved_count,
                 "unresolved_by_type": unresolved_by_type,
                 "unresolved_ratio": unresolved_ratio,
@@ -694,6 +748,8 @@ def _index_graph(
             "java_cross_file_resolved_by_type": {},
             "javascript_cross_file_resolved_count": 0,
             "typescript_cross_file_resolved_count": 0,
+            "kotlin_cross_file_resolved_count": 0,
+            "swift_cross_file_resolved_count": 0,
             "python_resolution_source_counts": {},
             "python_top_level_file_import_count": 0,
             "python_top_level_file_import_internal_count": 0,
@@ -701,6 +757,8 @@ def _index_graph(
             "java_resolution_source_counts": {},
             "javascript_resolution_source_counts": {},
             "typescript_resolution_source_counts": {},
+            "kotlin_resolution_source_counts": {},
+            "swift_resolution_source_counts": {},
             "unresolved_count": 0,
             "unresolved_by_type": {},
             "unresolved_ratio": 0.0,

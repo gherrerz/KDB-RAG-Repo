@@ -62,6 +62,21 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Politica de retiro controlado para la tabla `alembic_version` legacy,
     con ventana minima de observacion, validaciones previas y estrategia
     reversible rename-then-drop en la guia de cutover compartido.
+- Soporte AST embebido con Tree-sitter para Kotlin y Swift en la ingesta,
+    sin sidecars JVM ni toolchain Swift adicional.
+- Nuevos extractores estructurales Kotlin y Swift con spans exactos y snippets
+    completos integrados al chunker por registry.
+- Nuevas flags `SEMANTIC_GRAPH_KOTLIN_ENABLED` y
+    `SEMANTIC_GRAPH_SWIFT_ENABLED` para habilitar semantica gradual por
+    lenguaje.
+- Nueva semantica Kotlin de Fase 1 para `IMPORTS`, `CALLS`, `EXTENDS` e
+    `IMPLEMENTS`, con cobertura intrafile y cross-file basica.
+- Nueva semantica Swift de Fase 1 para `IMPORTS`, `CALLS`, `EXTENDS` e
+    `IMPLEMENTS`, con soporte de `extension`, `associatedtype`, `where`
+    constraints y desambiguacion basica cross-file.
+- Validacion manual de cierre de Fase 1 para Kotlin y Swift sobre archivos
+    reales temporales usando `scan_repository()`, `extract_symbol_chunks()` y
+    semantica por lenguaje.
 
 ### Changed
 
@@ -188,3 +203,15 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - El bootstrap de PostgreSQL ya no estampa como `head` bases legacy parciales o
     incompatibles: ahora exige tablas y columnas requeridas antes de considerar
     un esquema legacy como compatible.
+- El scanner ahora clasifica archivos `.kt` como `kotlin` y `.swift` como
+    `swift`, y el pipeline de grafo puede procesar ambos lenguajes detras de sus
+    flags dedicadas.
+- La semantica Swift amplía la inferencia de receivers sin introducir nuevos
+    relation types: ahora reutiliza contexto de `extension`, propiedades del
+    tipo, herencia, imports/modulo, aliases locales, optional bindings y
+    constraints de `associatedtype`/`where`.
+- La resolucion de `CALLS` en Swift ahora normaliza wrappers livianos que
+    preservan el tipo de elemento, incluyendo optionals, arrays tipados,
+    subscript de colecciones, `first`, `last`, `lazy`, `dropFirst`, `dropLast`,
+    `prefix`, `suffix`, `reversed`, `sorted` y `filter { ... }` cuando el
+    receiver observable sigue siendo el mismo tipo base.

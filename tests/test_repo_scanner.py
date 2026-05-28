@@ -15,6 +15,8 @@ def test_detect_language_maps_frontend_extensions() -> None:
     assert detect_language(Path("component.tsx")) == "typescript"
     assert detect_language(Path("component.js")) == "javascript"
     assert detect_language(Path("component.ts")) == "typescript"
+    assert detect_language(Path("feature.kt")) == "kotlin"
+    assert detect_language(Path("Screen.swift")) == "swift"
 
 
 def test_scan_repository_excludes_dirs_extensions_and_large_files(tmp_path: Path) -> None:

@@ -197,6 +197,8 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 - `SEMANTIC_GRAPH_JAVA_ENABLED`: activa extractor semantico Java fase 1. Default: `true`.
 - `SEMANTIC_GRAPH_JAVASCRIPT_ENABLED`: activa extractor semantico JavaScript fase 1. Default: `true`.
 - `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED`: activa extractor semantico TypeScript fase 1. Default: `true`.
+- `SEMANTIC_GRAPH_KOTLIN_ENABLED`: activa extractor semantico Kotlin fase 1. Default: `true`.
+- `SEMANTIC_GRAPH_SWIFT_ENABLED`: activa extractor semantico Swift fase 1. Default: `true`.
 - `SEMANTIC_GRAPH_FILE_EDGES_ENABLED`: persiste aristas derivadas `(:File)-[:IMPORTS_FILE]->(:File)` a partir de relaciones semanticas resueltas. Default: `true`.
 - `SEMANTIC_TSCONFIG_RESOLUTION_ENABLED`: habilita resolucion de `baseUrl` y `paths` desde el primer `tsconfig.json` o `jsconfig.json` escaneado para imports JS/TS no relativos. Default: `true`.
 - `SEMANTIC_GRAPH_QUERY_ENABLED`: activa expansion semantica en query. Default: `true`.
@@ -227,6 +229,7 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 - `INVENTORY_ALIAS_LIMIT`: maximo de aliases por entidad en respuesta. Default: `8`.
 - `INVENTORY_ENTITY_LIMIT`: maximo de entidades devueltas por consulta de inventario. Default: `500`.
 - `SYMBOL_EXTRACTOR_V2_ENABLED`: activa extractor de simbolos v2. Default: `true`.
+- Con `SYMBOL_EXTRACTOR_V2_ENABLED=true`, Kotlin (`.kt`) y Swift (`.swift`) usan extractores Tree-sitter para spans estructurales fase 1.
 
 ## Ejemplo minimo recomendado (.env local)
 
@@ -289,8 +292,54 @@ query, health y reset, porque el runtime comparte el mismo cliente HTTP.
 - Si `SEMANTIC_GRAPH_ENABLED=true`, la ingesta agrega relaciones Python y usa
   fallback automatico al grafo estructural si falla la extraccion semantica.
 - Si `SEMANTIC_GRAPH_JAVA_ENABLED=true` o
-  `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED=true`, se activan extractores fase 1 para
+  `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED=true`, `SEMANTIC_GRAPH_KOTLIN_ENABLED=true`
+  o `SEMANTIC_GRAPH_SWIFT_ENABLED=true`, se activan extractores fase 1 para
   esos lenguajes.
+- En Swift, la fase semántica actual también contempla relaciones básicas
+  originadas en métodos y contextos declarados dentro de `extension`.
+- Cuando existen tipos Swift homónimos en más de un archivo, el resolvedor
+  semántico intenta desambiguar usando módulos `import` simples y segmentos del
+  path del repositorio antes de caer a `unresolved`.
+- En relaciones `CALLS`, Swift también usa owner hints de llamadas cualificadas
+  como `Service.execute()` o `Payments.Service.execute()` para desambiguar
+  métodos homónimos entre módulos cuando el contexto lo permite.
+- Para llamadas sobre receivers inferidos como `dependency.call()`, Swift ahora
+  aprovecha tipos explícitos de parámetros y bindings locales simples
+  (`let`/`var`) para derivar owner hints sin resolver un sistema de tipos
+  completo.
+- Esa inferencia también cubre propiedades tipadas del tipo contenedor y accesos
+  directos o vía `self`, por ejemplo `dependency.call()` y
+  `self.dependency.call()` dentro de métodos de instancia.
+- En métodos definidos dentro de `extension`, Swift también reutiliza propiedades
+  tipadas declaradas en el tipo original cuando el archivo pertenece al mismo
+  contexto lógico del tipo.
+- La inferencia también compone propiedades heredadas desde base classes y
+  requisitos de protocolos cuando el tipo padre/protocolo puede desambiguarse
+  localmente por contexto de directorio o candidato único.
+- Si el ancestro está duplicado entre módulos, Swift también usa imports del
+  archivo y paths de módulo explícitos en la herencia para elegir el ancestro
+  correcto antes de componer sus propiedades heredadas.
+- Para protocolos con `associatedtype` y extensiones con `where`, Swift puede
+  sustituir placeholders genéricos por su constraint (`Dependency: Service`) o
+  por igualdades explícitas (`Dependency == Payments.Service`) antes de resolver
+  llamadas sobre propiedades como `dependency.call()`.
+- Esa sustitución también se propaga a aliases locales simples dentro del método,
+  por ejemplo `let current = dependency; let next = current; next.call()`.
+- La propagación local también cubre aliases vía `self.currentDependency` y
+  bindings condicionales simples como `if let current = dependency` o
+  `guard let fallback = self.dependency`.
+- En wrappers simples, Swift normaliza optionals y arrays tipados para resolver
+  llamadas como `optionalDependency?.call()`, `dependencies[0].call()` o
+  aliases como `let current = dependencies[0]; current.call()`.
+- La misma normalización cubre accesos de conveniencia sobre colecciones como
+  `dependencies.first?.call()`, `dependencies.last?.call()` y variantes
+  encadenadas sobre optionals como `optionalDependencies?.first?.call()`.
+- También cubre wrappers livianos del Collection API que preservan el tipo de
+  elemento, por ejemplo `dependencies.lazy.first?.call()` o
+  `dependencies.dropFirst().first?.call()`.
+- La normalización se extiende a wrappers más profundos de secuencia que siguen
+  preservando el elemento, como `reversed()`, `sorted()` o `filter { ... }`
+  antes de un acceso final tipo `first?.call()`.
 - Si `SEMANTIC_TSCONFIG_RESOLUTION_ENABLED=true`, los extractores JS/TS intentan
   resolver imports no relativos usando `compilerOptions.baseUrl` y
   `compilerOptions.paths` del primer `tsconfig.json` o `jsconfig.json` disponible.

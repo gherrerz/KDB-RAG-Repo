@@ -266,6 +266,14 @@ class Settings(BaseSettings):
         default=True,
         alias="SEMANTIC_GRAPH_TYPESCRIPT_ENABLED",
     )
+    semantic_graph_kotlin_enabled: bool = Field(
+        default=True,
+        alias="SEMANTIC_GRAPH_KOTLIN_ENABLED",
+    )
+    semantic_graph_swift_enabled: bool = Field(
+        default=True,
+        alias="SEMANTIC_GRAPH_SWIFT_ENABLED",
+    )
     semantic_graph_file_edges_enabled: bool = Field(
         default=True,
         alias="SEMANTIC_GRAPH_FILE_EDGES_ENABLED",

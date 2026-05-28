@@ -16,6 +16,12 @@ de codigo con evidencia verificable (archivos y lineas).
   EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
 - Permite habilitar grafo semantico TypeScript fase 1 (IMPORTS,
   EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
+- Permite habilitar extraccion AST de simbolos Kotlin y Swift con Tree-sitter
+  para la ingesta estructural fase 1.
+- Permite habilitar grafo semantico Kotlin fase 1 (IMPORTS,
+  EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
+- Permite habilitar grafo semantico Swift fase 1 (IMPORTS,
+  EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
 - Permite habilitar expansion semantica en query con filtros por tipo de
   relacion y budgets de nodos/aristas/latencia.
 - Responde consultas por dos rutas:

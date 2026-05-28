@@ -53,6 +53,70 @@ def test_extract_symbol_chunks_python_def_and_class() -> None:
     assert "run" in names
 
 
+def test_extract_symbol_chunks_kotlin_class_method_constructor() -> None:
+    """Extrae símbolos Kotlin de Fase 1 a través del chunker común."""
+    scanned = [
+        ScannedFile(
+            path="app/Demo.kt",
+            language="kotlin",
+            content=(
+                "class Demo(val value: Int) {\n"
+                "    constructor(): this(0)\n"
+                "    fun run() {\n"
+                "        println(value)\n"
+                "    }\n"
+                "}\n\n"
+                "fun helper() {}\n"
+            ),
+        )
+    ]
+
+    chunks = extract_symbol_chunks(repo_id="repo1", scanned_files=scanned)
+    pairs = {(item.symbol_type, item.symbol_name) for item in chunks}
+
+    assert ("class", "Demo") in pairs
+    assert ("constructor", "Demo") in pairs
+    assert ("method", "run") in pairs
+    assert ("function", "helper") in pairs
+
+
+def test_extract_symbol_chunks_swift_class_struct_protocol_init() -> None:
+    """Extrae símbolos Swift de Fase 1 a través del chunker común."""
+    scanned = [
+        ScannedFile(
+            path="app/Demo.swift",
+            language="swift",
+            content=(
+                "class Demo {\n"
+                "    init() {}\n"
+                "    func run() {}\n"
+                "}\n\n"
+                "extension Demo {\n"
+                "    func extendedRun() {}\n"
+                "}\n\n"
+                "struct Model {}\n\n"
+                "protocol Contract {\n"
+                "    func contractRun()\n"
+                "}\n\n"
+                "func helper() {}\n"
+            ),
+        )
+    ]
+
+    chunks = extract_symbol_chunks(repo_id="repo1", scanned_files=scanned)
+    pairs = {(item.symbol_type, item.symbol_name) for item in chunks}
+
+    assert ("class", "Demo") in pairs
+    assert ("constructor", "Demo") in pairs
+    assert ("extension", "Demo") in pairs
+    assert ("method", "run") in pairs
+    assert ("method", "extendedRun") in pairs
+    assert ("method", "contractRun") in pairs
+    assert ("struct", "Model") in pairs
+    assert ("protocol", "Contract") in pairs
+    assert ("function", "helper") in pairs
+
+
 def test_extract_symbol_chunks_python_long_symbol_uses_full_span(
     monkeypatch,
 ) -> None:

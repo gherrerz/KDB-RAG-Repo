@@ -4,7 +4,9 @@ from coderag.ingestion.extractors.base import SymbolExtractor
 from coderag.ingestion.extractors.generic_fallback import GenericFallbackExtractor
 from coderag.ingestion.extractors.java_brace import JavaBraceExtractor
 from coderag.ingestion.extractors.javascript_brace import JavaScriptBraceExtractor
+from coderag.ingestion.extractors.kotlin_treesitter import KotlinTreeSitterExtractor
 from coderag.ingestion.extractors.python_ast import PythonAstExtractor
+from coderag.ingestion.extractors.swift_treesitter import SwiftTreeSitterExtractor
 
 
 class LanguageExtractorRegistry:
@@ -17,6 +19,8 @@ class LanguageExtractorRegistry:
             "python": PythonAstExtractor(),
             "java": JavaBraceExtractor(),
             "javascript": JavaScriptBraceExtractor(),
+            "kotlin": KotlinTreeSitterExtractor(),
+            "swift": SwiftTreeSitterExtractor(),
             "typescript": JavaScriptBraceExtractor(),
             "js": JavaScriptBraceExtractor(),
             "ts": JavaScriptBraceExtractor(),

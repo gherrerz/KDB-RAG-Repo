@@ -16,6 +16,8 @@ Este documento describe el framework modular de extraccion de simbolos usado por
   - `PythonAstExtractor`
   - `JavaBraceExtractor`
   - `JavaScriptBraceExtractor` (reutilizado para TypeScript)
+    - `KotlinTreeSitterExtractor`
+    - `SwiftTreeSitterExtractor`
   - `GenericFallbackExtractor`
 
 Cobertura frontend actual del extractor ECMAScript:
@@ -32,6 +34,8 @@ La resolucion ocurre por `language` normalizado en minusculas:
 - `python` -> `PythonAstExtractor`
 - `java` -> `JavaBraceExtractor`
 - `javascript`, `js`, `typescript`, `ts` -> `JavaScriptBraceExtractor`
+- `kotlin` -> `KotlinTreeSitterExtractor`
+- `swift` -> `SwiftTreeSitterExtractor`
 - cualquier otro -> `GenericFallbackExtractor`
 
 Notas prácticas para React y Next.js:
@@ -56,6 +60,13 @@ La variable se lee desde `Settings.symbol_extractor_v2_enabled`.
 
 La extracción semántica de JavaScript usa un flag separado `SEMANTIC_GRAPH_JAVASCRIPT_ENABLED`.
 La de TypeScript mantiene `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED`.
+La de Kotlin usa `SEMANTIC_GRAPH_KOTLIN_ENABLED`.
+La de Swift usa `SEMANTIC_GRAPH_SWIFT_ENABLED`.
+
+Para Kotlin y Swift, la fase estructural actual usa Tree-sitter y cubre
+tipos top-level, métodos, constructores y funciones top-level con resolución
+de spans multilinea. En Swift también se indexan declaraciones `extension`
+y los métodos declarados dentro de esas extensiones.
 
 En TypeScript, la fase semántica también infiere relaciones `CALLS` desde uso de
 componentes JSX/TSX como `<Button />`, además de llamadas tradicionales con

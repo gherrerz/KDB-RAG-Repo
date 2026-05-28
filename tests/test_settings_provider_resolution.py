@@ -254,6 +254,20 @@ def test_semantic_graph_javascript_flag_defaults_to_true() -> None:
     assert settings.semantic_graph_javascript_enabled is True
 
 
+def test_semantic_graph_kotlin_flag_defaults_to_true() -> None:
+    """Mantiene habilitada la extracción semántica Kotlin por defecto."""
+    settings = Settings(_env_file=None)
+
+    assert settings.semantic_graph_kotlin_enabled is True
+
+
+def test_semantic_graph_swift_flag_defaults_to_true() -> None:
+    """Mantiene habilitada la extracción semántica Swift por defecto."""
+    settings = Settings(_env_file=None)
+
+    assert settings.semantic_graph_swift_enabled is True
+
+
 def test_semantic_graph_query_flags_defaults() -> None:
     """Configura por defecto la expansión semántica de query habilitada."""
     settings = Settings(_env_file=None)

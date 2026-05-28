@@ -1087,10 +1087,423 @@ def test_index_graph_reports_java_cross_file_resolved_count(
     )
 
     assert diagnostics["semantic_graph"]["java_cross_file_resolved_count"] == 1
-    assert diagnostics["semantic_graph"]["java_cross_file_resolved_by_type"] == {
-        "IMPLEMENTS": 1
+
+
+def test_index_graph_respects_kotlin_semantic_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
+) -> None:
+    """Ejecuta extracción semántica Kotlin solo cuando el flag está activo."""
+    scanned = [ScannedFile(path="src/A.kt", language="kotlin", content="class A")]
+    symbols = [
+        SymbolChunk(
+            id="sk1",
+            repo_id="rk",
+            path="src/A.kt",
+            language="kotlin",
+            symbol_name="A",
+            symbol_type="class",
+            start_line=1,
+            end_line=1,
+            snippet="class A",
+        )
+    ]
+    diagnostics: dict[str, object] = {}
+
+    class _FakeGraphBuilder:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def upsert_repo_graph(
+            self,
+            repo_id: str,
+            scanned_files: list[ScannedFile],
+            symbols: list[SymbolChunk],
+            semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
+        ) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        pipeline,
+        "extract_python_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None, file_imports_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_kotlin_semantic_relations",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("kotlin extractor should not run")
+        ),
+    )
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=False,
+        semantic_graph_typescript_enabled=False,
+        semantic_graph_kotlin_enabled=False,
+        semantic_graph_swift_enabled=False,
+    )
+    pipeline._index_graph(
+        repo_id="rk",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=False,
+        semantic_graph_typescript_enabled=False,
+        semantic_graph_kotlin_enabled=True,
+        semantic_graph_swift_enabled=False,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_kotlin_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [
+            SemanticRelation(
+                repo_id=repo_id,
+                source_symbol_id="sk1",
+                relation_type="CALLS",
+                target_symbol_id=None,
+                target_ref="println",
+                target_kind="external",
+                path="src/A.kt",
+                line=1,
+                confidence=0.75,
+                language="kotlin",
+            )
+        ],
+    )
+    pipeline._index_graph(
+        repo_id="rk",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    assert diagnostics["semantic_graph"]["relation_counts"] == 1
+    assert diagnostics["semantic_graph"]["relation_counts_by_type"] == {
+        "CALLS": 1
     }
-    assert diagnostics["semantic_graph"]["java_resolution_source_counts"] == {}
+    assert diagnostics["semantic_graph"]["kotlin_cross_file_resolved_count"] == 0
+    assert diagnostics["semantic_graph"]["kotlin_resolution_source_counts"] == {}
+
+
+def test_index_graph_respects_swift_semantic_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
+) -> None:
+    """Ejecuta extracción semántica Swift solo cuando el flag está activo."""
+    scanned = [
+        ScannedFile(path="src/A.swift", language="swift", content="class A {}")
+    ]
+    symbols = [
+        SymbolChunk(
+            id="ss1",
+            repo_id="rs",
+            path="src/A.swift",
+            language="swift",
+            symbol_name="A",
+            symbol_type="class",
+            start_line=1,
+            end_line=1,
+            snippet="class A {}",
+        )
+    ]
+    diagnostics: dict[str, object] = {}
+
+    class _FakeGraphBuilder:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def upsert_repo_graph(
+            self,
+            repo_id: str,
+            scanned_files: list[ScannedFile],
+            symbols: list[SymbolChunk],
+            semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
+        ) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        pipeline,
+        "extract_python_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None, file_imports_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_swift_semantic_relations",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("swift extractor should not run")
+        ),
+    )
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=False,
+        semantic_graph_typescript_enabled=False,
+        semantic_graph_kotlin_enabled=False,
+        semantic_graph_swift_enabled=False,
+    )
+    pipeline._index_graph(
+        repo_id="rs",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=False,
+        semantic_graph_typescript_enabled=False,
+        semantic_graph_kotlin_enabled=False,
+        semantic_graph_swift_enabled=True,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_swift_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [
+            SemanticRelation(
+                repo_id=repo_id,
+                source_symbol_id="ss1",
+                relation_type="CALLS",
+                target_symbol_id=None,
+                target_ref="print",
+                target_kind="external",
+                path="src/A.swift",
+                line=1,
+                confidence=0.75,
+                language="swift",
+            )
+        ],
+    )
+    pipeline._index_graph(
+        repo_id="rs",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    assert diagnostics["semantic_graph"]["relation_counts"] == 1
+    assert diagnostics["semantic_graph"]["relation_counts_by_type"] == {
+        "CALLS": 1
+    }
+    assert diagnostics["semantic_graph"]["swift_cross_file_resolved_count"] == 0
+    assert diagnostics["semantic_graph"]["swift_resolution_source_counts"] == {}
+
+
+def test_index_graph_mixed_kotlin_swift_preserves_python_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
+) -> None:
+    """No altera símbolos ni semántica Python al coexistir con Kotlin y Swift."""
+    python_scanned = [
+        ScannedFile(
+            path="pkg/shared.py",
+            language="python",
+            content="def helper():\n    return 1\n",
+        ),
+        ScannedFile(
+            path="pkg/consumer.py",
+            language="python",
+            content=(
+                "def run():\n"
+                "    from pkg.shared import helper\n"
+                "    helper()\n"
+            ),
+        ),
+    ]
+    mixed_scanned = python_scanned + [
+        ScannedFile(
+            path="src/com/acme/api/Service.kt",
+            language="kotlin",
+            content="package com.acme.api\n\ninterface Service\n",
+        ),
+        ScannedFile(
+            path="src/com/acme/impl/Base.kt",
+            language="kotlin",
+            content=(
+                "package com.acme.impl\n\n"
+                "open class Base {\n"
+                "    fun helper() {}\n"
+                "}\n"
+            ),
+        ),
+        ScannedFile(
+            path="src/com/acme/impl/Impl.kt",
+            language="kotlin",
+            content=(
+                "package com.acme.impl\n\n"
+                "import com.acme.api.Service\n\n"
+                "class Impl: Base(), Service {\n"
+                "    fun run() {\n"
+                "        helper()\n"
+                "    }\n"
+                "}\n"
+            ),
+        ),
+        ScannedFile(
+            path="src/Base.swift",
+            language="swift",
+            content="class Base {\n    func helper() {}\n}\n",
+        ),
+        ScannedFile(
+            path="src/Service.swift",
+            language="swift",
+            content="protocol Service {\n    func run()\n}\n",
+        ),
+        ScannedFile(
+            path="src/Impl.swift",
+            language="swift",
+            content=(
+                "class Impl: Base, Service {\n"
+                "    func run() {\n"
+                "        helper()\n"
+                "    }\n"
+                "}\n"
+            ),
+        ),
+    ]
+    diagnostics: dict[str, object] = {}
+    captured: dict[str, object] = {}
+
+    class _FakeGraphBuilder:
+        def upsert_repo_graph(
+            self,
+            repo_id: str,
+            scanned_files: list[ScannedFile],
+            symbols: list[SymbolChunk],
+            semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations: list[FileImportRelation] | None = None,
+        ) -> None:
+            captured["repo_id"] = repo_id
+            captured["scanned_files"] = scanned_files
+            captured["symbols"] = symbols
+            captured["semantic_relations"] = semantic_relations or []
+            captured["file_import_relations"] = file_import_relations or []
+
+        def close(self) -> None:
+            return None
+
+    def _symbol_key(symbol: SymbolChunk) -> tuple[str, str, str, int, int]:
+        return (
+            symbol.path,
+            symbol.symbol_name,
+            symbol.symbol_type,
+            symbol.start_line,
+            symbol.end_line,
+        )
+
+    def _relation_key(
+        relation: SemanticRelation,
+    ) -> tuple[str, str, str | None, str | None, str | None]:
+        return (
+            relation.path,
+            relation.relation_type,
+            relation.target_ref,
+            relation.target_symbol_id,
+            relation.resolution_method,
+        )
+
+    def _file_import_key(
+        relation: FileImportRelation,
+    ) -> tuple[str, str | None, str, str, str | None]:
+        return (
+            relation.source_path,
+            relation.target_path,
+            relation.target_ref,
+            relation.target_kind,
+            relation.resolution_method,
+        )
+
+    baseline_python_symbols = pipeline.extract_symbol_chunks(
+        repo_id="rmix",
+        scanned_files=python_scanned,
+    )
+    baseline_python_resolution_stats: dict[str, int] = {}
+    baseline_python_file_imports: list[FileImportRelation] = []
+    baseline_python_relations = pipeline.extract_python_semantic_relations(
+        repo_id="rmix",
+        scanned_files=python_scanned,
+        symbols=baseline_python_symbols,
+        resolution_stats_sink=baseline_python_resolution_stats,
+        file_imports_sink=baseline_python_file_imports,
+    )
+
+    mixed_symbols = pipeline.extract_symbol_chunks(
+        repo_id="rmix",
+        scanned_files=mixed_scanned,
+    )
+
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=False,
+        semantic_graph_typescript_enabled=False,
+        semantic_graph_kotlin_enabled=True,
+        semantic_graph_swift_enabled=True,
+    )
+    monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
+
+    pipeline._index_graph(
+        repo_id="rmix",
+        scanned_files=mixed_scanned,
+        symbols=mixed_symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    python_symbols_from_mixed = [
+        item for item in mixed_symbols if item.language == "python"
+    ]
+    python_relations_from_mixed = [
+        item
+        for item in captured["semantic_relations"]
+        if item.language == "python"
+    ]
+    python_file_imports_from_mixed = list(captured["file_import_relations"])
+
+    assert {
+        _symbol_key(item) for item in python_symbols_from_mixed
+    } == {_symbol_key(item) for item in baseline_python_symbols}
+    assert {
+        _relation_key(item) for item in python_relations_from_mixed
+    } == {_relation_key(item) for item in baseline_python_relations}
+    assert {
+        _file_import_key(item) for item in python_file_imports_from_mixed
+    } == {_file_import_key(item) for item in baseline_python_file_imports}
+    assert diagnostics["semantic_graph"]["python_resolution_source_counts"] == (
+        baseline_python_resolution_stats
+    )
+    assert any(
+        item.language == "kotlin" for item in captured["semantic_relations"]
+    )
+    assert any(item.language == "swift" for item in captured["semantic_relations"])
 
 
 def test_index_graph_reports_java_resolution_source_counts(

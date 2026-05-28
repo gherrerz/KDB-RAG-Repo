@@ -2,7 +2,10 @@
 
 from coderag.ingestion.extractors.java_brace import JavaBraceExtractor
 from coderag.ingestion.extractors.javascript_brace import JavaScriptBraceExtractor
+from coderag.ingestion.extractors.kotlin_treesitter import KotlinTreeSitterExtractor
 from coderag.ingestion.extractors.python_ast import PythonAstExtractor
+from coderag.ingestion.extractors.registry import LanguageExtractorRegistry
+from coderag.ingestion.extractors.swift_treesitter import SwiftTreeSitterExtractor
 
 
 def test_python_ast_extractor_resolves_full_function_span() -> None:
@@ -217,3 +220,11 @@ def test_javascript_brace_extractor_maps_next_special_files_to_framework_names()
 
     assert any(item.symbol_name == "_App" for item in app_detections)
     assert any(item.symbol_name == "Middleware" for item in middleware_detections)
+
+
+def test_registry_resolves_kotlin_and_swift_extractors() -> None:
+    """The registry should expose the new Tree-sitter extractor slots."""
+    registry = LanguageExtractorRegistry()
+
+    assert isinstance(registry.get("kotlin"), KotlinTreeSitterExtractor)
+    assert isinstance(registry.get("swift"), SwiftTreeSitterExtractor)
