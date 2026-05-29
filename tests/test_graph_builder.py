@@ -223,6 +223,48 @@ def test_upsert_repo_graph_persists_semantic_relations() -> None:
     assert "resolution_method = row.resolution_method" in import_query
 
 
+def test_upsert_repo_graph_batches_large_semantic_relation_payloads() -> None:
+    """Trocea relaciones semánticas grandes en múltiples llamadas UNWIND."""
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _FakeDriver(nodes_deleted=0, total_nodes=0)
+    builder.driver = driver
+
+    relations = [
+        SemanticRelation(
+            repo_id="repo-x",
+            source_symbol_id=f"source-{index}",
+            relation_type="CALLS",
+            target_symbol_id=f"target-{index}",
+            target_ref=f"helper_{index}",
+            target_kind="symbol",
+            path=f"pkg/file_{index}.py",
+            line=index,
+            confidence=0.9,
+            language="python",
+            resolution_method="local",
+        )
+        for index in range(GraphBuilder._WRITE_BATCH_SIZE + 5)
+    ]
+
+    builder.upsert_repo_graph(
+        repo_id="repo-x",
+        scanned_files=[],
+        symbols=[],
+        semantic_relations=relations,
+    )
+
+    session = driver.last_session
+    assert session is not None
+    call_rows = [
+        kwargs["rows"]
+        for query, kwargs in session.calls
+        if ":CALLS" in query
+    ]
+    assert len(call_rows) == 2
+    assert max(len(rows) for rows in call_rows) == GraphBuilder._WRITE_BATCH_SIZE
+    assert sum(len(rows) for rows in call_rows) == len(relations)
+
+
 def test_derive_file_dependency_edges_deduplicates_resolved_relations() -> None:
     """Colapsa relaciones resueltas entre símbolos a pares archivo->archivo."""
     symbols = [
@@ -369,6 +411,138 @@ def test_upsert_repo_graph_persists_file_dependency_edges_when_enabled(
             "relation_types": ["CALLS"],
         }
     ]
+
+
+def test_upsert_repo_graph_batches_large_file_dependency_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Trocea file dependency edges grandes en múltiples llamadas UNWIND."""
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _FakeDriver(nodes_deleted=0, total_nodes=0)
+    builder.driver = driver
+
+    class _SettingsEnabled:
+        semantic_graph_file_edges_enabled = True
+
+    monkeypatch.setattr(
+        graph_builder_module,
+        "get_settings",
+        lambda: _SettingsEnabled(),
+    )
+
+    symbols = []
+    relations = []
+    for index in range(GraphBuilder._WRITE_BATCH_SIZE + 3):
+        source_id = f"source-{index}"
+        target_id = f"target-{index}"
+        symbols.extend(
+            [
+                SymbolChunk(
+                    id=source_id,
+                    repo_id="repo-x",
+                    path=f"pkg/source_{index}.py",
+                    language="python",
+                    symbol_name=f"source_{index}",
+                    symbol_type="function",
+                    start_line=1,
+                    end_line=2,
+                    snippet="def source():\n    pass",
+                ),
+                SymbolChunk(
+                    id=target_id,
+                    repo_id="repo-x",
+                    path=f"pkg/target_{index}.py",
+                    language="python",
+                    symbol_name=f"target_{index}",
+                    symbol_type="function",
+                    start_line=1,
+                    end_line=2,
+                    snippet="def target():\n    pass",
+                ),
+            ]
+        )
+        relations.append(
+            SemanticRelation(
+                repo_id="repo-x",
+                source_symbol_id=source_id,
+                relation_type="CALLS",
+                target_symbol_id=target_id,
+                target_ref=f"target_{index}",
+                target_kind="symbol",
+                path=f"pkg/source_{index}.py",
+                line=1,
+                confidence=0.9,
+                language="python",
+            )
+        )
+
+    builder.upsert_repo_graph(
+        repo_id="repo-x",
+        scanned_files=[],
+        symbols=symbols,
+        semantic_relations=relations,
+    )
+
+    session = driver.last_session
+    assert session is not None
+    file_edge_rows = [
+        kwargs["rows"]
+        for query, kwargs in session.calls
+        if "IMPORTS_FILE" in query
+    ]
+    assert len(file_edge_rows) == 2
+    assert max(len(rows) for rows in file_edge_rows) == GraphBuilder._WRITE_BATCH_SIZE
+
+
+def test_upsert_repo_graph_batches_large_file_external_imports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Trocea imports externos de archivo en múltiples llamadas UNWIND."""
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _FakeDriver(nodes_deleted=0, total_nodes=0)
+    builder.driver = driver
+
+    class _SettingsEnabled:
+        semantic_graph_file_edges_enabled = True
+
+    monkeypatch.setattr(
+        graph_builder_module,
+        "get_settings",
+        lambda: _SettingsEnabled(),
+    )
+
+    file_import_relations = [
+        FileImportRelation(
+            repo_id="repo-x",
+            source_path=f"pkg/source_{index}.py",
+            target_path=None,
+            target_ref=f"external_{index}",
+            target_kind="external",
+            path=f"pkg/source_{index}.py",
+            line=index,
+            language="python",
+            resolution_method="unresolved",
+        )
+        for index in range(GraphBuilder._WRITE_BATCH_SIZE + 7)
+    ]
+
+    builder.upsert_repo_graph(
+        repo_id="repo-x",
+        scanned_files=[],
+        symbols=[],
+        semantic_relations=[],
+        file_import_relations=file_import_relations,
+    )
+
+    session = driver.last_session
+    assert session is not None
+    external_rows = [
+        kwargs["rows"]
+        for query, kwargs in session.calls
+        if "IMPORTS_EXTERNAL_FILE" in query
+    ]
+    assert len(external_rows) == 2
+    assert max(len(rows) for rows in external_rows) == GraphBuilder._WRITE_BATCH_SIZE
 
 
 def test_upsert_repo_graph_skips_file_dependency_edges_when_disabled(

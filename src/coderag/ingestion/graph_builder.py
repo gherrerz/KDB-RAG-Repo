@@ -2,6 +2,7 @@
 
 import hashlib
 from collections import defaultdict
+from collections.abc import Iterator
 from contextlib import contextmanager
 from threading import Lock
 from typing import Any
@@ -105,6 +106,7 @@ def _is_wrapped_neo4j_error(exc: Exception) -> bool:
 class GraphBuilder:
     """Generador de gráficos para almacenar archivos, símbolos y relaciones."""
 
+    _WRITE_BATCH_SIZE = 500
     _DEPENDENCY_INVENTORY_TERMS = {
         "dependency",
         "dependencies",
@@ -329,6 +331,16 @@ class GraphBuilder:
         rows.sort(key=lambda item: (item["source_path"], item["target_path"]))
         return rows
 
+    @classmethod
+    def _iter_write_batches(
+        cls,
+        rows: list[dict[str, Any]],
+    ) -> Iterator[list[dict[str, Any]]]:
+        """Trocea payloads grandes de escritura para reducir presión de memoria."""
+        batch_size = max(1, cls._WRITE_BATCH_SIZE)
+        for index in range(0, len(rows), batch_size):
+            yield rows[index : index + batch_size]
+
     def _upsert_file_dependency_edges(
         self,
         session: Any,
@@ -346,18 +358,20 @@ class GraphBuilder:
         if not rows:
             return
 
-        session.run(
-            """
+        query = """
             UNWIND $rows AS row
             MATCH (source:File {repo_id: $repo_id, path: row.source_path})
             MATCH (target:File {repo_id: $repo_id, path: row.target_path})
             MERGE (source)-[r:IMPORTS_FILE {repo_id: $repo_id, source_path: row.source_path, target_path: row.target_path}]->(target)
             SET r.count = row.count,
                 r.relation_types = row.relation_types
-            """,
-            repo_id=repo_id,
-            rows=rows,
-        )
+            """
+        for batch in self._iter_write_batches(rows):
+            session.run(
+                query,
+                repo_id=repo_id,
+                rows=batch,
+            )
 
     def _upsert_file_external_imports(
         self,
@@ -381,8 +395,7 @@ class GraphBuilder:
         if not rows:
             return
 
-        session.run(
-            """
+        query = """
             UNWIND $rows AS row
             MATCH (source:File {repo_id: $repo_id, path: row.source_path})
             MERGE (target:ExternalSymbol {
@@ -395,10 +408,13 @@ class GraphBuilder:
                 r.line = row.line,
                 r.language = row.language,
                 r.resolution_method = row.resolution_method
-            """,
-            repo_id=repo_id,
-            rows=rows,
-        )
+            """
+        for batch in self._iter_write_batches(rows):
+            session.run(
+                query,
+                repo_id=repo_id,
+                rows=batch,
+            )
 
     def _upsert_semantic_relations(
         self,
@@ -437,8 +453,7 @@ class GraphBuilder:
                 unresolved_by_type[relation_type].append(row)
 
         for relation_type, rows in resolved_by_type.items():
-            session.run(
-                f"""
+            query = f"""
                 UNWIND $rows AS row
                 MATCH (s:Symbol {{id: row.source_symbol_id}})
                 MATCH (t:Symbol {{id: row.target_symbol_id}})
@@ -450,14 +465,16 @@ class GraphBuilder:
                     r.target_kind = row.target_kind,
                     r.language = row.language,
                     r.resolution_method = row.resolution_method
-                """,
-                repo_id=repo_id,
-                rows=rows,
-            )
+                """
+            for batch in self._iter_write_batches(rows):
+                session.run(
+                    query,
+                    repo_id=repo_id,
+                    rows=batch,
+                )
 
         for relation_type, rows in unresolved_by_type.items():
-            session.run(
-                f"""
+            query = f"""
                 UNWIND $rows AS row
                 MATCH (s:Symbol {{id: row.source_symbol_id}})
                 MERGE (t:ExternalSymbol {{
@@ -474,10 +491,13 @@ class GraphBuilder:
                     r.target_kind = row.target_kind,
                     r.language = row.language,
                     r.resolution_method = row.resolution_method
-                """,
-                repo_id=repo_id,
-                rows=rows,
-            )
+                """
+            for batch in self._iter_write_batches(rows):
+                session.run(
+                    query,
+                    repo_id=repo_id,
+                    rows=batch,
+                )
 
     @staticmethod
     def _relation_id(relation: SemanticRelation) -> str:

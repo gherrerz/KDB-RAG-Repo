@@ -236,6 +236,7 @@ class JobManager:
         self._ingestion_mode = getattr(settings, "ingestion_execution_mode", "thread")
         self._store: BaseMetadataStore | None = None
         self._jobs: dict[str, JobInfo] = {}
+        self._job_threads: dict[str, object] = {}
         self._store_lock = Lock()
         self._create_job_lock = Lock()
 
@@ -285,6 +286,82 @@ class JobManager:
             last_queried_on_or_before=last_queried_on_or_before,
         )
 
+    def _is_local_job_active(self, job_id: str) -> bool:
+        """Indica si un job local todavía tiene un hilo vivo asociado."""
+        thread = self._job_threads.get(job_id)
+        if thread is None:
+            return False
+
+        is_alive = getattr(thread, "is_alive", None)
+        if callable(is_alive):
+            return bool(is_alive())
+        return True
+
+    def _get_rq_job_status(self, job_id: str) -> str | None:
+        """Consulta el estado actual del job en RQ si sigue existiendo."""
+        from redis import Redis
+        from rq.exceptions import NoSuchJobError
+        from rq.job import Job
+
+        settings = get_settings()
+        redis_conn = Redis.from_url(settings.redis_url)
+        try:
+            rq_job = Job.fetch(job_id, connection=redis_conn)
+        except NoSuchJobError:
+            return None
+
+        status = str(rq_job.get_status() or "").strip().lower()
+        return status or None
+
+    def _is_rq_job_active(self, job_id: str) -> bool:
+        """Indica si un job RQ sigue en un estado runnable."""
+        status = self._get_rq_job_status(job_id)
+        return status in {"queued", "started", "deferred", "scheduled"}
+
+    def _is_job_really_active(self, job_id: str) -> bool:
+        """Evalúa si un job activo en metadata sigue vivo en runtime."""
+        if self._ingestion_mode == "rq":
+            return self._is_rq_job_active(job_id)
+        return self._is_local_job_active(job_id)
+
+    def _mark_orphan_job_failed(self, job_id: str) -> None:
+        """Reclasifica a failed un job activo que ya no existe en runtime."""
+        message = (
+            "Job reconciliado como huerfano durante la validacion de borrado. "
+            "La ejecucion ya no estaba activa."
+        )
+        job = self.store.get_job(job_id) or self._jobs.get(job_id)
+        if job is None:
+            return
+
+        job.status = JobStatus.failed
+        if not (job.error or "").strip():
+            job.error = message
+        job.logs.append(message)
+        job.diagnostics["orphan_reconciled"] = True
+        job.updated_at = datetime.datetime.now(datetime.UTC)
+        self.store.upsert_job(job)
+        self._jobs[job_id] = job
+        self._job_threads.pop(job_id, None)
+
+    def _reconcile_repo_active_jobs(self, repo_id: str) -> list[str]:
+        """Sincroniza jobs activos del repo con su liveness real."""
+        active_job_ids = self.store.list_active_job_ids(repo_id=repo_id)
+        really_active_job_ids: list[str] = []
+
+        for job_id in active_job_ids:
+            try:
+                if self._is_job_really_active(job_id):
+                    really_active_job_ids.append(job_id)
+                    continue
+            except Exception:
+                really_active_job_ids.append(job_id)
+                continue
+
+            self._mark_orphan_job_failed(job_id)
+
+        return really_active_job_ids
+
     def reset_all_data(self) -> tuple[list[str], list[str]]:
         """Restablezca todos los índices persistentes y el estado del trabajo/caché en memoria."""
         running_jobs = self.store.list_active_job_ids()
@@ -299,6 +376,7 @@ class JobManager:
 
         cleared, warnings = reset_all_storage()
         self._jobs.clear()
+        self._job_threads.clear()
         self.store = _build_metadata_store()
         return cleared, warnings
 
@@ -308,9 +386,7 @@ class JobManager:
         if not normalized_repo_id:
             raise ValueError("repo_id no puede estar vacío")
 
-        running_same_repo_jobs = self.store.list_active_job_ids(
-            repo_id=normalized_repo_id,
-        )
+        running_same_repo_jobs = self._reconcile_repo_active_jobs(normalized_repo_id)
         if running_same_repo_jobs:
             joined = ", ".join(running_same_repo_jobs)
             raise RuntimeError(
@@ -334,6 +410,7 @@ class JobManager:
         ]
         for job_id in tracked_jobs:
             self._jobs.pop(job_id, None)
+            self._job_threads.pop(job_id, None)
 
         return cleared, warnings, deleted_counts
 
@@ -390,6 +467,7 @@ class JobManager:
                 args=(job_id, request),
                 daemon=True,
             )
+            self._job_threads[job_id] = thread
             thread.start()
         return job
 
@@ -476,13 +554,16 @@ class JobManager:
     def _run_ingest_job(self, job_id: str, request: RepoIngestRequest) -> None:
         """Ejecute el flujo de trabajo de ingesta y actualice las transiciones de estado."""
         job = self._jobs[job_id]
-        _invoke_execute_ingest_job(
-            job=job,
-            request=request,
-            store=self.store,
-            workspace_path=self._workspace_path,
-            retain_workspace_after_ingest=self._retain_workspace_after_ingest,
-        )
+        try:
+            _invoke_execute_ingest_job(
+                job=job,
+                request=request,
+                store=self.store,
+                workspace_path=self._workspace_path,
+                retain_workspace_after_ingest=self._retain_workspace_after_ingest,
+            )
+        finally:
+            self._job_threads.pop(job_id, None)
 
 
 if __name__ == "__main__":

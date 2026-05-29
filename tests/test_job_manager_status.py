@@ -543,6 +543,159 @@ def test_job_manager_rejects_duplicate_active_repo_ingest(
         manager.create_ingest_job(request)
 
 
+def test_job_manager_delete_repo_reconciles_local_orphan_job(
+    monkeypatch,
+    patch_module_settings,
+) -> None:
+    """Permite borrar cuando el job local persisted ya no tiene thread vivo."""
+
+    import coderag.jobs.worker as module
+    import coderag.maintenance.reset_service as reset_module
+
+    patch_module_settings(module)
+    manager = JobManager()
+
+    orphan = JobInfo(
+        id=str(uuid4()),
+        status=JobStatus.running,
+        progress=0.5,
+        logs=["Procesando repo..."],
+        repo_id="repo-zombie",
+        error=None,
+        created_at=datetime.datetime.now(datetime.UTC),
+        updated_at=datetime.datetime.now(datetime.UTC),
+    )
+    manager.store.upsert_job(orphan)
+
+    monkeypatch.setattr(
+        reset_module,
+        "delete_repo_storage",
+        lambda repo_id: ([f"repo={repo_id}"], [], {"metadata_total": 1}),
+    )
+
+    cleared, warnings, deleted_counts = manager.delete_repo("repo-zombie")
+    recovered = manager.store.get_job(orphan.id)
+
+    assert cleared == ["repo=repo-zombie"]
+    assert warnings == []
+    assert deleted_counts == {"metadata_total": 1}
+    assert recovered is not None
+    assert recovered.status == JobStatus.failed
+    assert recovered.diagnostics["orphan_reconciled"] is True
+    assert "huerfano" in (recovered.error or "").lower()
+
+
+def test_job_manager_delete_repo_blocks_when_local_job_is_still_alive(
+    monkeypatch,
+    patch_module_settings,
+) -> None:
+    """Mantiene el bloqueo si el job local sigue con un thread vivo."""
+
+    import coderag.jobs.worker as module
+
+    patch_module_settings(module)
+    manager = JobManager()
+
+    class AliveThread:
+        def is_alive(self) -> bool:
+            return True
+
+    active = JobInfo(
+        id=str(uuid4()),
+        status=JobStatus.running,
+        progress=0.5,
+        logs=["Procesando repo..."],
+        repo_id="repo-vivo",
+        error=None,
+        created_at=datetime.datetime.now(datetime.UTC),
+        updated_at=datetime.datetime.now(datetime.UTC),
+    )
+    manager._jobs[active.id] = active
+    manager._job_threads[active.id] = AliveThread()
+    manager.store.upsert_job(active)
+
+    with pytest.raises(RuntimeError, match="ingestas activas"):
+        manager.delete_repo("repo-vivo")
+
+
+def test_job_manager_delete_repo_reconciles_missing_rq_job(
+    monkeypatch,
+    patch_module_settings,
+) -> None:
+    """Permite borrar si el job RQ persisted ya no existe en Redis/RQ."""
+
+    import coderag.jobs.worker as module
+    import coderag.maintenance.reset_service as reset_module
+
+    patch_module_settings(
+        module,
+        ingestion_execution_mode="rq",
+        redis_url="redis://localhost:6379/0",
+    )
+    manager = JobManager()
+
+    orphan = JobInfo(
+        id=str(uuid4()),
+        status=JobStatus.running,
+        progress=0.5,
+        logs=["Procesando repo..."],
+        repo_id="repo-rq-zombie",
+        error=None,
+        created_at=datetime.datetime.now(datetime.UTC),
+        updated_at=datetime.datetime.now(datetime.UTC),
+    )
+    manager.store.upsert_job(orphan)
+
+    monkeypatch.setattr(manager, "_get_rq_job_status", lambda job_id: None)
+    monkeypatch.setattr(
+        reset_module,
+        "delete_repo_storage",
+        lambda repo_id: ([f"repo={repo_id}"], [], {"metadata_total": 1}),
+    )
+
+    cleared, warnings, deleted_counts = manager.delete_repo("repo-rq-zombie")
+    recovered = manager.store.get_job(orphan.id)
+
+    assert cleared == ["repo=repo-rq-zombie"]
+    assert warnings == []
+    assert deleted_counts == {"metadata_total": 1}
+    assert recovered is not None
+    assert recovered.status == JobStatus.failed
+    assert recovered.diagnostics["orphan_reconciled"] is True
+
+
+def test_job_manager_delete_repo_blocks_when_rq_job_is_still_active(
+    monkeypatch,
+    patch_module_settings,
+) -> None:
+    """Mantiene el bloqueo si el job RQ sigue runnable."""
+
+    import coderag.jobs.worker as module
+
+    patch_module_settings(
+        module,
+        ingestion_execution_mode="rq",
+        redis_url="redis://localhost:6379/0",
+    )
+    manager = JobManager()
+
+    active = JobInfo(
+        id=str(uuid4()),
+        status=JobStatus.running,
+        progress=0.5,
+        logs=["Procesando repo..."],
+        repo_id="repo-rq-vivo",
+        error=None,
+        created_at=datetime.datetime.now(datetime.UTC),
+        updated_at=datetime.datetime.now(datetime.UTC),
+    )
+    manager.store.upsert_job(active)
+    monkeypatch.setattr(manager, "_get_rq_job_status", lambda job_id: "started")
+
+    with pytest.raises(RuntimeError, match="ingestas activas"):
+        manager.delete_repo("repo-rq-vivo")
+
+
 def test_job_manager_uses_repo_lock_in_rq_mode(
     monkeypatch,
     patch_module_settings,

@@ -358,6 +358,54 @@ def test_delete_repo_returns_409_when_same_repo_job_running(monkeypatch) -> None
     assert "ingesta activa" in str(response.json().get("detail", "")).lower()
 
 
+def test_delete_repo_returns_200_after_reconciling_orphan_job(
+    monkeypatch,
+    tmp_path,
+    patch_module_settings,
+) -> None:
+    """Devuelve 200 cuando el manager reconcilia un job zombie del repo."""
+
+    import coderag.jobs.worker as worker_module
+    import coderag.maintenance.reset_service as reset_module
+
+    patch_module_settings(worker_module)
+
+    manager = JobManager()
+    manager.store = MetadataStore(tmp_path / "metadata.db")
+
+    orphan = JobInfo(
+        id="job-zombie",
+        status=JobStatus.running,
+        progress=0.5,
+        logs=["Procesando repo..."],
+        repo_id="mall",
+        error=None,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    manager.store.upsert_job(orphan)
+
+    monkeypatch.setattr(
+        reset_module,
+        "delete_repo_storage",
+        lambda repo_id: ([f"repo={repo_id}"], [], {"metadata_total": 1}),
+    )
+    monkeypatch.setattr(app.state, "job_manager_override", manager, raising=False)
+
+    client = TestClient(app)
+    response = client.delete("/repos/mall")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["repo_id"] == "mall"
+    assert payload["cleared"] == ["repo=mall"]
+
+    recovered = manager.store.get_job(orphan.id)
+    assert recovered is not None
+    assert recovered.status == JobStatus.failed
+    assert recovered.diagnostics["orphan_reconciled"] is True
+
+
 def test_list_repos_returns_repo_id_catalog(monkeypatch) -> None:
     """Devuelve ids y metadata básica de repositorios conocidos para consultas."""
 
