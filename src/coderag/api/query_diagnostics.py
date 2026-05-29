@@ -93,6 +93,7 @@ def build_query_diagnostics(
             if inventory_intent and not inventory_target
             else None
         ),
+        "fallback_used": fallback_reason is not None,
     }
     if llm_error is not None:
         diagnostics["llm_error"] = llm_error
@@ -193,8 +194,39 @@ def build_retrieval_diagnostics(
         "budget_exhausted": budget_exhausted,
         "stage_timings_ms": stage_timings,
         "fallback_reason": fallback_reason,
+        "fallback_used": fallback_reason is not None,
         "mode": "retrieval_only",
     }
     if semantic_diagnostics:
         diagnostics.update(semantic_diagnostics)
+    return diagnostics
+
+
+def build_graph_first_response_diagnostics(
+    *,
+    base_diagnostics: dict[str, Any],
+    page: int,
+    page_size: int,
+    total: int,
+    mode: str | None = None,
+    default_route: str = "graph_first",
+) -> dict[str, Any]:
+    """Finalize diagnostics for graph-first short-circuit responses."""
+    diagnostics = dict(base_diagnostics)
+    route = str(diagnostics.get("inventory_route") or default_route)
+    diagnostics.update(
+        {
+            "inventory_route": route,
+            "graph_first_route": route,
+            "graph_first_response": True,
+            "inventory_page": page,
+            "inventory_page_size": page_size,
+            "inventory_total": total,
+            "fallback_used": bool(diagnostics.get("fallback_reason")),
+        }
+    )
+    if "impact_route" in diagnostics:
+        diagnostics["impact_route_used"] = diagnostics["impact_route"]
+    if mode is not None:
+        diagnostics["mode"] = mode
     return diagnostics

@@ -63,14 +63,25 @@ La de TypeScript mantiene `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED`.
 La de Kotlin usa `SEMANTIC_GRAPH_KOTLIN_ENABLED`.
 La de Swift usa `SEMANTIC_GRAPH_SWIFT_ENABLED`.
 
+Además del extractor estructural, Python, Java, JavaScript, TypeScript,
+Kotlin y Swift pueden emitir `FileImportRelation` top-level para persistir
+`IMPORTS_FILE` e `IMPORTS_EXTERNAL_FILE` en Neo4j.
+
 Para Kotlin y Swift, la fase estructural actual usa Tree-sitter y cubre
 tipos top-level, métodos, constructores y funciones top-level con resolución
 de spans multilinea. En Swift también se indexan declaraciones `extension`
 y los métodos declarados dentro de esas extensiones.
 
+En Swift, la emisión de `FileImportRelation` es conservadora: solo se genera
+una arista interna cuando el resolvedor identifica un archivo único; si no,
+el import queda registrado como externo.
+
 En TypeScript, la fase semántica también infiere relaciones `CALLS` desde uso de
 componentes JSX/TSX como `<Button />`, además de llamadas tradicionales con
 paréntesis.
+
+Go no tiene extractor semántico dedicado ni emisión de `FileImportRelation` en
+esta fase; su cobertura actual sigue siendo estructural mediante fallback.
 
 ## Como registrar un nuevo lenguaje
 

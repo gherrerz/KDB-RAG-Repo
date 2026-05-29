@@ -1,6 +1,6 @@
 """Tests for Java semantic relation extraction phase 1."""
 
-from coderag.core.models import ScannedFile
+from coderag.core.models import FileImportRelation, ScannedFile
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.semantic_java import extract_java_semantic_relations
 
@@ -270,3 +270,55 @@ def test_extract_java_semantic_relations_exposes_resolution_sources() -> None:
 
     assert stats.get("static_import_member", 0) >= 1
     assert stats.get("fqcn", 0) >= 1
+
+
+def test_extract_java_semantic_relations_emits_top_level_file_imports() -> None:
+    """Captura imports Java top-level como relaciones file->file o externas."""
+    scanned_files = [
+        ScannedFile(
+            path="src/com/acme/api/Service.java",
+            language="java",
+            content=(
+                "package com.acme.api;\n\n"
+                "public interface Service {\n"
+                "    void run();\n"
+                "}\n"
+            ),
+        ),
+        ScannedFile(
+            path="src/com/acme/app/Impl.java",
+            language="java",
+            content=(
+                "package com.acme.app;\n"
+                "import com.acme.api.Service;\n"
+                "import java.util.List;\n\n"
+                "public class Impl implements Service {\n"
+                "    public void run() {}\n"
+                "}\n"
+            ),
+        ),
+    ]
+    symbols = extract_symbol_chunks(repo_id="repo-java", scanned_files=scanned_files)
+    file_imports: list[FileImportRelation] = []
+
+    extract_java_semantic_relations(
+        repo_id="repo-java",
+        scanned_files=scanned_files,
+        symbols=symbols,
+        file_imports_sink=file_imports,
+    )
+
+    assert any(
+        item.source_path == "src/com/acme/app/Impl.java"
+        and item.target_path == "src/com/acme/api/Service.java"
+        and item.target_ref == "com.acme.api.Service"
+        and item.target_kind == "file"
+        for item in file_imports
+    )
+    assert any(
+        item.source_path == "src/com/acme/app/Impl.java"
+        and item.target_path is None
+        and item.target_ref == "java.util.List"
+        and item.target_kind == "external"
+        for item in file_imports
+    )

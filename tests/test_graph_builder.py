@@ -958,6 +958,86 @@ def test_query_file_importers_returns_direct_importer_files() -> None:
     }
 
 
+def test_query_file_impact_paths_returns_direct_and_transitive_files() -> None:
+    """Devuelve impactos directos y transitivos con hop_distance y orden estable."""
+
+    class _ImpactRecord:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def data(self) -> dict[str, object]:
+            return self._payload
+
+    class _ImpactSession:
+        def __init__(self) -> None:
+            self.query = ""
+            self.kwargs: dict[str, Any] = {}
+
+        def run(self, query: str, **kwargs: Any) -> list[_ImpactRecord]:
+            self.query = query
+            self.kwargs = kwargs
+            return [
+                _ImpactRecord(
+                    {
+                        "label": "FeatureConsumer.kt",
+                        "path": "src/app/FeatureConsumer.kt",
+                        "kind": "file_impact_direct",
+                        "start_line": 1,
+                        "end_line": 1,
+                        "hop_distance": 1,
+                    }
+                ),
+                _ImpactRecord(
+                    {
+                        "label": "Screen.kt",
+                        "path": "src/app/Screen.kt",
+                        "kind": "file_impact_transitive",
+                        "start_line": 1,
+                        "end_line": 1,
+                        "hop_distance": 2,
+                    }
+                ),
+            ]
+
+        def __enter__(self) -> "_ImpactSession":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class _ImpactDriver:
+        def __init__(self) -> None:
+            self.last_session: _ImpactSession | None = None
+
+        def session(self) -> _ImpactSession:
+            self.last_session = _ImpactSession()
+            return self.last_session
+
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _ImpactDriver()
+    builder.driver = driver
+
+    records = builder.query_file_impact_paths(
+        repo_id="repo-x",
+        target_paths=["src/app/Feature.kt"],
+        max_depth=2,
+        limit=20,
+    )
+
+    assert [(item["path"], item["hop_distance"]) for item in records] == [
+        ("src/app/FeatureConsumer.kt", 1),
+        ("src/app/Screen.kt", 2),
+    ]
+    assert driver.last_session is not None
+    assert "MATCH (source:File {repo_id: $repo_id})-[:IMPORTS_FILE]->" in driver.last_session.query
+    assert "min(hop_distance) AS hop_distance" in driver.last_session.query
+    assert driver.last_session.kwargs == {
+        "repo_id": "repo-x",
+        "target_paths": ["src/app/Feature.kt"],
+        "limit": 20,
+    }
+
+
 def test_expand_symbol_file_context_uses_file_edges() -> None:
     """Expande contexto de archivo a partir de símbolos semilla mediante aristas File."""
 

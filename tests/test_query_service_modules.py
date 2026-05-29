@@ -5,6 +5,7 @@ from time import monotonic
 
 import pytest
 
+import coderag.api.query_signals as query_signals
 import coderag.api.query_service as query_service
 from coderag.core.models import Citation, InventoryItem, InventoryQueryResponse, RetrievalChunk
 
@@ -14,6 +15,43 @@ def test_is_module_query_detects_spanish_and_english_terms() -> None:
     assert query_service._is_module_query("Cuales son los modulos?")
     assert query_service._is_module_query("list repository modules")
     assert not query_service._is_module_query("donde se define auth")
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        (
+            "posibles impactos al modificar src/app/Feature.kt",
+            ("src/app/feature.kt",),
+        ),
+        (
+            "what is impacted if I change Sources/App/Feature.swift?",
+            ("sources/app/feature.swift",),
+        ),
+    ],
+)
+def test_extract_file_reference_candidates_supports_kotlin_and_swift(
+    query: str,
+    expected: tuple[str, ...],
+) -> None:
+    """Extrae referencias de archivo Kotlin y Swift citadas en la query."""
+    assert query_signals.extract_file_reference_candidates(query) == expected
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("posibles impactos al modificar metadata_store.py", True),
+        ("what files are impacted if I change Sources/App/Feature.swift", True),
+        ("who imports metadata_store.py", False),
+    ],
+)
+def test_is_impact_query_detects_change_impact_intent(
+    query: str,
+    expected: bool,
+) -> None:
+    """Reconoce preguntas de impacto por cambio sin confundirlas con reverse import."""
+    assert query_signals.is_impact_query(query) is expected
 
 
 @pytest.mark.parametrize(
@@ -242,6 +280,493 @@ def test_run_query_routes_reverse_import_query_graph_first(
     assert "src/coderag/maintenance/reset_service.py" in result.answer
     assert result.diagnostics["reverse_import_lookup_used"] is True
     assert result.citations[0].path == "src/coderag/maintenance/reset_service.py"
+
+
+def test_run_retrieval_query_routes_impact_query_graph_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Atiende queries de impacto directo sin pasar por hybrid search."""
+
+    class _Settings:
+        inventory_page_size = 50
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(
+            self,
+            repo_id: str,
+            candidates: list[str],
+            limit: int = 20,
+        ) -> list[dict[str, object]]:
+            assert repo_id == "repo1"
+            assert "sources/app/feature.swift" in candidates
+            return [{"path": "Sources/App/Feature.swift", "match_score": 3}]
+
+        def query_file_importers(
+            self,
+            repo_id: str,
+            target_paths: list[str],
+            limit: int = 100,
+        ) -> list[dict[str, object]]:
+            assert target_paths == ["Sources/App/Feature.swift"]
+            return [
+                {
+                    "target_path": target_paths[0],
+                    "label": "HomeViewModel.swift",
+                    "path": "Sources/App/HomeViewModel.swift",
+                    "kind": "file_importer",
+                    "start_line": 1,
+                    "end_line": 1,
+                }
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("hybrid_search no debe ejecutarse")
+        ),
+    )
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="what files are impacted if I change Sources/App/Feature.swift",
+        top_n=10,
+        top_k=5,
+        include_context=False,
+    )
+
+    assert [chunk.path for chunk in result.chunks] == [
+        "Sources/App/HomeViewModel.swift"
+    ]
+    assert result.diagnostics["impact_lookup_used"] is True
+    assert result.diagnostics["inventory_route"] == "graph_direct_impact"
+    assert result.diagnostics["graph_first_route"] == "graph_direct_impact"
+    assert result.diagnostics["impact_route"] == "graph_direct_impact"
+    assert result.diagnostics["impact_route_used"] == "graph_direct_impact"
+    assert result.diagnostics["target_resolution_confidence"] == "high"
+    assert result.diagnostics["fallback_used"] is False
+
+
+def test_run_query_routes_impact_query_graph_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Responde queries de impacto directo en query general vía grafo."""
+
+    class _Settings:
+        inventory_page_size = 50
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(
+            self,
+            repo_id: str,
+            candidates: list[str],
+            limit: int = 20,
+        ) -> list[dict[str, object]]:
+            assert "src/app/feature.kt" in candidates
+            return [{"path": "src/app/Feature.kt", "match_score": 2}]
+
+        def query_file_importers(
+            self,
+            repo_id: str,
+            target_paths: list[str],
+            limit: int = 100,
+        ) -> list[dict[str, object]]:
+            assert target_paths == ["src/app/Feature.kt"]
+            return [
+                {
+                    "target_path": target_paths[0],
+                    "label": "FeatureConsumer.kt",
+                    "path": "src/app/FeatureConsumer.kt",
+                    "kind": "file_importer",
+                    "start_line": 1,
+                    "end_line": 1,
+                }
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("hybrid_search no debe ejecutarse")
+        ),
+    )
+
+    result = query_service.run_query(
+        repo_id="repo1",
+        query="posibles impactos al modificar src/app/Feature.kt",
+        top_n=10,
+        top_k=5,
+    )
+
+    assert "src/app/FeatureConsumer.kt" in result.answer
+    assert result.diagnostics["impact_lookup_used"] is True
+    assert result.diagnostics["inventory_route"] == "graph_direct_impact"
+    assert result.diagnostics["graph_first_route"] == "graph_direct_impact"
+    assert result.diagnostics["impact_route_used"] == "graph_direct_impact"
+    assert result.diagnostics["fallback_used"] is False
+    assert result.citations[0].path == "src/app/FeatureConsumer.kt"
+    assert result.citations[0].reason == "graph_direct_impact_match"
+
+
+def test_run_query_impact_query_with_ambiguous_best_match_returns_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No autoselecciona impacto cuando hay empate en la mejor categoría."""
+
+    class _Settings:
+        inventory_page_size = 50
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(
+            self,
+            repo_id: str,
+            candidates: list[str],
+            limit: int = 20,
+        ) -> list[dict[str, object]]:
+            return [
+                {"path": "src/app/Feature.kt", "match_score": 2},
+                {"path": "src/shared/Feature.kt", "match_score": 2},
+            ]
+
+        def query_file_importers(
+            self,
+            repo_id: str,
+            target_paths: list[str],
+            limit: int = 100,
+        ) -> list[dict[str, object]]:
+            raise AssertionError("No debe calcular impacto con target ambiguo")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("hybrid_search no debe ejecutarse")
+        ),
+    )
+
+    result = query_service.run_query(
+        repo_id="repo1",
+        query="posibles impactos al modificar Feature.kt",
+        top_n=10,
+        top_k=5,
+    )
+
+    assert "múltiples archivos objetivo" in result.answer
+    assert result.diagnostics["impact_target_ambiguous"] is True
+    assert result.diagnostics["target_resolution_confidence"] == "ambiguous"
+    assert result.citations == []
+
+
+def test_run_retrieval_query_impact_query_includes_transitive_hops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expone hop_distance y separación directa/transitiva en retrieval-only."""
+
+    class _Settings:
+        inventory_page_size = 50
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(
+            self,
+            repo_id: str,
+            candidates: list[str],
+            limit: int = 20,
+        ) -> list[dict[str, object]]:
+            return [{"path": "src/app/Feature.kt", "match_score": 2}]
+
+        def query_file_impact_paths(
+            self,
+            repo_id: str,
+            target_paths: list[str],
+            *,
+            max_depth: int = 2,
+            limit: int = 200,
+        ) -> list[dict[str, object]]:
+            assert max_depth == 2
+            return [
+                {
+                    "label": "FeatureConsumer.kt",
+                    "path": "src/app/FeatureConsumer.kt",
+                    "kind": "file_impact_direct",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "hop_distance": 1,
+                },
+                {
+                    "label": "FeatureScreen.kt",
+                    "path": "src/app/FeatureScreen.kt",
+                    "kind": "file_impact_transitive",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "hop_distance": 2,
+                },
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("hybrid_search no debe ejecutarse")
+        ),
+    )
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="posibles impactos al modificar src/app/Feature.kt",
+        top_n=10,
+        top_k=5,
+        include_context=False,
+    )
+
+    assert [chunk.metadata["hop_distance"] for chunk in result.chunks] == [1, 2]
+    assert result.diagnostics["impact_depth"] == 2
+    assert result.diagnostics["direct_dependents"] == [
+        {
+            "path": "src/app/FeatureConsumer.kt",
+            "label": "FeatureConsumer.kt",
+            "hop_distance": 1,
+        }
+    ]
+    assert result.diagnostics["transitive_dependents"] == [
+        {
+            "path": "src/app/FeatureScreen.kt",
+            "label": "FeatureScreen.kt",
+            "hop_distance": 2,
+        }
+    ]
+
+
+def test_run_query_impact_query_groups_transitive_results_by_hop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agrupa el impacto directo y transitivo en la respuesta extractiva."""
+
+    class _Settings:
+        inventory_page_size = 50
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(
+            self,
+            repo_id: str,
+            candidates: list[str],
+            limit: int = 20,
+        ) -> list[dict[str, object]]:
+            return [{"path": "src/app/Feature.kt", "match_score": 2}]
+
+        def query_file_impact_paths(
+            self,
+            repo_id: str,
+            target_paths: list[str],
+            *,
+            max_depth: int = 2,
+            limit: int = 200,
+        ) -> list[dict[str, object]]:
+            return [
+                {
+                    "label": "FeatureConsumer.kt",
+                    "path": "src/app/FeatureConsumer.kt",
+                    "kind": "file_impact_direct",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "hop_distance": 1,
+                },
+                {
+                    "label": "FeatureScreen.kt",
+                    "path": "src/app/FeatureScreen.kt",
+                    "kind": "file_impact_transitive",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "hop_distance": 2,
+                },
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("hybrid_search no debe ejecutarse")
+        ),
+    )
+
+    result = query_service.run_query(
+        repo_id="repo1",
+        query="posibles impactos al modificar src/app/Feature.kt",
+        top_n=10,
+        top_k=5,
+    )
+
+    assert "Impacto directo:" in result.answer
+    assert "Impacto transitivo (hop 2):" in result.answer
+    assert result.diagnostics["impact_direct_match_count"] == 1
+    assert result.diagnostics["impact_transitive_match_count"] == 1
+    assert result.citations[0].reason == "graph_direct_impact_match"
+    assert result.citations[1].reason == "graph_transitive_impact_match"
+
+
+def test_impact_query_query_and_retrieval_share_graph_first_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mantiene el mismo contrato diagnóstico esencial en query y retrieval."""
+
+    class _Settings:
+        inventory_page_size = 50
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(
+            self,
+            repo_id: str,
+            candidates: list[str],
+            limit: int = 20,
+        ) -> list[dict[str, object]]:
+            return [{"path": "src/app/Feature.kt", "match_score": 2}]
+
+        def query_file_impact_paths(
+            self,
+            repo_id: str,
+            target_paths: list[str],
+            *,
+            max_depth: int = 2,
+            limit: int = 200,
+        ) -> list[dict[str, object]]:
+            return [
+                {
+                    "label": "FeatureConsumer.kt",
+                    "path": "src/app/FeatureConsumer.kt",
+                    "kind": "file_impact_direct",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "hop_distance": 1,
+                },
+                {
+                    "label": "FeatureScreen.kt",
+                    "path": "src/app/FeatureScreen.kt",
+                    "kind": "file_impact_transitive",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "hop_distance": 2,
+                },
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("hybrid_search no debe ejecutarse")
+        ),
+    )
+
+    query_result = query_service.run_query(
+        repo_id="repo1",
+        query="posibles impactos al modificar src/app/Feature.kt",
+        top_n=10,
+        top_k=5,
+    )
+    retrieval_result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="posibles impactos al modificar src/app/Feature.kt",
+        top_n=10,
+        top_k=5,
+        include_context=False,
+    )
+
+    expected_fields = {
+        "inventory_route": "graph_direct_impact",
+        "graph_first_route": "graph_direct_impact",
+        "impact_route": "graph_direct_impact",
+        "impact_route_used": "graph_direct_impact",
+        "target_path_resolved": "src/app/Feature.kt",
+        "target_resolution_confidence": "medium",
+        "impact_depth": 2,
+        "impact_direct_match_count": 1,
+        "impact_transitive_match_count": 1,
+        "fallback_used": False,
+    }
+    for field_name, expected in expected_fields.items():
+        assert query_result.diagnostics[field_name] == expected
+        assert retrieval_result.diagnostics[field_name] == expected
+
+
+def test_impact_query_missing_target_returns_graph_first_resolution_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reporta target no resuelto sin degradar a hybrid search."""
+
+    class _Settings:
+        inventory_page_size = 50
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(
+            self,
+            repo_id: str,
+            candidates: list[str],
+            limit: int = 20,
+        ) -> list[dict[str, object]]:
+            return []
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("hybrid_search no debe ejecutarse")
+        ),
+    )
+
+    query_result = query_service.run_query(
+        repo_id="repo1",
+        query="posibles impactos al modificar src/app/Missing.kt",
+        top_n=10,
+        top_k=5,
+    )
+    retrieval_result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="posibles impactos al modificar src/app/Missing.kt",
+        top_n=10,
+        top_k=5,
+        include_context=False,
+    )
+
+    assert "No se pudo resolver el archivo objetivo" in query_result.answer
+    assert "No se pudo resolver el archivo objetivo" in retrieval_result.answer
+    assert query_result.diagnostics["target_resolution_confidence"] == "none"
+    assert retrieval_result.diagnostics["target_resolution_confidence"] == "none"
+    assert query_result.diagnostics["fallback_used"] is False
+    assert retrieval_result.diagnostics["fallback_used"] is False
+    assert retrieval_result.chunks == []
 
 
 def test_apply_external_import_seed_boost_promotes_matching_paths(
@@ -2272,8 +2797,10 @@ def test_run_retrieval_query_routes_inventory_intent_without_llm(
     assert len(result.chunks) == 2
     assert result.statistics.total_before_rerank == 2
     assert result.statistics.total_after_rerank == 2
-    assert result.diagnostics["inventory_route"] == "graph_first_retrieval"
+    assert result.diagnostics["inventory_route"] == "graph_first"
+    assert result.diagnostics["graph_first_route"] == "graph_first"
     assert result.diagnostics["inventory_total"] == 2
+    assert result.diagnostics["fallback_used"] is False
 
 
 def test_run_retrieval_query_inventory_includes_context_when_enabled(

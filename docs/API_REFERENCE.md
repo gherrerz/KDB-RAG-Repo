@@ -329,6 +329,9 @@ Notas de `diagnostics` en jobs de ingesta con grafo semántico habilitado:
 - `semantic_graph.unresolved_by_type`: desglose de no resueltos por tipo de relación
 - `semantic_graph.unresolved_ratio`: proporción de targets no resueltos
 - `semantic_graph.semantic_extraction_ms`: latencia de extracción semántica
+- `semantic_graph.file_import_resolution_counts`: conteos canónicos de `FileImportRelation` por método de resolución normalizado
+- `semantic_graph.file_import_resolution_counts_by_language`: desglose del método de resolución de file imports por lenguaje
+- `semantic_graph.file_import_counts_by_language`: total de file imports internos/externos por lenguaje
 
 Notas de `diagnostics` en respuestas de query/retrieval con expansión semántica habilitada:
 
@@ -348,6 +351,17 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 - `semantic_noise_ratio`: proporción de aristas podadas sobre total evaluado
 - `semantic_fallback_used`: indica si se activó degradación a expansión estructural
 - `semantic_fallback_reason`: causa de fallback (`semantic_budget_pruned_all`, `semantic_exception`)
+- `inventory_route`: ruta de inventario o graph-first efectivamente usada (`graph_first`, `graph_direct_impact`, etc.)
+- `graph_first_route`: nombre estable de la ruta graph-first usada cuando aplica
+- `graph_first_response`: indica si la respuesta completa se resolvió por graph-first sin pasar por retrieval híbrido
+- `fallback_used`: indica si la ruta graph-first/semántica terminó degradando a otra estrategia
+- `impact_route_used`: nombre de la ruta usada para consultas de impacto por archivo cuando aplica
+- `impact_lookup_used`: indica si la respuesta salió de lookup de impacto por archivo
+- `impact_depth`: profundidad máxima explorada para impacto por archivo
+- `impact_direct_match_count`: cantidad de dependientes directos encontrados para el archivo objetivo
+- `impact_transitive_match_count`: cantidad de dependientes transitivos encontrados para el archivo objetivo
+- `target_path_resolved`: archivo objetivo resuelto a partir de la query cuando la ruta graph-first necesita un path concreto
+- `target_resolution_confidence`: confianza de la resolución de target (`high`, `medium`, `low`, `none`)
 
 ### QueryRequest
 
@@ -400,6 +414,8 @@ Valores frecuentes de `reason`:
 - `inventory_graph_match`: evidencia generada por el flujo de inventario.
 - `graph_file_dependency_match`: evidencia derivada de una arista `File -> File` relevante para la query.
 - `graph_external_dependency_source`: evidencia derivada de un import externo, citando el archivo fuente donde aparece.
+- `graph_direct_impact_match`: evidencia de un dependiente directo del archivo objetivo.
+- `graph_transitive_impact_match`: evidencia de un dependiente transitivo del archivo objetivo.
 
 ### QueryResponse
 
@@ -476,6 +492,13 @@ Notas operativas de inventory/discovery:
   y `en qué archivos se usa X` pueden resolverse por una ruta graph-first
   específica que busca importadores directos del archivo objetivo vía
   `IMPORTS_FILE`, sin depender del retrieval híbrido.
+- Consultas como `what breaks if I change X`, `qué se afecta si modifico X` o
+  `impacto de cambiar X` pueden resolverse por una ruta graph-first específica
+  que recorre `IMPORTS_FILE` con profundidad fija 2 y separa dependientes
+  directos de transitivos.
+- La cobertura actual de file edges e impacto por archivo incluye Python,
+  Java, JavaScript, TypeScript, Kotlin y Swift. Go queda fuera de este
+  contrato semántico y sigue disponible solo en retrieval estructural.
 - Para frontend React/Next, la ingesta ahora reconoce heurísticas de archivo como
   `page.tsx`, `layout.tsx`, `loading.tsx`, `route.ts` y `middleware.ts`, además de
   hooks `use*` y providers `*Provider`, para describir mejor el propósito del archivo

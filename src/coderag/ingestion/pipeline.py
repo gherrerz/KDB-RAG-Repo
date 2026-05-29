@@ -2,6 +2,7 @@
 
 from collections import Counter
 from collections import defaultdict
+from inspect import signature
 from time import perf_counter
 from typing import Callable
 
@@ -38,6 +39,24 @@ from coderag.ingestion.semantic_typescript import extract_typescript_semantic_re
 from coderag.ingestion.summarizer import summarize_file, summarize_modules
 
 LoggerFn = Callable[[str], None]
+
+_FILE_IMPORT_RESOLUTION_METHOD_ALIASES = {
+    "import": "import_path",
+    "import_from": "import_path",
+    "path": "import_path",
+    "fqcn": "import_path",
+    "module": "module_path",
+    "qualified": "symbol_path",
+    "same_package": "same_package_path",
+    "import_wildcard": "wildcard_path",
+    "static_import_member": "static_owner_path",
+    "static_import_wildcard": "wildcard_path",
+    "import_module_path": "module_hint_path",
+    "global_unique": "global_unique_path",
+    "local": "local_path",
+    "local_type": "local_path",
+    "unresolved": "unresolved",
+}
 
 
 def _symbol_observability_summary(
@@ -94,6 +113,76 @@ def _summarize_file_import_relations(
     return len(file_import_relations), internal_count, external_count
 
 
+def _normalize_file_import_resolution_method(
+    resolution_method: str | None,
+) -> str | None:
+    """Normalize file import resolution labels to a canonical vocabulary."""
+    if resolution_method is None:
+        return None
+    normalized = resolution_method.strip().lower()
+    if not normalized:
+        return None
+    return _FILE_IMPORT_RESOLUTION_METHOD_ALIASES.get(normalized, normalized)
+
+
+def _normalize_file_import_relations(
+    file_import_relations: list[FileImportRelation],
+) -> None:
+    """Normalize file import relations in place before diagnostics/persistence."""
+    for relation in file_import_relations:
+        relation.resolution_method = _normalize_file_import_resolution_method(
+            relation.resolution_method
+        )
+
+
+def _summarize_file_import_resolution_counts(
+    file_import_relations: list[FileImportRelation],
+) -> dict[str, int]:
+    """Summarize canonical file import resolution methods across languages."""
+    return dict(
+        Counter(
+            relation.resolution_method
+            for relation in file_import_relations
+            if relation.resolution_method
+        )
+    )
+
+
+def _summarize_file_import_resolution_counts_by_language(
+    file_import_relations: list[FileImportRelation],
+) -> dict[str, dict[str, int]]:
+    """Summarize canonical file import resolution methods grouped by language."""
+    by_language: dict[str, Counter[str]] = defaultdict(Counter)
+    for relation in file_import_relations:
+        if not relation.resolution_method:
+            continue
+        by_language[relation.language][relation.resolution_method] += 1
+    return {
+        language: dict(counts)
+        for language, counts in sorted(by_language.items())
+    }
+
+
+def _summarize_file_import_counts_by_language(
+    file_import_relations: list[FileImportRelation],
+) -> dict[str, dict[str, int]]:
+    """Summarize total/internal/external file import counts grouped by language."""
+    by_language: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"total": 0, "internal": 0, "external": 0}
+    )
+    for relation in file_import_relations:
+        counts = by_language[relation.language]
+        counts["total"] += 1
+        if relation.target_kind == "file":
+            counts["internal"] += 1
+        elif relation.target_kind == "external":
+            counts["external"] += 1
+    return {
+        language: counts
+        for language, counts in sorted(by_language.items())
+    }
+
+
 def _parse_csv_set(raw_value: str, prefix_dot: bool = False) -> set[str]:
     """Convierte una cadena CSV en un conjunto normalizado de tokens."""
     values: set[str] = set()
@@ -135,6 +224,28 @@ def _read_scan_filters_from_settings(
     excluded_extensions = _parse_csv_set(excluded_extensions_raw, prefix_dot=True)
     excluded_files = _parse_csv_set(excluded_files_raw, prefix_dot=False)
     return int(max_file_size), excluded_dirs, excluded_extensions, excluded_files
+
+
+def _run_semantic_extractor(
+    extractor: Callable[..., list[SemanticRelation]],
+    *,
+    repo_id: str,
+    scanned_files: list[ScannedFile],
+    symbols: list[SymbolChunk],
+    resolution_stats_sink: dict[str, int],
+    file_imports_sink: list[FileImportRelation],
+) -> list[SemanticRelation]:
+    """Run a semantic extractor, preserving compatibility with legacy stubs."""
+    kwargs = {
+        "repo_id": repo_id,
+        "scanned_files": scanned_files,
+        "symbols": symbols,
+        "resolution_stats_sink": resolution_stats_sink,
+    }
+    parameters = signature(extractor).parameters
+    if "file_imports_sink" in parameters:
+        kwargs["file_imports_sink"] = file_imports_sink
+    return extractor(**kwargs)
 
 
 def _repo_has_existing_index_data(repo_id: str, logger: LoggerFn) -> bool:
@@ -535,7 +646,8 @@ def _index_graph(
         kotlin_resolution_source_counts: dict[str, int] = {}
         swift_resolution_source_counts: dict[str, int] = {}
         try:
-            python_relations = extract_python_semantic_relations(
+            python_relations = _run_semantic_extractor(
+                extract_python_semantic_relations,
                 repo_id=repo_id,
                 scanned_files=scanned_files,
                 symbols=symbols,
@@ -545,43 +657,53 @@ def _index_graph(
             semantic_relations.extend(python_relations)
 
             if java_semantic_enabled:
-                java_relations = extract_java_semantic_relations(
+                java_relations = _run_semantic_extractor(
+                    extract_java_semantic_relations,
                     repo_id=repo_id,
                     scanned_files=scanned_files,
                     symbols=symbols,
                     resolution_stats_sink=java_resolution_source_counts,
+                    file_imports_sink=file_import_relations,
                 )
                 semantic_relations.extend(java_relations)
             if javascript_semantic_enabled:
-                javascript_relations = extract_javascript_semantic_relations(
+                javascript_relations = _run_semantic_extractor(
+                    extract_javascript_semantic_relations,
                     repo_id=repo_id,
                     scanned_files=scanned_files,
                     symbols=symbols,
                     resolution_stats_sink=javascript_resolution_source_counts,
+                    file_imports_sink=file_import_relations,
                 )
                 semantic_relations.extend(javascript_relations)
             if typescript_semantic_enabled:
-                typescript_relations = extract_typescript_semantic_relations(
+                typescript_relations = _run_semantic_extractor(
+                    extract_typescript_semantic_relations,
                     repo_id=repo_id,
                     scanned_files=scanned_files,
                     symbols=symbols,
                     resolution_stats_sink=typescript_resolution_source_counts,
+                    file_imports_sink=file_import_relations,
                 )
                 semantic_relations.extend(typescript_relations)
             if kotlin_semantic_enabled:
-                kotlin_relations = extract_kotlin_semantic_relations(
+                kotlin_relations = _run_semantic_extractor(
+                    extract_kotlin_semantic_relations,
                     repo_id=repo_id,
                     scanned_files=scanned_files,
                     symbols=symbols,
                     resolution_stats_sink=kotlin_resolution_source_counts,
+                    file_imports_sink=file_import_relations,
                 )
                 semantic_relations.extend(kotlin_relations)
             if swift_semantic_enabled:
-                swift_relations = extract_swift_semantic_relations(
+                swift_relations = _run_semantic_extractor(
+                    extract_swift_semantic_relations,
                     repo_id=repo_id,
                     scanned_files=scanned_files,
                     symbols=symbols,
                     resolution_stats_sink=swift_resolution_source_counts,
+                    file_imports_sink=file_import_relations,
                 )
                 semantic_relations.extend(swift_relations)
         except Exception as exc:
@@ -641,11 +763,23 @@ def _index_graph(
             and symbol_path_by_id.get(item.target_symbol_id, item.path) != item.path
         ]
         swift_cross_file_resolved_count = len(swift_cross_file_relations)
+        _normalize_file_import_relations(file_import_relations)
         (
             python_top_level_file_import_count,
             python_top_level_file_import_internal_count,
             python_top_level_file_import_external_count,
         ) = _summarize_file_import_relations(file_import_relations)
+        file_import_resolution_counts = _summarize_file_import_resolution_counts(
+            file_import_relations
+        )
+        file_import_resolution_counts_by_language = (
+            _summarize_file_import_resolution_counts_by_language(
+                file_import_relations
+            )
+        )
+        file_import_counts_by_language = _summarize_file_import_counts_by_language(
+            file_import_relations
+        )
         unresolved_by_type = dict(
             Counter(
                 item.relation_type
@@ -684,6 +818,10 @@ def _index_graph(
                 f"typescript_resolution_source_counts={typescript_resolution_source_counts}, "
                 f"kotlin_resolution_source_counts={kotlin_resolution_source_counts}, "
                 f"swift_resolution_source_counts={swift_resolution_source_counts}, "
+                f"file_import_resolution_counts={file_import_resolution_counts}, "
+                "file_import_resolution_counts_by_language="
+                f"{file_import_resolution_counts_by_language}, "
+                f"file_import_counts_by_language={file_import_counts_by_language}, "
                 f"unresolved_count={unresolved_count}, "
                 f"unresolved_by_type={unresolved_by_type}, "
                 f"unresolved_ratio={unresolved_ratio}, "
@@ -730,6 +868,11 @@ def _index_graph(
                 ),
                 "kotlin_resolution_source_counts": kotlin_resolution_source_counts,
                 "swift_resolution_source_counts": swift_resolution_source_counts,
+                "file_import_resolution_counts": file_import_resolution_counts,
+                "file_import_resolution_counts_by_language": (
+                    file_import_resolution_counts_by_language
+                ),
+                "file_import_counts_by_language": file_import_counts_by_language,
                 "unresolved_count": unresolved_count,
                 "unresolved_by_type": unresolved_by_type,
                 "unresolved_ratio": unresolved_ratio,
@@ -759,6 +902,9 @@ def _index_graph(
             "typescript_resolution_source_counts": {},
             "kotlin_resolution_source_counts": {},
             "swift_resolution_source_counts": {},
+            "file_import_resolution_counts": {},
+            "file_import_resolution_counts_by_language": {},
+            "file_import_counts_by_language": {},
             "unresolved_count": 0,
             "unresolved_by_type": {},
             "unresolved_ratio": 0.0,

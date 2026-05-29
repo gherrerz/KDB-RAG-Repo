@@ -77,6 +77,13 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 - Validacion manual de cierre de Fase 1 para Kotlin y Swift sobre archivos
     reales temporales usando `scan_repository()`, `extract_symbol_chunks()` y
     semantica por lenguaje.
+- Nueva ruta graph-first para consultas de impacto por archivo en
+    `POST /query` y `POST /query/retrieval`, con dependientes directos y
+    transitivos hasta profundidad 2 via `IMPORTS_FILE`.
+- Nuevos diagnosticos de ingesta para file imports:
+    `semantic_graph.file_import_resolution_counts`,
+    `semantic_graph.file_import_resolution_counts_by_language` y
+    `semantic_graph.file_import_counts_by_language`.
 
 ### Changed
 
@@ -108,6 +115,10 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
     contrato por defecto priorice levantar la API.
 - `Dockerfile` mantiene build de runtime usando el contrato API-first de
     `requirements.txt`, dejando fuera PySide6 y pytest del contenedor.
+- Python, Java, JavaScript, TypeScript, Kotlin y Swift ahora alimentan
+        `FileImportRelation` para aristas `IMPORTS_FILE`/`IMPORTS_EXTERNAL_FILE`;
+        Swift mantiene emision conservadora y Go queda fuera del contrato
+        semantico de impacto por archivo.
 - `chromadb` se actualiza a `1.5.5` para alinear el stack vectorial con versiones recientes del ecosistema.
 - README reestructurado como portal corto de navegacion.
 - API reference reorganizada por journeys y operaciones.

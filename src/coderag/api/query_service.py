@@ -30,6 +30,7 @@ from coderag.api import inventory_query_flow as inventory_query_flow_service
 from coderag.api import literal_mode as literal_mode_service
 from coderag.api.citation_filters import build_inventory_citations, is_noisy_path
 from coderag.api.query_diagnostics import (
+    build_graph_first_response_diagnostics,
     build_inventory_diagnostics,
     build_inventory_missing_target_diagnostics,
     build_query_diagnostics,
@@ -104,6 +105,7 @@ def _discover_repo_modules(repo_id: str) -> list[str]:
 
 _is_inventory_query = query_signals_service.is_inventory_query
 _is_external_import_query = query_signals_service.is_external_import_query
+_is_impact_query = query_signals_service.is_impact_query
 _normalize_query_signal_text = query_signals_service.normalize_query_signal_text
 _extract_file_reference_candidates = (
     query_signals_service.extract_file_reference_candidates
@@ -250,6 +252,7 @@ def _inventory_graph_first_hooks(
     return inventory_graph_first_service.InventoryGraphFirstHooks(
         get_settings=get_settings,
         graph_builder_factory=GraphBuilder,
+        is_impact_query=_is_impact_query,
         is_reverse_file_import_query=_is_reverse_file_import_query,
         extract_file_reference_candidates=_extract_file_reference_candidates,
         sanitize_inventory_pagination=_sanitize_inventory_pagination,
@@ -644,6 +647,17 @@ def _build_retrieval_inventory_response(
     include_context: bool,
 ) -> RetrievalQueryResponse:
     """Adapta una respuesta de inventario al contrato retrieval-only."""
+    hop_distance_by_path: dict[str, int] = {}
+    diagnostics = dict(inventory_response.diagnostics)
+    for key in ("direct_dependents", "transitive_dependents"):
+        for item in diagnostics.get(key, []):
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path", "") or "").strip()
+            hop_distance = int(item.get("hop_distance", 1) or 1)
+            if path:
+                hop_distance_by_path[path] = hop_distance
+
     chunks: list[RetrievedChunk] = []
     for item in inventory_response.items:
         chunk_id = f"inventory:{item.path}:{item.start_line}:{item.end_line}"
@@ -661,19 +675,21 @@ def _build_retrieval_inventory_response(
                     "start_line": item.start_line,
                     "end_line": item.end_line,
                     "kind": item.kind,
+                    "hop_distance": hop_distance_by_path.get(item.path, 1),
                     "inventory_label": item.label,
                 },
             )
         )
 
-    diagnostics = dict(inventory_response.diagnostics)
+    diagnostics = build_graph_first_response_diagnostics(
+        base_diagnostics=diagnostics,
+        page=inventory_response.page,
+        page_size=inventory_response.page_size,
+        total=inventory_response.total,
+        mode="retrieval_only",
+    )
     diagnostics.update(
         {
-            "mode": "retrieval_only",
-            "inventory_route": "graph_first_retrieval",
-            "inventory_page": inventory_response.page,
-            "inventory_page_size": inventory_response.page_size,
-            "inventory_total": inventory_response.total,
             "retrieved": inventory_response.total,
             "reranked": len(chunks),
             "graph_nodes": 0,
@@ -936,7 +952,7 @@ def _resolve_graph_first_inventory_route(
     repo_id: str,
     query: str,
     page_size: int,
-) -> tuple[InventoryQueryResponse | None, bool, str | None, bool]:
+) -> tuple[InventoryQueryResponse | None, bool, str | None, str | None]:
     """Resuelve short-circuits graph-first compartidos antes del flujo general."""
     return inventory_graph_first_service.resolve_graph_first_inventory_route(
         repo_id=repo_id,
@@ -1106,7 +1122,7 @@ def run_query(
     """Ejecute el proceso de consulta completo y devuelva la respuesta con citas."""
     settings = get_settings()
     inventory_page_size = int(getattr(settings, "inventory_page_size", 80))
-    inventory_response, inventory_intent, inventory_target, is_reverse_import = (
+    inventory_response, inventory_intent, inventory_target, graph_first_route = (
         _resolve_graph_first_inventory_route(
             repo_id=repo_id,
             query=query,
@@ -1114,18 +1130,21 @@ def run_query(
         )
     )
     if inventory_response is not None:
-        diagnostics = dict(inventory_response.diagnostics)
-        diagnostics.update(
-            {
-                "inventory_route": (
-                    "graph_reverse_import"
-                    if is_reverse_import
-                    else "graph_first"
-                ),
-                "inventory_page": inventory_response.page,
-                "inventory_page_size": inventory_response.page_size,
-                "inventory_total": inventory_response.total,
-            }
+        default_route = (
+            "graph_reverse_import"
+            if graph_first_route == "reverse_import"
+            else (
+                "graph_direct_impact"
+                if graph_first_route == "impact"
+                else "graph_first"
+            )
+        )
+        diagnostics = build_graph_first_response_diagnostics(
+            base_diagnostics=inventory_response.diagnostics,
+            page=inventory_response.page,
+            page_size=inventory_response.page_size,
+            total=inventory_response.total,
+            default_route=default_route,
         )
         return QueryResponse(
             answer=inventory_response.answer,

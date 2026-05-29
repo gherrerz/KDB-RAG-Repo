@@ -199,7 +199,7 @@ Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 - `SEMANTIC_GRAPH_TYPESCRIPT_ENABLED`: activa extractor semantico TypeScript fase 1. Default: `true`.
 - `SEMANTIC_GRAPH_KOTLIN_ENABLED`: activa extractor semantico Kotlin fase 1. Default: `true`.
 - `SEMANTIC_GRAPH_SWIFT_ENABLED`: activa extractor semantico Swift fase 1. Default: `true`.
-- `SEMANTIC_GRAPH_FILE_EDGES_ENABLED`: persiste aristas derivadas `(:File)-[:IMPORTS_FILE]->(:File)` a partir de relaciones semanticas resueltas. Default: `true`.
+- `SEMANTIC_GRAPH_FILE_EDGES_ENABLED`: persiste aristas derivadas `(:File)-[:IMPORTS_FILE]->(:File)` a partir de imports top-level resueltos en Python, Java, JavaScript, TypeScript, Kotlin y Swift. Default: `true`.
 - `SEMANTIC_TSCONFIG_RESOLUTION_ENABLED`: habilita resolucion de `baseUrl` y `paths` desde el primer `tsconfig.json` o `jsconfig.json` escaneado para imports JS/TS no relativos. Default: `true`.
 - `SEMANTIC_GRAPH_QUERY_ENABLED`: activa expansion semantica en query. Default: `true`.
 - `SEMANTIC_RELATION_TYPES`: tipos de relacion considerados en expansion semantica. Default: `CALLS,IMPORTS,EXTENDS,IMPLEMENTS`.
@@ -346,6 +346,16 @@ query, health y reset, porque el runtime comparte el mismo cliente HTTP.
 - Si `SEMANTIC_GRAPH_FILE_EDGES_ENABLED=true`, la persistencia a Neo4j agrega
   aristas derivadas entre archivos a partir de relaciones `Symbol -> Symbol`
   ya resueltas, sin cambiar el contrato de expansión semántica por símbolos.
+- En Swift, esas aristas de archivo se materializan de forma conservadora:
+  solo se persisten como internas cuando el resolvedor identifica un archivo
+  objetivo claro; en caso contrario, el import queda como externo.
+- Las consultas de impacto por archivo, por ejemplo `que se afecta si cambio
+  src/app/Feature.kt`, usan `IMPORTS_FILE` por una ruta graph-first con
+  profundidad fija 2 y devuelven dependientes directos y transitivos tanto en
+  query como en retrieval-only.
+- Go permanece fuera del alcance de la semántica experimental: puede escanearse
+  e indexarse de forma estructural, pero no emite `FileImportRelation` ni
+  participa en el contrato graph-first de impacto por archivo.
 - Si `SEMANTIC_GRAPH_QUERY_ENABLED=true`, la expansion de grafo en query usa
   `SEMANTIC_RELATION_TYPES` y `SEMANTIC_RELATION_WEIGHTS` respetando budgets.
 - `NEO4J_URI` cambia por entorno:

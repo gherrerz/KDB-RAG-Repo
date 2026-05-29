@@ -1,7 +1,7 @@
 """Tests for TypeScript semantic relation extraction phase 1."""
 
 import coderag.ingestion.semantic_typescript as semantic_typescript
-from coderag.core.models import ScannedFile
+from coderag.core.models import FileImportRelation, ScannedFile
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.semantic_typescript import extract_typescript_semantic_relations
 
@@ -247,4 +247,48 @@ def test_extract_typescript_semantic_relations_resolves_tsconfig_alias_when_enab
         and item.target_ref == "Base"
         and item.target_symbol_id is not None
         for item in relations
+    )
+
+
+def test_extract_typescript_semantic_relations_emits_top_level_file_imports() -> None:
+    """Captura imports TS top-level como relaciones file->file o externas."""
+    scanned_files = [
+        ScannedFile(
+            path="src/base.ts",
+            language="typescript",
+            content="export class Base {}\n",
+        ),
+        ScannedFile(
+            path="src/service.ts",
+            language="typescript",
+            content=(
+                "import { Base } from './base';\n"
+                "import type { ReactNode } from 'react';\n\n"
+                "export class Service extends Base {}\n"
+            ),
+        ),
+    ]
+    symbols = extract_symbol_chunks(repo_id="repo-ts", scanned_files=scanned_files)
+    file_imports: list[FileImportRelation] = []
+
+    extract_typescript_semantic_relations(
+        repo_id="repo-ts",
+        scanned_files=scanned_files,
+        symbols=symbols,
+        file_imports_sink=file_imports,
+    )
+
+    assert any(
+        item.source_path == "src/service.ts"
+        and item.target_path == "src/base.ts"
+        and item.target_ref == "./base"
+        and item.target_kind == "file"
+        for item in file_imports
+    )
+    assert any(
+        item.source_path == "src/service.ts"
+        and item.target_path is None
+        and item.target_ref == "react"
+        and item.target_kind == "external"
+        for item in file_imports
     )

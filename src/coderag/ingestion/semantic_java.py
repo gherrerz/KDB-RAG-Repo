@@ -6,7 +6,12 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable
 
-from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.core.models import (
+    FileImportRelation,
+    ScannedFile,
+    SemanticRelation,
+    SymbolChunk,
+)
 
 _IMPORT_PATTERN = re.compile(
     r"^\s*import\s+(?:static\s+)?([A-Za-z_][A-Za-z0-9_\.\*]*)\s*;"
@@ -123,6 +128,45 @@ def _build_fqcn_index(
             fqcn = f"{package_name}.{symbol.symbol_name}"
             fqcn_index[fqcn] = symbol.id
     return fqcn_index
+
+
+def _build_top_level_file_import_relations(
+    repo_id: str,
+    file_obj: ScannedFile,
+    *,
+    resolve_target: Callable[[str], tuple[str | None, str]],
+    symbol_path_by_id: dict[str, str],
+) -> list[FileImportRelation]:
+    """Emit Java file-scoped import edges from top-level import lines."""
+    relations: list[FileImportRelation] = []
+    seen: set[tuple[str, str, int]] = set()
+
+    for line_number, line in enumerate(file_obj.content.splitlines(), start=1):
+        import_match = _IMPORT_PATTERN.match(line)
+        if not import_match:
+            continue
+        target_ref = import_match.group(1).strip()
+        target_symbol_id, resolution_method = resolve_target(target_ref)
+        target_path = symbol_path_by_id.get(target_symbol_id or "")
+        dedup_key = (file_obj.path, target_path or target_ref, line_number)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        relations.append(
+            FileImportRelation(
+                repo_id=repo_id,
+                source_path=file_obj.path,
+                target_path=target_path,
+                target_ref=target_ref,
+                target_kind="file" if target_path else "external",
+                path=file_obj.path,
+                line=line_number,
+                language="java",
+                resolution_method=resolution_method,
+            )
+        )
+
+    return relations
 
 
 def _build_java_target_resolver(
@@ -314,6 +358,7 @@ def extract_java_semantic_relations(
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
     resolution_stats_sink: dict[str, int] | None = None,
+    file_imports_sink: list[FileImportRelation] | None = None,
 ) -> list[SemanticRelation]:
     """Extrae relaciones Java fase 1: IMPORTS, EXTENDS/IMPLEMENTS y CALLS."""
     by_file_symbols, by_file_name, global_types_by_name = _build_symbol_indexes(
@@ -321,7 +366,9 @@ def extract_java_semantic_relations(
     )
     path_to_package = _build_path_to_package(scanned_files)
     fqcn_index = _build_fqcn_index(symbols, path_to_package)
+    symbol_path_by_id = {item.id: item.path for item in symbols}
     relations: list[SemanticRelation] = []
+    file_import_relations: list[FileImportRelation] = []
     resolution_source_counts: Counter[str] = Counter()
 
     for file_obj in _java_files(scanned_files):
@@ -334,6 +381,14 @@ def extract_java_semantic_relations(
             global_types_by_name=global_types_by_name,
             path_to_package=path_to_package,
             fqcn_index=fqcn_index,
+        )
+        file_import_relations.extend(
+            _build_top_level_file_import_relations(
+                repo_id,
+                file_obj,
+                resolve_target=resolve_target,
+                symbol_path_by_id=symbol_path_by_id,
+            )
         )
 
         for line_number, line in enumerate(file_obj.content.splitlines(), start=1):
@@ -440,4 +495,6 @@ def extract_java_semantic_relations(
     if resolution_stats_sink is not None:
         resolution_stats_sink.clear()
         resolution_stats_sink.update(dict(resolution_source_counts))
+    if file_imports_sink is not None:
+        file_imports_sink.extend(file_import_relations)
     return relations

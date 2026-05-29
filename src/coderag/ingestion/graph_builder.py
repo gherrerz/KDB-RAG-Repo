@@ -894,6 +894,88 @@ class GraphBuilder:
             )
             return [record.data() for record in records]
 
+    def query_file_impact_paths(
+        self,
+        repo_id: str,
+        target_paths: list[str],
+        *,
+        max_depth: int = 2,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Devuelve archivos impactados por IMPORTS_FILE a profundidad fija 1..2."""
+        normalized_target_paths = [
+            item.strip() for item in target_paths if item and item.strip()
+        ]
+        if not normalized_target_paths:
+            return []
+
+        effective_depth = 1 if int(max_depth) <= 1 else 2
+        if effective_depth == 1:
+            query = """
+            MATCH (source:File {repo_id: $repo_id})-[:IMPORTS_FILE]->
+                  (target:File {repo_id: $repo_id})
+            WHERE target.path IN $target_paths
+            RETURN DISTINCT
+                   split(source.path, '/')[size(split(source.path, '/')) - 1] AS label,
+                   source.path AS path,
+                   'file_impact_direct' AS kind,
+                   1 AS start_line,
+                   1 AS end_line,
+                   1 AS hop_distance
+            ORDER BY hop_distance ASC, path ASC
+            LIMIT $limit
+            """
+        else:
+            query = """
+            CALL {
+                MATCH (source:File {repo_id: $repo_id})-[:IMPORTS_FILE]->
+                      (target:File {repo_id: $repo_id})
+                WHERE target.path IN $target_paths
+                RETURN DISTINCT
+                       split(source.path, '/')[size(split(source.path, '/')) - 1] AS label,
+                       source.path AS path,
+                       1 AS start_line,
+                       1 AS end_line,
+                       1 AS hop_distance
+                UNION
+                MATCH (source:File {repo_id: $repo_id})-[:IMPORTS_FILE]->
+                      (middle:File {repo_id: $repo_id})-[:IMPORTS_FILE]->
+                      (target:File {repo_id: $repo_id})
+                WHERE target.path IN $target_paths
+                  AND NOT source.path IN $target_paths
+                RETURN DISTINCT
+                       split(source.path, '/')[size(split(source.path, '/')) - 1] AS label,
+                       source.path AS path,
+                       1 AS start_line,
+                       1 AS end_line,
+                       2 AS hop_distance
+            }
+            WITH label, path, start_line, end_line, min(hop_distance) AS hop_distance
+            RETURN label,
+                   path,
+                   CASE
+                       WHEN hop_distance = 1 THEN 'file_impact_direct'
+                       ELSE 'file_impact_transitive'
+                   END AS kind,
+                   start_line,
+                   end_line,
+                   hop_distance
+            ORDER BY hop_distance ASC, path ASC
+            LIMIT $limit
+            """
+
+        with self._managed_session(
+            operation="consultar impacto por archivo",
+            repo_id=repo_id,
+        ) as session:
+            records = session.run(
+                query,
+                repo_id=repo_id,
+                target_paths=normalized_target_paths,
+                limit=max(1, int(limit)),
+            )
+            return [record.data() for record in records]
+
     def query_file_purpose_summaries(
         self,
         repo_id: str,

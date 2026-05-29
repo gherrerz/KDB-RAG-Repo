@@ -22,8 +22,17 @@ de codigo con evidencia verificable (archivos y lineas).
   EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
 - Permite habilitar grafo semantico Swift fase 1 (IMPORTS,
   EXTENDS/IMPLEMENTS, CALLS basicos) con flag dedicado.
+- Persiste aristas de archivo `IMPORTS_FILE` e `IMPORTS_EXTERNAL_FILE` a
+  partir de imports top-level resueltos en Python, Java, JavaScript,
+  TypeScript, Kotlin y Swift.
 - Permite habilitar expansion semantica en query con filtros por tipo de
   relacion y budgets de nodos/aristas/latencia.
+- Resuelve consultas de impacto por archivo por ruta graph-first, con
+  dependientes directos y transitivos hasta profundidad 2 tanto en
+  `POST /query` como en `POST /query/retrieval`.
+- Go sigue disponible para escaneo estructural y citas textuales, pero no
+  forma parte del contrato actual de grafo semantico ni de impacto por
+  archivo.
 - Responde consultas por dos rutas:
   - Query con LLM y verificacion.
   - Retrieval-only sin sintesis LLM.
@@ -303,6 +312,10 @@ flowchart LR
 | Ingesta | POST /repos/ingest | Job con estado y logs | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Query con LLM | POST /query | Answer con citas + diagnostics | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) |
 | Query retrieval-only | POST /query/retrieval | Chunks + citations + stats | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) |
+
+Las rutas de query y retrieval-only pueden resolver graph-first consultas de
+inventario inverso e impacto por archivo sin depender del retrieval híbrido
+cuando el grafo ya tiene aristas `IMPORTS_FILE`/`IMPORTS_EXTERNAL_FILE`.
 
 ## API Rapida
 

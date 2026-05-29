@@ -35,6 +35,37 @@ def is_external_import_query(query: str) -> bool:
     return any(token in normalized for token in signals)
 
 
+def is_impact_query(query: str) -> bool:
+    """Detect questions about files impacted by changing another file."""
+    candidates = extract_file_reference_candidates(query)
+    if not candidates:
+        return False
+
+    normalized = normalize_query_signal_text(query)
+    impact_patterns = (
+        r"\bimpact(?:o|os)?\b",
+        r"\baffected?\b",
+        r"\bafecta(?:r|ria|rian|do)?\b",
+        r"\bimpactaria(?:n)?\b",
+    )
+    change_patterns = (
+        r"\bchang(?:e|ing|ed)\b",
+        r"\bmodif(?:y|ying|ied|icar|ico|ique|icaria|icaria)\b",
+        r"\bedit(?:ar|o|ed|ing)?\b",
+        r"\bactualiz(?:ar|o|ado|aria)\b",
+        r"\btoc(?:ar|o|aria)\b",
+    )
+    if any(re.search(pattern, normalized) for pattern in impact_patterns) and any(
+        re.search(pattern, normalized) for pattern in change_patterns
+    ):
+        return True
+
+    return bool(
+        re.search(r"\b(?:what|which|que|cuales?)\b.*\bimpact", normalized)
+        or re.search(r"\b(?:si|if)\b.*\bchang", normalized)
+    )
+
+
 def normalize_query_signal_text(query: str) -> str:
     """Normalize query text to detect signals with or without accents."""
     normalized = unicodedata.normalize("NFKD", query.lower())
@@ -49,7 +80,7 @@ def extract_file_reference_candidates(query: str) -> tuple[str, ...]:
     """Extract file-like references from the user query."""
     matches = re.findall(
         r"[A-Za-z0-9_./\\-]+\."
-        r"(?:py|js|jsx|ts|tsx|java|json|ya?ml|md|txt|c|h|cpp|hpp|cs|go|rb|php|rs)",
+        r"(?:py|js|jsx|ts|tsx|java|json|ya?ml|md|txt|c|h|cpp|hpp|cs|go|rb|php|rs|kt|kts|swift)",
         query,
         flags=re.IGNORECASE,
     )

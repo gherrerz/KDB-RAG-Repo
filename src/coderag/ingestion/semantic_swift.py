@@ -8,7 +8,12 @@ from collections.abc import Iterable, Iterator
 from pathlib import PurePosixPath
 from typing import Any
 
-from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.core.models import (
+    FileImportRelation,
+    ScannedFile,
+    SemanticRelation,
+    SymbolChunk,
+)
 from coderag.ingestion.extractors.treesitter_runtime import (
     TreeSitterUnavailableError,
     parse_source,
@@ -39,6 +44,7 @@ def extract_swift_semantic_relations(
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
     resolution_stats_sink: dict[str, int] | None = None,
+    file_imports_sink: list[FileImportRelation] | None = None,
 ) -> list[SemanticRelation]:
     """Extract Swift IMPORTS, EXTENDS, IMPLEMENTS and CALLS relations."""
     swift_files = _swift_files(scanned_files)
@@ -50,12 +56,14 @@ def extract_swift_semantic_relations(
         symbol_by_id,
         owner_symbol_by_member_id,
     ) = _build_symbol_indexes(symbols)
+    symbol_path_by_id = {item.id: item.path for item in symbols}
     type_receiver_hints_index = _build_type_receiver_hints_index(
         swift_files=swift_files,
         parsed_roots=parsed_roots,
     )
     resolution_counts: Counter[str] = Counter()
     relations: list[SemanticRelation] = []
+    file_import_relations: list[FileImportRelation] = []
 
     for file_obj in swift_files:
         file_symbols = by_file.get(file_obj.path, [])
@@ -72,6 +80,15 @@ def extract_swift_semantic_relations(
             global_by_name=global_by_name,
             symbol_by_id=symbol_by_id,
             owner_symbol_by_member_id=owner_symbol_by_member_id,
+        )
+        file_import_relations.extend(
+            _build_top_level_file_import_relations(
+                repo_id,
+                file_obj,
+                root=root,
+                resolve_target=resolve_target,
+                symbol_path_by_id=symbol_path_by_id,
+            )
         )
         relations.extend(
             _extract_import_relations(
@@ -110,6 +127,8 @@ def extract_swift_semantic_relations(
     if resolution_stats_sink is not None:
         resolution_stats_sink.clear()
         resolution_stats_sink.update(dict(resolution_counts))
+    if file_imports_sink is not None:
+        file_imports_sink.extend(file_import_relations)
     return relations
 
 
@@ -294,6 +313,46 @@ def _extract_import_relations(
                 path=file_obj.path,
                 line=line,
                 confidence=0.95,
+                language="swift",
+                resolution_method=resolution_method,
+            )
+        )
+    return relations
+
+
+def _build_top_level_file_import_relations(
+    repo_id: str,
+    file_obj: ScannedFile,
+    *,
+    root: Any,
+    resolve_target: Any,
+    symbol_path_by_id: dict[str, str],
+) -> list[FileImportRelation]:
+    """Emit conservative Swift file-scoped import edges from import declarations."""
+    relations: list[FileImportRelation] = []
+    seen: set[tuple[str, str, int]] = set()
+    for node in root.named_children:
+        if node.type != "import_declaration":
+            continue
+        target_ref = _import_target_name(node)
+        if not target_ref:
+            continue
+        line = node.start_point[0] + 1
+        target_symbol_id, resolution_method = resolve_target(target_ref)
+        target_path = symbol_path_by_id.get(target_symbol_id or "")
+        dedup_key = (file_obj.path, target_path or target_ref, line)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        relations.append(
+            FileImportRelation(
+                repo_id=repo_id,
+                source_path=file_obj.path,
+                target_path=target_path,
+                target_ref=target_ref,
+                target_kind="file" if target_path else "external",
+                path=file_obj.path,
+                line=line,
                 language="swift",
                 resolution_method=resolution_method,
             )

@@ -1,6 +1,6 @@
 """Tests for Kotlin semantic relation extraction phase 1."""
 
-from coderag.core.models import ScannedFile
+from coderag.core.models import FileImportRelation, ScannedFile
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.semantic_kotlin import extract_kotlin_semantic_relations
 
@@ -127,4 +127,49 @@ def test_extract_kotlin_semantic_relations_resolves_cross_file_targets() -> None
         and item.target_ref == "helper"
         and item.target_symbol_id == helper_symbol_id
         for item in relations
+    )
+
+
+def test_extract_kotlin_semantic_relations_emits_top_level_file_imports() -> None:
+    """Captura imports Kotlin top-level como relaciones file->file o externas."""
+    scanned_files = [
+        ScannedFile(
+            path="src/com/acme/api/Service.kt",
+            language="kotlin",
+            content="package com.acme.api\n\ninterface Service\n",
+        ),
+        ScannedFile(
+            path="src/com/acme/app/Impl.kt",
+            language="kotlin",
+            content=(
+                "package com.acme.app\n\n"
+                "import com.acme.api.Service\n"
+                "import kotlinx.coroutines.Job\n\n"
+                "class Impl: Service\n"
+            ),
+        ),
+    ]
+    symbols = extract_symbol_chunks(repo_id="repo-kotlin", scanned_files=scanned_files)
+    file_imports: list[FileImportRelation] = []
+
+    extract_kotlin_semantic_relations(
+        repo_id="repo-kotlin",
+        scanned_files=scanned_files,
+        symbols=symbols,
+        file_imports_sink=file_imports,
+    )
+
+    assert any(
+        item.source_path == "src/com/acme/app/Impl.kt"
+        and item.target_path == "src/com/acme/api/Service.kt"
+        and item.target_ref == "com.acme.api.Service"
+        and item.target_kind == "file"
+        for item in file_imports
+    )
+    assert any(
+        item.source_path == "src/com/acme/app/Impl.kt"
+        and item.target_path is None
+        and item.target_ref == "kotlinx.coroutines.Job"
+        and item.target_kind == "external"
+        for item in file_imports
     )

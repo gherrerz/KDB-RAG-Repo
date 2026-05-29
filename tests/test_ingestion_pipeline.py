@@ -1486,7 +1486,11 @@ def test_index_graph_mixed_kotlin_swift_preserves_python_outputs(
         for item in captured["semantic_relations"]
         if item.language == "python"
     ]
-    python_file_imports_from_mixed = list(captured["file_import_relations"])
+    python_file_imports_from_mixed = [
+        item
+        for item in captured["file_import_relations"]
+        if item.language == "python"
+    ]
 
     assert {
         _symbol_key(item) for item in python_symbols_from_mixed
@@ -1504,6 +1508,127 @@ def test_index_graph_mixed_kotlin_swift_preserves_python_outputs(
         item.language == "kotlin" for item in captured["semantic_relations"]
     )
     assert any(item.language == "swift" for item in captured["semantic_relations"])
+
+
+def test_index_graph_multilanguage_file_imports_feed_graph_edges(
+    monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
+) -> None:
+    """Integra Python, TypeScript, Kotlin y Swift en el mismo sink de file imports."""
+    scanned = [
+        ScannedFile(
+            path="pkg/shared.py",
+            language="python",
+            content="def helper():\n    return 1\n",
+        ),
+        ScannedFile(
+            path="pkg/consumer.py",
+            language="python",
+            content="from pkg.shared import helper\n",
+        ),
+        ScannedFile(
+            path="web/button.tsx",
+            language="typescript",
+            content="export function Button(): JSX.Element { return <button /> }\n",
+        ),
+        ScannedFile(
+            path="web/page.tsx",
+            language="typescript",
+            content="import { Button } from './button';\nexport function Page(): JSX.Element { return <Button /> }\n",
+        ),
+        ScannedFile(
+            path="src/com/acme/api/Service.kt",
+            language="kotlin",
+            content="package com.acme.api\n\ninterface Service\n",
+        ),
+        ScannedFile(
+            path="src/com/acme/app/Impl.kt",
+            language="kotlin",
+            content="package com.acme.app\n\nimport com.acme.api.Service\n\nclass Impl: Service\n",
+        ),
+        ScannedFile(
+            path="src/App/Impl.swift",
+            language="swift",
+            content="import Foundation\n\nclass Impl {}\n",
+        ),
+    ]
+    diagnostics: dict[str, object] = {}
+    captured: dict[str, object] = {}
+
+    class _FakeGraphBuilder:
+        def upsert_repo_graph(
+            self,
+            repo_id: str,
+            scanned_files: list[ScannedFile],
+            symbols: list[SymbolChunk],
+            semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations: list[FileImportRelation] | None = None,
+        ) -> None:
+            captured["file_import_relations"] = file_import_relations or []
+
+        def close(self) -> None:
+            return None
+
+    symbols = pipeline.extract_symbol_chunks(repo_id="rmulti", scanned_files=scanned)
+
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=False,
+        semantic_graph_typescript_enabled=True,
+        semantic_graph_kotlin_enabled=True,
+        semantic_graph_swift_enabled=True,
+    )
+    monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
+
+    pipeline._index_graph(
+        repo_id="rmulti",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    file_imports = captured["file_import_relations"]
+    assert {item.language for item in file_imports} == {
+        "python",
+        "typescript",
+        "kotlin",
+        "swift",
+    }
+    assert any(
+        item.language == "python"
+        and item.target_path == "pkg/shared.py"
+        and item.target_kind == "file"
+        for item in file_imports
+    )
+    assert any(
+        item.language == "typescript"
+        and item.target_path == "web/button.tsx"
+        and item.target_kind == "file"
+        for item in file_imports
+    )
+    assert any(
+        item.language == "kotlin"
+        and item.target_path == "src/com/acme/api/Service.kt"
+        and item.target_kind == "file"
+        for item in file_imports
+    )
+    assert any(
+        item.language == "swift"
+        and item.target_path is None
+        and item.target_ref == "Foundation"
+        and item.target_kind == "external"
+        for item in file_imports
+    )
+    assert diagnostics["semantic_graph"]["file_import_counts_by_language"] == {
+        "kotlin": {"total": 1, "internal": 1, "external": 0},
+        "python": {"total": 1, "internal": 1, "external": 0},
+        "swift": {"total": 1, "internal": 0, "external": 1},
+        "typescript": {"total": 1, "internal": 1, "external": 0},
+    }
 
 
 def test_index_graph_reports_java_resolution_source_counts(
@@ -1797,6 +1922,170 @@ def test_index_graph_reports_python_top_level_file_import_counts(
         diagnostics["semantic_graph"]["python_top_level_file_import_external_count"]
         == 1
     )
+
+
+def test_index_graph_normalizes_file_import_resolution_methods_and_reports_counts(
+    monkeypatch: pytest.MonkeyPatch,
+    patch_module_settings,
+    tmp_path: Path,
+) -> None:
+    """Normaliza resolution_method de file imports y expone conteos canónicos."""
+    scanned = [
+        ScannedFile(
+            path="src/a.py",
+            language="python",
+            content="from pkg import mod\n",
+        ),
+        ScannedFile(
+            path="src/a.js",
+            language="javascript",
+            content="import Base from './base';\n",
+        ),
+    ]
+    symbols = [
+        SymbolChunk(
+            id="sp1",
+            repo_id="rp",
+            path="src/a.py",
+            language="python",
+            symbol_name="a",
+            symbol_type="function",
+            start_line=1,
+            end_line=1,
+            snippet="def a():\n    pass",
+        )
+    ]
+    diagnostics: dict[str, object] = {}
+    captured: dict[str, object] = {}
+
+    class _FakeGraphBuilder:
+        def upsert_repo_graph(
+            self,
+            repo_id: str,
+            scanned_files: list[ScannedFile],
+            symbols: list[SymbolChunk],
+            semantic_relations: list[SemanticRelation] | None = None,
+            file_import_relations=None,
+        ) -> None:
+            captured["file_import_relations"] = file_import_relations or []
+
+        def close(self) -> None:
+            return None
+
+    def _fake_python_extract(
+        repo_id: str,
+        scanned_files: list[ScannedFile],
+        symbols: list[SymbolChunk],
+        resolution_stats_sink: dict[str, int] | None = None,
+        file_imports_sink: list[FileImportRelation] | None = None,
+    ) -> list[SemanticRelation]:
+        if file_imports_sink is not None:
+            file_imports_sink.extend(
+                [
+                    FileImportRelation(
+                        repo_id=repo_id,
+                        source_path="src/a.py",
+                        target_path="src/pkg/mod.py",
+                        target_ref="pkg.mod",
+                        target_kind="file",
+                        path="src/a.py",
+                        line=1,
+                        language="python",
+                        resolution_method="import_from",
+                    ),
+                    FileImportRelation(
+                        repo_id=repo_id,
+                        source_path="src/a.py",
+                        target_path=None,
+                        target_ref="requests",
+                        target_kind="external",
+                        path="src/a.py",
+                        line=2,
+                        language="python",
+                        resolution_method="import",
+                    ),
+                ]
+            )
+        return []
+
+    def _fake_javascript_extract(
+        repo_id: str,
+        scanned_files: list[ScannedFile],
+        symbols: list[SymbolChunk],
+        resolution_stats_sink: dict[str, int] | None = None,
+        file_imports_sink: list[FileImportRelation] | None = None,
+    ) -> list[SemanticRelation]:
+        if file_imports_sink is not None:
+            file_imports_sink.extend(
+                [
+                    FileImportRelation(
+                        repo_id=repo_id,
+                        source_path="src/a.js",
+                        target_path="src/base.js",
+                        target_ref="./base",
+                        target_kind="file",
+                        path="src/a.js",
+                        line=1,
+                        language="javascript",
+                        resolution_method="path",
+                    )
+                ]
+            )
+        return []
+
+    _patch_pipeline_settings(
+        patch_module_settings,
+        tmp_path,
+        semantic_graph_enabled=True,
+        semantic_graph_java_enabled=False,
+        semantic_graph_javascript_enabled=True,
+        semantic_graph_typescript_enabled=False,
+    )
+    monkeypatch.setattr(pipeline, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(pipeline, "extract_python_semantic_relations", _fake_python_extract)
+    monkeypatch.setattr(
+        pipeline,
+        "extract_javascript_semantic_relations",
+        _fake_javascript_extract,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_java_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_typescript_semantic_relations",
+        lambda repo_id, scanned_files, symbols, resolution_stats_sink=None: [],
+    )
+
+    pipeline._index_graph(
+        repo_id="rp",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    normalized_methods = {
+        (item.language, item.target_ref): item.resolution_method
+        for item in captured["file_import_relations"]
+    }
+    assert normalized_methods == {
+        ("python", "pkg.mod"): "import_path",
+        ("python", "requests"): "import_path",
+        ("javascript", "./base"): "import_path",
+    }
+    assert diagnostics["semantic_graph"]["file_import_resolution_counts"] == {
+        "import_path": 3
+    }
+    assert diagnostics["semantic_graph"]["file_import_resolution_counts_by_language"] == {
+        "javascript": {"import_path": 1},
+        "python": {"import_path": 2},
+    }
+    assert diagnostics["semantic_graph"]["file_import_counts_by_language"] == {
+        "javascript": {"total": 1, "internal": 1, "external": 0},
+        "python": {"total": 2, "internal": 1, "external": 1},
+    }
 
 
 def test_index_graph_runs_typescript_semantics_only_when_enabled(

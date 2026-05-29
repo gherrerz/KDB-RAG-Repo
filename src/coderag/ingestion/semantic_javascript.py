@@ -7,7 +7,12 @@ from collections import Counter
 from collections.abc import Iterable
 
 from coderag.core.settings import get_settings
-from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.core.models import (
+    FileImportRelation,
+    ScannedFile,
+    SemanticRelation,
+    SymbolChunk,
+)
 from coderag.ingestion.module_resolver import (
     build_js_export_index,
     load_tsconfig_paths,
@@ -122,6 +127,51 @@ def _parse_import_bindings(
     return bindings
 
 
+def _build_top_level_file_import_relations(
+    repo_id: str,
+    file_obj: ScannedFile,
+    scanned_paths: set[str],
+    *,
+    tsconfig_paths: dict[str, str],
+    tsconfig_base_url: str | None,
+) -> list[FileImportRelation]:
+    """Emit JS file-scoped import edges from top-level import lines."""
+    relations: list[FileImportRelation] = []
+    seen: set[tuple[str, str, int]] = set()
+
+    for line_number, line in enumerate(file_obj.content.splitlines(), start=1):
+        import_match = _IMPORT_PATTERN.match(line)
+        if not import_match:
+            continue
+        raw_target = import_match.group(1).strip()
+        target_path = normalize_js_import_path(
+            file_obj.path,
+            raw_target,
+            scanned_paths,
+            tsconfig_paths=tsconfig_paths,
+            tsconfig_base_url=tsconfig_base_url,
+        )
+        dedup_key = (file_obj.path, target_path or raw_target, line_number)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        relations.append(
+            FileImportRelation(
+                repo_id=repo_id,
+                source_path=file_obj.path,
+                target_path=target_path,
+                target_ref=raw_target,
+                target_kind="file" if target_path else "external",
+                path=file_obj.path,
+                line=line_number,
+                language="javascript",
+                resolution_method="path" if target_path else "unresolved",
+            )
+        )
+
+    return relations
+
+
 def _resolve_source_symbol_id(line: int, file_symbols: list[SymbolChunk]) -> str | None:
     """Resuelve el símbolo fuente más interno que contiene la línea."""
     candidates = [
@@ -234,6 +284,7 @@ def extract_javascript_semantic_relations(
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
     resolution_stats_sink: dict[str, int] | None = None,
+    file_imports_sink: list[FileImportRelation] | None = None,
 ) -> list[SemanticRelation]:
     """Extrae relaciones JavaScript fase 1: IMPORTS, EXTENDS y CALLS."""
     by_file_symbols, global_by_name = _build_symbol_indexes(symbols)
@@ -251,6 +302,7 @@ def extract_javascript_semantic_relations(
     )
     scanned_paths = {item.path for item in _javascript_files(scanned_files)}
     relations: list[SemanticRelation] = []
+    file_import_relations: list[FileImportRelation] = []
     resolution_source_counts: Counter[str] = Counter()
 
     for file_obj in _javascript_files(scanned_files):
@@ -262,6 +314,15 @@ def extract_javascript_semantic_relations(
             scanned_paths,
             tsconfig_paths=tsconfig_paths,
             tsconfig_base_url=tsconfig_base_url,
+        )
+        file_import_relations.extend(
+            _build_top_level_file_import_relations(
+                repo_id,
+                file_obj,
+                scanned_paths,
+                tsconfig_paths=tsconfig_paths,
+                tsconfig_base_url=tsconfig_base_url,
+            )
         )
 
         for line_number, line in enumerate(file_obj.content.splitlines(), start=1):
@@ -348,4 +409,6 @@ def extract_javascript_semantic_relations(
     if resolution_stats_sink is not None:
         resolution_stats_sink.clear()
         resolution_stats_sink.update(dict(resolution_source_counts))
+    if file_imports_sink is not None:
+        file_imports_sink.extend(file_import_relations)
     return relations

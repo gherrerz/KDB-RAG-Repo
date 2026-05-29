@@ -1,6 +1,6 @@
 """Tests for Swift semantic relation extraction phase 1."""
 
-from coderag.core.models import ScannedFile
+from coderag.core.models import FileImportRelation, ScannedFile
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.semantic_swift import extract_swift_semantic_relations
 
@@ -171,6 +171,39 @@ def test_extract_swift_semantic_relations_supports_extension_contexts() -> None:
         and item.target_ref == "helper"
         and item.target_symbol_id == helper_symbol_id
         for item in relations
+    )
+
+
+def test_extract_swift_semantic_relations_emits_conservative_file_imports() -> None:
+    """Registra imports Swift como externos cuando sólo hay módulo y conserva sink."""
+    scanned_files = [
+        ScannedFile(
+            path="src/App/Impl.swift",
+            language="swift",
+            content=(
+                "import Foundation\n\n"
+                "class Impl {\n"
+                "    func run() {}\n"
+                "}\n"
+            ),
+        )
+    ]
+    symbols = extract_symbol_chunks(repo_id="repo-swift", scanned_files=scanned_files)
+    file_imports: list[FileImportRelation] = []
+
+    extract_swift_semantic_relations(
+        repo_id="repo-swift",
+        scanned_files=scanned_files,
+        symbols=symbols,
+        file_imports_sink=file_imports,
+    )
+
+    assert any(
+        item.source_path == "src/App/Impl.swift"
+        and item.target_path is None
+        and item.target_ref == "Foundation"
+        and item.target_kind == "external"
+        for item in file_imports
     )
 
 

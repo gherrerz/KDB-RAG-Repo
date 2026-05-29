@@ -7,7 +7,12 @@ from collections import Counter
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-from coderag.core.models import ScannedFile, SemanticRelation, SymbolChunk
+from coderag.core.models import (
+    FileImportRelation,
+    ScannedFile,
+    SemanticRelation,
+    SymbolChunk,
+)
 from coderag.ingestion.extractors.treesitter_runtime import (
     TreeSitterUnavailableError,
     parse_source,
@@ -23,14 +28,17 @@ def extract_kotlin_semantic_relations(
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
     resolution_stats_sink: dict[str, int] | None = None,
+    file_imports_sink: list[FileImportRelation] | None = None,
 ) -> list[SemanticRelation]:
     """Extract Kotlin IMPORTS, EXTENDS, IMPLEMENTS and CALLS relations."""
     kotlin_files = _kotlin_files(scanned_files)
     by_file, by_file_name, global_by_name = _build_symbol_indexes(symbols)
     path_to_package = _build_path_to_package(kotlin_files)
     fqname_index = _build_fqname_index(symbols, path_to_package)
+    symbol_path_by_id = {item.id: item.path for item in symbols}
     resolution_counts: Counter[str] = Counter()
     relations: list[SemanticRelation] = []
+    file_import_relations: list[FileImportRelation] = []
 
     for file_obj in kotlin_files:
         file_symbols = by_file.get(file_obj.path, [])
@@ -48,6 +56,15 @@ def extract_kotlin_semantic_relations(
             global_by_name=global_by_name,
             path_to_package=path_to_package,
             fqname_index=fqname_index,
+        )
+        file_import_relations.extend(
+            _build_top_level_file_import_relations(
+                repo_id,
+                file_obj,
+                root=tree.root_node,
+                resolve_target=resolve_target,
+                symbol_path_by_id=symbol_path_by_id,
+            )
         )
         relations.extend(
             _extract_import_relations(
@@ -84,6 +101,8 @@ def extract_kotlin_semantic_relations(
     if resolution_stats_sink is not None:
         resolution_stats_sink.clear()
         resolution_stats_sink.update(dict(resolution_counts))
+    if file_imports_sink is not None:
+        file_imports_sink.extend(file_import_relations)
     return relations
 
 
@@ -257,6 +276,46 @@ def _extract_import_relations(
                 path=file_obj.path,
                 line=line,
                 confidence=0.95,
+                language="kotlin",
+                resolution_method=resolution_method,
+            )
+        )
+    return relations
+
+
+def _build_top_level_file_import_relations(
+    repo_id: str,
+    file_obj: ScannedFile,
+    *,
+    root: Any,
+    resolve_target: Any,
+    symbol_path_by_id: dict[str, str],
+) -> list[FileImportRelation]:
+    """Emit Kotlin file-scoped import edges from import declarations."""
+    relations: list[FileImportRelation] = []
+    seen: set[tuple[str, str, int]] = set()
+    for node in root.named_children:
+        if node.type != "import":
+            continue
+        line = node.start_point[0] + 1
+        import_ref = node.text.decode("utf-8")[len("import ") :].strip()
+        if " as " in import_ref:
+            import_ref = import_ref.split(" as ", maxsplit=1)[0].strip()
+        target_symbol_id, resolution_method = resolve_target(import_ref)
+        target_path = symbol_path_by_id.get(target_symbol_id or "")
+        dedup_key = (file_obj.path, target_path or import_ref, line)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        relations.append(
+            FileImportRelation(
+                repo_id=repo_id,
+                source_path=file_obj.path,
+                target_path=target_path,
+                target_ref=import_ref,
+                target_kind="file" if target_path else "external",
+                path=file_obj.path,
+                line=line,
                 language="kotlin",
                 resolution_method=resolution_method,
             )
