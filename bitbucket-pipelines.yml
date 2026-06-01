@@ -1,0 +1,346 @@
+image: atlassian/default-image:4
+
+definitions:
+  steps:
+    - step: &validate_ingest_endpoints
+        name: "Validar /repos/ingest y /jobs/{job_id}"
+        script:
+          - export BITBUCKET_HTTP_BASE_URL="${BITBUCKET_HTTP_BASE_URL:-https://bitbucket.org}"
+          - export INGEST_API_BASE_URL="${INGEST_API_BASE_URL:-}"
+          - export INGEST_PROVIDER="${INGEST_PROVIDER:-bitbucket}"
+          - export INGEST_BRANCH="${INGEST_BRANCH:-${BITBUCKET_BRANCH:-main}}"
+          - export INGEST_COMMIT="${INGEST_COMMIT:-${BITBUCKET_COMMIT:-}}"
+          - export INGEST_STARTUP_TIMEOUT_SECONDS="${INGEST_STARTUP_TIMEOUT_SECONDS:-300}"
+          - export INGEST_JOB_TIMEOUT_SECONDS="${INGEST_JOB_TIMEOUT_SECONDS:-1800}"
+          - export INGEST_POLL_INTERVAL_SECONDS="${INGEST_POLL_INTERVAL_SECONDS:-10}"
+          - export INGEST_LOGS_TAIL="${INGEST_LOGS_TAIL:-50}"
+          - |
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y python3
+          - |
+              set -euo pipefail
+              python3 - <<'PY'
+              import json
+              import os
+              import time
+              from urllib import error, parse, request
+
+              API_BASE_URL = os.environ.get("INGEST_API_BASE_URL", "").strip().rstrip("/")
+              BITBUCKET_BASE_URL = os.environ["BITBUCKET_HTTP_BASE_URL"].rstrip("/")
+              REPO_FULL_NAME = os.environ.get("BITBUCKET_REPO_FULL_NAME", "").strip()
+
+              if not API_BASE_URL:
+                  raise SystemExit(
+                      "Define INGEST_API_BASE_URL con la URL publica o alcanzable "
+                      "del API desplegado en Kubernetes."
+                  )
+
+              if not REPO_FULL_NAME:
+                  raise SystemExit(
+                      "BITBUCKET_REPO_FULL_NAME no esta disponible en el entorno."
+                  )
+
+              REPO_URL = f"{BITBUCKET_BASE_URL}/{REPO_FULL_NAME}.git"
+
+
+              def env_value(name: str, default: str = "") -> str:
+                  value = os.getenv(name, default)
+                  return value.strip() if isinstance(value, str) else default
+
+
+              def request_json(
+                  method: str,
+                  url: str,
+                  payload: dict[str, object] | None = None,
+                  timeout: float = 60.0,
+              ) -> tuple[int, object]:
+                  headers = {"Accept": "application/json"}
+                  body = None
+                  if payload is not None:
+                      headers["Content-Type"] = "application/json"
+                      body = json.dumps(payload).encode("utf-8")
+
+                  req = request.Request(
+                      url,
+                      data=body,
+                      headers=headers,
+                      method=method,
+                  )
+                  try:
+                      with request.urlopen(req, timeout=timeout) as response:
+                          raw_body = response.read().decode("utf-8")
+                          parsed = json.loads(raw_body) if raw_body else {}
+                          return response.status, parsed
+                  except error.HTTPError as exc:
+                      raw_body = exc.read().decode("utf-8", "replace")
+                      try:
+                          parsed = json.loads(raw_body) if raw_body else {}
+                      except json.JSONDecodeError:
+                          parsed = {"raw": raw_body}
+                      return exc.code, parsed
+
+
+              def wait_for_health() -> None:
+                  timeout_seconds = float(
+                      env_value("INGEST_STARTUP_TIMEOUT_SECONDS", "300") or "300"
+                  )
+                  deadline = time.monotonic() + timeout_seconds
+                  last_payload: object = {}
+
+                  while time.monotonic() < deadline:
+                      try:
+                          status, payload = request_json(
+                              "GET",
+                              f"{API_BASE_URL}/health",
+                              timeout=15.0,
+                          )
+                      except Exception as exc:  # noqa: BLE001
+                          last_payload = {"error": str(exc)}
+                          time.sleep(5)
+                          continue
+
+                      last_payload = payload
+                      if status == 200 and isinstance(payload, dict) and payload.get("ok"):
+                          print(
+                              "API lista:",
+                              json.dumps(
+                                  {
+                                      "failed_components": payload.get(
+                                          "failed_components",
+                                          [],
+                                      ),
+                                      "context": payload.get("context"),
+                                  },
+                                  ensure_ascii=False,
+                              ),
+                          )
+                          return
+
+                      print(
+                          "Esperando a que /health quede ok=true:",
+                          json.dumps(last_payload, ensure_ascii=False),
+                      )
+                      time.sleep(5)
+
+                  raise SystemExit(
+                      "La API no quedo lista dentro del timeout. "
+                      f"Ultimo payload: {json.dumps(last_payload, ensure_ascii=False)}"
+                  )
+
+
+              def build_ingest_payload() -> dict[str, object]:
+                  auth_username = env_value("INGEST_AUTH_USERNAME")
+                  auth_secret = env_value("INGEST_AUTH_SECRET")
+                  legacy_token = env_value("INGEST_TOKEN")
+
+                  if legacy_token and auth_secret:
+                      raise SystemExit(
+                          "Usa INGEST_TOKEN o INGEST_AUTH_SECRET, pero no ambos."
+                      )
+                  if auth_username and not auth_secret:
+                      raise SystemExit(
+                          "Define INGEST_AUTH_SECRET cuando uses INGEST_AUTH_USERNAME."
+                      )
+                  if auth_secret and not auth_username:
+                      raise SystemExit(
+                          "Define INGEST_AUTH_USERNAME cuando uses INGEST_AUTH_SECRET."
+                      )
+
+                  payload: dict[str, object] = {
+                      "provider": env_value("INGEST_PROVIDER", "bitbucket") or "bitbucket",
+                      "repo_url": REPO_URL,
+                      "branch": env_value(
+                          "INGEST_BRANCH",
+                          env_value("BITBUCKET_BRANCH", "main") or "main",
+                      )
+                      or "main",
+                  }
+
+                  commit = env_value(
+                      "INGEST_COMMIT",
+                      env_value("BITBUCKET_COMMIT"),
+                  )
+                  if commit:
+                      payload["commit"] = commit
+
+                  embedding_provider = env_value(
+                      "INGEST_EMBEDDING_PROVIDER",
+                      env_value("EMBEDDING_PROVIDER"),
+                  )
+                  if embedding_provider:
+                      payload["embedding_provider"] = embedding_provider
+
+                  embedding_model = env_value(
+                      "INGEST_EMBEDDING_MODEL",
+                      env_value("EMBEDDING_MODEL"),
+                  )
+                  if embedding_model:
+                      payload["embedding_model"] = embedding_model
+
+                  if legacy_token:
+                      payload["token"] = legacy_token
+
+                  if auth_secret:
+                      payload["auth"] = {
+                          "deployment": env_value(
+                              "INGEST_AUTH_DEPLOYMENT",
+                              "cloud",
+                          )
+                          or "cloud",
+                          "transport": env_value(
+                              "INGEST_AUTH_TRANSPORT",
+                              "https",
+                          )
+                          or "https",
+                          "method": env_value(
+                              "INGEST_AUTH_METHOD",
+                              "http_basic",
+                          )
+                          or "http_basic",
+                          "username": auth_username,
+                          "secret": auth_secret,
+                      }
+
+                  return payload
+
+
+              def poll_job(job_id: str) -> None:
+                  timeout_seconds = float(
+                      env_value("INGEST_JOB_TIMEOUT_SECONDS", "1800") or "1800"
+                  )
+                  poll_interval = float(
+                      env_value("INGEST_POLL_INTERVAL_SECONDS", "10") or "10"
+                  )
+                  logs_tail = int(env_value("INGEST_LOGS_TAIL", "50") or "50")
+                  deadline = time.monotonic() + timeout_seconds
+                  last_status = ""
+                  last_progress = None
+
+                  while time.monotonic() < deadline:
+                      status_code, payload = request_json(
+                          "GET",
+                          (
+                              f"{API_BASE_URL}/jobs/"
+                              f"{parse.quote(job_id, safe='')}"
+                              f"?logs_tail={logs_tail}"
+                          ),
+                          timeout=30.0,
+                      )
+
+                      if status_code != 200:
+                          raise SystemExit(
+                              "Fallo consultando /jobs/{job_id}: "
+                              f"status={status_code}, body={json.dumps(payload, ensure_ascii=False)}"
+                          )
+
+                      if not isinstance(payload, dict):
+                          raise SystemExit(
+                              "Respuesta inesperada de /jobs/{job_id}: "
+                              f"{json.dumps(payload, ensure_ascii=False)}"
+                          )
+
+                      job_status = str(payload.get("status", "")).lower()
+                      progress = payload.get("progress")
+                      if job_status != last_status or progress != last_progress:
+                          print(
+                              "Estado job:",
+                              json.dumps(
+                                  {
+                                      "job_id": job_id,
+                                      "status": job_status,
+                                      "progress": progress,
+                                      "repo_id": payload.get("repo_id"),
+                                  },
+                                  ensure_ascii=False,
+                              ),
+                          )
+                          last_status = job_status
+                          last_progress = progress
+
+                      if job_status == "completed":
+                          print(
+                              "Job completado:",
+                              json.dumps(
+                                  {
+                                      "job_id": job_id,
+                                      "repo_id": payload.get("repo_id"),
+                                      "diagnostics": payload.get("diagnostics", {}),
+                                  },
+                                  ensure_ascii=False,
+                              ),
+                          )
+                          return
+
+                      if job_status == "failed":
+                          raise SystemExit(
+                              "Job de ingesta fallido: "
+                              f"{json.dumps(payload, ensure_ascii=False)}"
+                          )
+
+                      time.sleep(poll_interval)
+
+                  raise SystemExit(
+                      "Timeout esperando la finalizacion del job de ingesta."
+                  )
+
+
+              wait_for_health()
+
+              ingest_payload = build_ingest_payload()
+              sanitized_payload = json.loads(json.dumps(ingest_payload))
+              if "auth" in sanitized_payload:
+                  sanitized_payload["auth"]["secret"] = "***"
+              if "token" in sanitized_payload:
+                  sanitized_payload["token"] = "***"
+
+              print(
+                  "Payload /repos/ingest:",
+                  json.dumps(sanitized_payload, ensure_ascii=False),
+              )
+
+              status_code, ingest_response = request_json(
+                  "POST",
+                  f"{API_BASE_URL}/repos/ingest",
+                  payload=ingest_payload,
+                  timeout=60.0,
+              )
+              if status_code != 200:
+                  raise SystemExit(
+                      "Fallo llamando /repos/ingest: "
+                      f"status={status_code}, body={json.dumps(ingest_response, ensure_ascii=False)}"
+                  )
+
+              if not isinstance(ingest_response, dict):
+                  raise SystemExit(
+                      "Respuesta inesperada de /repos/ingest: "
+                      f"{json.dumps(ingest_response, ensure_ascii=False)}"
+                  )
+
+              job_id = str(ingest_response.get("id", "")).strip()
+              if not job_id:
+                  raise SystemExit(
+                      "La respuesta de /repos/ingest no incluyo job id."
+                  )
+
+              print(
+                  "Job creado:",
+                  json.dumps(
+                      {
+                          "job_id": job_id,
+                          "status": ingest_response.get("status"),
+                          "repo_id": ingest_response.get("repo_id"),
+                      },
+                      ensure_ascii=False,
+                  ),
+              )
+              poll_job(job_id)
+              PY
+
+pipelines:
+  branches:
+    main:
+      - step: *validate_ingest_endpoints
+    master:
+      - step: *validate_ingest_endpoints
