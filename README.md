@@ -259,6 +259,82 @@ Ejemplo rápido para Bitbucket Cloud o Server/Data Center vía HTTPS:
 
 Ejemplo rapido para `.env` o Docker Compose:
 
+## Jenkins con Bitbucket Server
+
+Si usas Bitbucket Server o Data Center en lugar de Bitbucket Cloud, el repo
+incluye un flujo centralizado para Jenkins con un solo job y webhook por merge
+a `main` o `master`.
+
+- [Jenkinsfile](Jenkinsfile): pipeline corto con `Generic Webhook Trigger`,
+  validacion del evento `pr:merged`, registro central de repos permitidos y
+  llamada al script versionado.
+- [scripts/trigger_repo_ingest.py](scripts/trigger_repo_ingest.py): resuelve
+  el payload de `/repos/ingest`, espera `GET /health` y hace polling de
+  `/jobs/{job_id}` hasta completion o fail.
+
+Plugins minimos en Jenkins:
+
+- Pipeline
+- Git
+- Credentials Binding
+- Generic Webhook Trigger
+
+Variables o parametros minimos del job:
+
+- `INGEST_API_BASE_URL`
+- `BITBUCKET_HTTP_BASE_URL`
+- `REPO_REGISTRY_JSON`
+
+`REPO_REGISTRY_JSON` define la allowlist de repos que pueden disparar el job y
+el tipo de credencial a usar por repositorio. Puedes centralizar valores
+compartidos en `_defaults` y dejar en cada repo solo lo especifico. Ejemplo:
+
+```json
+{
+  "_defaults": {
+    "auth_deployment": "server",
+    "auth_transport": "https",
+    "auth_method": "http_basic",
+    "embedding_provider": "vertex",
+    "embedding_model": "text-embedding-005"
+  },
+  "COIPO/repositories-kdb": {
+    "enabled": true,
+    "credentials_type": "http_basic",
+    "credentials_id": "bitbucket-coipo-repositories-kdb-http"
+  },
+  "COIPO/documents-kdb": {
+    "enabled": true,
+    "credentials_type": "http_basic",
+    "credentials_id": "bitbucket-coipo-documents-kdb-http"
+  }
+}
+```
+
+La clave del registro debe coincidir con `project.key/repository.slug` del
+payload de Bitbucket. Si tu webhook entrega `coipo` en minúscula en vez de
+`COIPO`, usa exactamente ese valor en las claves.
+
+Si un repo necesita un valor distinto, puede sobreescribir cualquier campo de
+`_defaults` dentro de su propia entrada. Si `_defaults` no existe, Jenkins usa
+los parámetros `INGEST_AUTH_*` y `INGEST_EMBEDDING_*` como fallback.
+
+Webhook recomendado en Bitbucket Server/Data Center:
+
+- URL: `https://<jenkins>/generic-webhook-trigger/invoke?token=kdb-rag-ingest`
+- Evento: Pull Request merged (`eventKey=pr:merged`)
+- Rama destino filtrada en Jenkins: `main` o `master`
+- El mismo endpoint puede ser reutilizado por varios repos o proyectos, porque
+  el job valida `project/repo` contra `REPO_REGISTRY_JSON`.
+
+El pipeline toma `repo_url` desde el payload HTTP del webhook cuando está
+disponible y hace fallback a
+`BITBUCKET_HTTP_BASE_URL/scm/<project>/<repo>.git`.
+
+En este modelo centralizado el mismo job puede procesar merges de distintos
+repositorios en paralelo. Si necesitas serializar ejecuciones por repo, agrega
+un mecanismo de locking por `project/repo` en Jenkins.
+
 ```dotenv
 GIT_SSH_KEY_CONTENT_B64=<base64_private_key_openssh>
 GIT_SSH_KNOWN_HOSTS_CONTENT_B64=<base64_known_hosts>
