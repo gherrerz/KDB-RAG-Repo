@@ -129,6 +129,14 @@ class Settings(BaseSettings):
         default="",
         alias="CHROMA_ADMIN_API_TOKEN",
     )
+    admin_reset_enabled: bool = Field(
+        default=False,
+        alias="ADMIN_RESET_ENABLED",
+    )
+    admin_reset_token: str = Field(
+        default="",
+        alias="ADMIN_RESET_TOKEN",
+    )
     chroma_remote_batch_size_override: int = Field(
         default=0,
         alias="CHROMA_REMOTE_BATCH_SIZE_OVERRIDE",
@@ -363,6 +371,7 @@ class Settings(BaseSettings):
         self.chroma_admin_api_token = (
             self.chroma_admin_api_token or ""
         ).strip()
+        self.admin_reset_token = (self.admin_reset_token or "").strip()
 
         has_basic = bool(username or password)
         if token and has_basic:
@@ -381,6 +390,16 @@ class Settings(BaseSettings):
         if self.chroma_remote_batch_size_override < 0:
             raise ValueError(
                 "CHROMA_REMOTE_BATCH_SIZE_OVERRIDE no puede ser negativo."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_admin_reset_settings(self) -> "Settings":
+        """Exige token explícito cuando el reset administrativo está activo."""
+        if self.admin_reset_enabled and not self.admin_reset_token:
+            raise ValueError(
+                "ADMIN_RESET_TOKEN es obligatorio cuando "
+                "ADMIN_RESET_ENABLED=true."
             )
         return self
 

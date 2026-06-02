@@ -441,6 +441,15 @@ Para habilitarlos explícitamente, activa `CHROMA_ADMIN_API_ENABLED=true`. Si
 además defines `CHROMA_ADMIN_API_TOKEN`, debes enviar el header
 `X-Chroma-Admin-Token` en cada request.
 
+El endpoint `POST /admin/reset` es destructivo y queda deshabilitado por
+default. Para habilitarlo explícitamente debes definir
+`ADMIN_RESET_ENABLED=true` y `ADMIN_RESET_TOKEN=<token>`. Cada request debe
+enviar el header `X-Admin-Reset-Token` y un body JSON con
+`confirm=true` y `confirmation_phrase="RESET ALL DATA"`.
+
+Si la UI desktop apunta a una API remota protegida, el proceso de la UI debe
+arrancar con el mismo `ADMIN_RESET_TOKEN` configurado en la API.
+
 Ejemplo rapido para obtener vector store collection count:
 
 ```powershell

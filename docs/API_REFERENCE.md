@@ -225,10 +225,24 @@ Elimina datos del repositorio en todas las capas de storage.
 
 Limpia todo el estado indexado.
 
+- Request schema: `AdminResetRequest`
+- Header requerido:
+  - `X-Admin-Reset-Token: str`
 - Response schema: `ResetResponse`
 - Error responses:
+  - `403`: token administrativo faltante o inválido (`detail` es objeto)
+  - `404`: endpoint administrativo deshabilitado (`detail` es objeto)
   - `409`: reset bloqueado por jobs en ejecución (`detail` es string)
+  - `422`: payload de confirmación inválido (`detail` es objeto)
   - `500`: error inesperado en reset (`detail` es string)
+
+Notas de comportamiento:
+
+- El endpoint solo está disponible cuando `ADMIN_RESET_ENABLED=true`.
+- La configuración es inválida si `ADMIN_RESET_ENABLED=true` y
+  `ADMIN_RESET_TOKEN` está vacío.
+- El body debe incluir `confirm=true` y
+  `confirmation_phrase="RESET ALL DATA"`.
 
 ## Mapping interno
 
@@ -247,7 +261,7 @@ Limpia todo el estado indexado.
 | GET | `/admin/chroma/diagnostics` | `build_managed_vector_index` + Chroma diagnostics | Query params | `ChromaDiagnosticsResponse` |
 | POST | `/admin/chroma/query` | `build_managed_vector_index` + Chroma direct read | `ChromaQueryRequest` | `ChromaQueryResponse` |
 | DELETE | `/repos/{repo_id}` | `JobManager.delete_repo` | Path params | `RepoDeleteResponse` |
-| POST | `/admin/reset` | `JobManager.reset_all_data` | N/A | `ResetResponse` |
+| POST | `/admin/reset` | `JobManager.reset_all_data` | `AdminResetRequest` | `ResetResponse` |
 
 ## Schemas
 

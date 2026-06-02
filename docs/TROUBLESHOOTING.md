@@ -67,8 +67,10 @@ Causa:
 
 Acción recomendada:
 
-- Ejecuta limpieza total (`POST /admin/reset` o `scripts/reset_cold.ps1`) y luego
-  reingesta el repositorio con el mismo provider/modelo que usarás en query.
+- Ejecuta limpieza total (`POST /admin/reset` con header
+  `X-Admin-Reset-Token` y body de confirmación explícita, o
+  `scripts/reset_cold.ps1`) y luego reingesta el repositorio con el mismo
+  provider/modelo que usarás en query.
 
 ## Error al instalar dependencias en Windows
 

@@ -418,6 +418,35 @@ class ResetResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="Advertencias no bloqueantes de la operación.")
 
 
+class AdminResetRequest(BaseModel):
+    """Modelo de entrada requerido para confirmar un reset administrativo."""
+
+    confirm: Literal[True] = Field(
+        description="Debe enviarse en true para confirmar la operación destructiva.",
+    )
+    confirmation_phrase: str = Field(
+        description="Frase explícita de confirmación requerida por el endpoint.",
+        examples=["RESET ALL DATA"],
+    )
+
+    @field_validator("confirmation_phrase", mode="before")
+    @classmethod
+    def normalize_confirmation_phrase(cls, value: Any) -> str | Any:
+        """Normaliza el texto de confirmación antes de validar el contrato."""
+        if not isinstance(value, str):
+            return value
+        return value.strip()
+
+    @model_validator(mode="after")
+    def validate_confirmation_phrase(self) -> "AdminResetRequest":
+        """Exige la frase exacta de confirmación para ejecutar el reset."""
+        if self.confirmation_phrase != "RESET ALL DATA":
+            raise ValueError(
+                "confirmation_phrase debe ser exactamente 'RESET ALL DATA'"
+            )
+        return self
+
+
 class RepoDeleteResponse(BaseModel):
     """Modelo de salida devuelto por el endpoint de borrado por repositorio."""
 

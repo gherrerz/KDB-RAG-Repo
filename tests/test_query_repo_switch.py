@@ -1,6 +1,7 @@
 """Pruebas de limpieza de chat al cambiar repositorio en la vista de consulta."""
 
 import sys
+from types import SimpleNamespace
 
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -113,8 +114,18 @@ def test_reset_all_with_warnings_marks_partial(
 ) -> None:
     """Muestra estado parcial cuando la limpieza devuelve advertencias."""
 
-    def _fake_post(url: str, timeout: int) -> _FakeResponse:  # noqa: ARG001
+    captured: dict[str, object] = {}
+
+    def _fake_post(
+        url: str,
+        *,
+        headers: dict[str, str],
+        json: dict[str, object],
+        timeout: int,
+    ) -> _FakeResponse:  # noqa: ARG001
         assert url == "http://127.0.0.1:8000/admin/reset"
+        captured["headers"] = headers
+        captured["json"] = json
         return _FakeResponse(
             {
                 "message": "Limpieza total completada",
@@ -126,12 +137,48 @@ def test_reset_all_with_warnings_marks_partial(
     import coderag.ui.main_window as module
 
     monkeypatch.setattr(module.requests, "post", _fake_post)
+    monkeypatch.setattr(
+        module,
+        "get_settings",
+        lambda: SimpleNamespace(admin_reset_token="secret-token"),
+    )
 
     window._on_reset_all()
 
     assert window.ingestion_view.status_chip.text() == "Parcial"
     logs = window.ingestion_view.logs.toPlainText()
     assert "Advertencia: No se pudo vaciar carpeta Chroma por lock" in logs
+    assert captured["headers"] == {"X-Admin-Reset-Token": "secret-token"}
+    assert captured["json"] == {
+        "confirm": True,
+        "confirmation_phrase": "RESET ALL DATA",
+    }
+
+
+def test_reset_all_without_admin_token_logs_local_error(
+    window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Falla localmente cuando la UI no tiene token administrativo configurado."""
+
+    import coderag.ui.main_window as module
+
+    def _unexpected_post(*args, **kwargs) -> _FakeResponse:
+        raise AssertionError("No debía invocarse la API sin ADMIN_RESET_TOKEN")
+
+    monkeypatch.setattr(module.requests, "post", _unexpected_post)
+    monkeypatch.setattr(
+        module,
+        "get_settings",
+        lambda: SimpleNamespace(admin_reset_token=""),
+    )
+
+    window._on_reset_all()
+
+    assert window.ingestion_view.status_chip.text() == "Error"
+    assert "ADMIN_RESET_TOKEN no está configurado para la UI." in (
+        window.ingestion_view.logs.toPlainText()
+    )
 
 
 def test_sync_job_ui_partial_unlocks_query_controls(window: MainWindow) -> None:

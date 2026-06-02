@@ -288,15 +288,124 @@ def test_admin_reset_returns_summary(monkeypatch) -> None:
         return ["BM25 en memoria", "Grafo Neo4j"], ["warning de prueba"]
 
     monkeypatch.setattr(server.jobs, "reset_all_data", fake_reset_all_data)
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            admin_reset_enabled=True,
+            admin_reset_token="secret-token",
+        ),
+    )
     client = TestClient(app)
 
-    response = client.post("/admin/reset")
+    response = client.post(
+        "/admin/reset",
+        headers={"X-Admin-Reset-Token": "secret-token"},
+        json={
+            "confirm": True,
+            "confirmation_phrase": "RESET ALL DATA",
+        },
+    )
     assert response.status_code == 200
 
     payload = response.json()
     assert payload["message"] == "Limpieza total completada"
     assert "BM25 en memoria" in payload["cleared"]
     assert "warning de prueba" in payload["warnings"]
+
+
+def test_admin_reset_is_disabled_by_feature_flag(monkeypatch) -> None:
+    """Oculta el endpoint de reset cuando el flag administrativo está apagado."""
+
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            admin_reset_enabled=False,
+            admin_reset_token="secret-token",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/admin/reset",
+        headers={"X-Admin-Reset-Token": "secret-token"},
+        json={
+            "confirm": True,
+            "confirmation_phrase": "RESET ALL DATA",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_admin_reset_requires_valid_admin_token(monkeypatch) -> None:
+    """Requiere token administrativo válido cuando el reset está habilitado."""
+
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            admin_reset_enabled=True,
+            admin_reset_token="secret-token",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/admin/reset",
+        json={
+            "confirm": True,
+            "confirmation_phrase": "RESET ALL DATA",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_admin_reset_rejects_invalid_confirmation_phrase(monkeypatch) -> None:
+    """Rechaza payloads con confirmación humana distinta a la frase requerida."""
+
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(
+            admin_reset_enabled=True,
+            admin_reset_token="secret-token",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/admin/reset",
+        headers={"X-Admin-Reset-Token": "secret-token"},
+        json={
+            "confirm": True,
+            "confirmation_phrase": "RESET DATA",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_reset_openapi_marks_header_as_required(monkeypatch) -> None:
+    """Publica el header administrativo del reset como requerido en OpenAPI."""
+
+    app.openapi_schema = None
+    client = TestClient(app)
+
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    payload = response.json()
+    parameters = payload["paths"]["/admin/reset"]["post"]["parameters"]
+    header_parameter = next(
+        parameter
+        for parameter in parameters
+        if parameter["name"] == "X-Admin-Reset-Token"
+        and parameter["in"] == "header"
+    )
+    assert header_parameter["required"] is True
 
 
 def test_delete_repo_returns_summary(monkeypatch) -> None:

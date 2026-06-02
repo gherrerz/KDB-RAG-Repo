@@ -363,7 +363,21 @@ class MainWindow(QMainWindow):
         self.ingestion_view.append_log("Iniciando limpieza total del sistema...")
 
         try:
-            response = requests.post(f"{API_BASE}/admin/reset", timeout=120)
+            admin_reset_token = (get_settings().admin_reset_token or "").strip()
+            if not admin_reset_token:
+                raise RuntimeError(
+                    "ADMIN_RESET_TOKEN no está configurado para la UI."
+                )
+
+            response = requests.post(
+                f"{API_BASE}/admin/reset",
+                headers={"X-Admin-Reset-Token": admin_reset_token},
+                json={
+                    "confirm": True,
+                    "confirmation_phrase": "RESET ALL DATA",
+                },
+                timeout=120,
+            )
             response.raise_for_status()
             data = response.json()
             message = str(data.get("message") or "Limpieza total completada")

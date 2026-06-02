@@ -87,6 +87,13 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- `POST /admin/reset` ahora queda deshabilitado por default y exige
+    `ADMIN_RESET_ENABLED=true`, `ADMIN_RESET_TOKEN`, header
+    `X-Admin-Reset-Token` y body explícito de confirmación con
+    `confirm=true` y `confirmation_phrase="RESET ALL DATA"`.
+- La UI desktop ahora envía el nuevo contrato administrativo de reset y falla
+    localmente si no tiene `ADMIN_RESET_TOKEN` configurado al apuntar a una API
+    protegida.
 - El versionado Alembic queda aislado por aplicacion cuando KDB-RAG-Repo y
     KDB-RAG-Docs comparten la misma base Postgres: Repo usa
     `alembic_version_repo` y Docs usa `alembic_version_docs`, evitando

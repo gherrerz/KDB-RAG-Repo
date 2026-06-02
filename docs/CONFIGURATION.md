@@ -61,6 +61,23 @@ Compatibilidad temporal de naming:
 - `QUERY_MAX_SECONDS`: limite global de latencia para query API. Default: `55`.
 - `UI_REQUEST_TIMEOUT_SECONDS`: timeout de request desde UI a API. Default: `90`.
 
+### Controles administrativos
+
+- `ADMIN_RESET_ENABLED`: habilita `POST /admin/reset`. Default: `false`.
+- `ADMIN_RESET_TOKEN`: token administrativo dedicado para `POST /admin/reset`.
+  Default: vacio.
+
+Notas operativas:
+
+- La configuración se considera inválida si `ADMIN_RESET_ENABLED=true` y
+  `ADMIN_RESET_TOKEN` está vacío.
+- Cada request a `POST /admin/reset` debe enviar el header
+  `X-Admin-Reset-Token`.
+- El body del reset debe incluir `confirm=true` y
+  `confirmation_phrase="RESET ALL DATA"`.
+- Si la UI desktop consume una API remota protegida, debe arrancar con el
+  mismo `ADMIN_RESET_TOKEN` configurado en esa API.
+
 ### Storage, metadata, lexical y workspace
 
 - `POSTGRES_HOST`: host del backend operativo de Postgres para metadata y store lexico. El runtime soportado usa Postgres versionado como backend obligatorio. Default: vacio.

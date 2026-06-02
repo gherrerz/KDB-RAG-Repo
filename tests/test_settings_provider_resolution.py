@@ -123,6 +123,12 @@ def test_chroma_remote_auth_accepts_token_only() -> None:
     assert settings.chroma_password == ""
 
 
+def test_admin_reset_enabled_requires_token() -> None:
+    """Rechaza habilitar reset administrativo sin token dedicado."""
+    with pytest.raises(ValueError, match="ADMIN_RESET_TOKEN"):
+        Settings(ADMIN_RESET_ENABLED=True, _env_file=None)
+
+
 def test_chroma_remote_auth_accepts_basic_only() -> None:
     """Permite autenticación Basic cuando no se configura token bearer."""
     settings = Settings(

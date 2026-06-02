@@ -7,9 +7,11 @@ from time import perf_counter
 from typing import cast
 
 from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.openapi.utils import get_openapi
 
 from coderag.core.logging import configure_logging
 from coderag.core.models import (
+    AdminResetRequest,
     ChromaDiagnosticsCollectionResult,
     ChromaDiagnosticsResponse,
     ChromaQueryOperation,
@@ -80,6 +82,45 @@ app = FastAPI(
     lifespan=lifespan,
 )
 jobs = JobManager()
+
+
+def _mark_admin_reset_header_required(schema: dict[str, object]) -> None:
+    """Alinea el OpenAPI publicado con el contrato efectivo del reset admin."""
+    path_item = (
+        schema.get("paths", {})
+        .get("/admin/reset", {})
+        .get("post", {})
+    )
+    parameters = path_item.get("parameters", [])
+    for parameter in parameters:
+        if not isinstance(parameter, dict):
+            continue
+        if (
+            parameter.get("in") == "header"
+            and parameter.get("name") == "X-Admin-Reset-Token"
+        ):
+            parameter["required"] = True
+            return
+
+
+def custom_openapi() -> dict[str, object]:
+    """Publica un OpenAPI ajustado al contrato HTTP efectivo del servicio."""
+    if app.openapi_schema is not None:
+        return cast(dict[str, object], app.openapi_schema)
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        summary=app.summary,
+        description=app.description,
+        routes=app.routes,
+    )
+    _mark_admin_reset_header_required(schema)
+    app.openapi_schema = schema
+    return cast(dict[str, object], app.openapi_schema)
+
+
+app.openapi = custom_openapi
 
 
 def get_job_manager() -> JobManager:
@@ -186,6 +227,29 @@ def _ensure_chroma_admin_access(admin_token: str | None) -> None:
             detail={
                 "message": "Token administrativo inválido para endpoint Chroma.",
                 "code": "invalid_chroma_admin_token",
+            },
+        )
+
+
+def _ensure_admin_reset_access(admin_token: str | None) -> None:
+    """Protege el endpoint de reset global con flag y token dedicado."""
+    settings = get_settings()
+    if not bool(getattr(settings, "admin_reset_enabled", False)):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": "El endpoint administrativo de reset está deshabilitado.",
+                "code": "admin_reset_disabled",
+            },
+        )
+
+    expected_token = str(getattr(settings, "admin_reset_token", "") or "").strip()
+    if (admin_token or "").strip() != expected_token:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Token administrativo inválido para reset global.",
+                "code": "invalid_admin_reset_token",
             },
         )
 
@@ -902,16 +966,32 @@ def chroma_query(
         "si hay jobs en ejecución."
     ),
     responses={
+        403: {
+            "description": "Token administrativo faltante o inválido.",
+        },
+        404: {
+            "description": "El endpoint administrativo de reset está deshabilitado.",
+        },
         409: {
             "description": "No se puede limpiar mientras hay jobs en ejecución.",
+        },
+        422: {
+            "description": "Payload de confirmación inválido.",
         },
         500: {
             "description": "Error inesperado durante el proceso de limpieza.",
         },
     },
 )
-def reset_all_data() -> ResetResponse:
+def reset_all_data(
+    request: AdminResetRequest,
+    x_admin_reset_token: str | None = Header(
+        default=None,
+        alias="X-Admin-Reset-Token",
+    ),
+) -> ResetResponse:
     """Restablezca todos los almacenes de datos indexados y el espacio de trabajo de ingesta local."""
+    _ensure_admin_reset_access(x_admin_reset_token)
     job_manager = get_job_manager()
     try:
         cleared, warnings = job_manager.reset_all_data()
