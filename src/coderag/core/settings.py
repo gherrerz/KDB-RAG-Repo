@@ -142,6 +142,21 @@ class Settings(BaseSettings):
         alias="CHROMA_REMOTE_BATCH_SIZE_OVERRIDE",
         ge=0,
     )
+    chroma_max_request_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        alias="CHROMA_MAX_REQUEST_BYTES",
+        ge=1,
+    )
+    chroma_remote_min_batch_size: int = Field(
+        default=25,
+        alias="CHROMA_REMOTE_MIN_BATCH_SIZE",
+        ge=1,
+    )
+    chroma_remote_max_split_depth: int = Field(
+        default=6,
+        alias="CHROMA_REMOTE_MAX_SPLIT_DEPTH",
+        ge=1,
+    )
     postgres_host: str = Field(default="", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
     postgres_db: str = Field(default="", alias="POSTGRES_DB")
@@ -253,6 +268,10 @@ class Settings(BaseSettings):
     scan_excluded_files: str = Field(
         default=".gitignore,.env",
         alias="SCAN_EXCLUDED_FILES",
+    )
+    scan_excluded_patterns: str = Field(
+        default="",
+        alias="SCAN_EXCLUDED_PATTERNS",
     )
     symbol_extractor_v2_enabled: bool = Field(
         default=True,
@@ -390,6 +409,18 @@ class Settings(BaseSettings):
         if self.chroma_remote_batch_size_override < 0:
             raise ValueError(
                 "CHROMA_REMOTE_BATCH_SIZE_OVERRIDE no puede ser negativo."
+            )
+        if self.chroma_max_request_bytes <= 0:
+            raise ValueError(
+                "CHROMA_MAX_REQUEST_BYTES debe ser mayor a cero."
+            )
+        if self.chroma_remote_min_batch_size <= 0:
+            raise ValueError(
+                "CHROMA_REMOTE_MIN_BATCH_SIZE debe ser mayor a cero."
+            )
+        if self.chroma_remote_max_split_depth <= 0:
+            raise ValueError(
+                "CHROMA_REMOTE_MAX_SPLIT_DEPTH debe ser mayor a cero."
             )
         return self
 

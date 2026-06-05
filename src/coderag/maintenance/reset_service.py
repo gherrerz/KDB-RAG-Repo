@@ -229,6 +229,9 @@ def delete_repo_storage(
     try:
         metadata_store = _build_metadata_store(settings)
         metadata_deleted = metadata_store.delete_repo_data(normalized_repo_id)
+        deleted_counts["metadata_snapshots"] = int(
+            metadata_deleted.get("snapshots_deleted", 0) or 0
+        )
         deleted_counts["metadata_jobs"] = int(
             metadata_deleted.get("jobs_deleted", 0) or 0
         )

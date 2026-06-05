@@ -54,6 +54,9 @@ Compatibilidad temporal de naming:
 - `CHROMA_USERNAME`: usuario opcional para Basic auth contra Chroma remoto. Default: vacio.
 - `CHROMA_PASSWORD`: password opcional para Basic auth contra Chroma remoto. Default: vacio.
 - `CHROMA_REMOTE_BATCH_SIZE_OVERRIDE`: override opcional del batch size solo para Chroma remoto. Default: `0`, que significa usar el limite informado por el cliente y, si no existe, caer al fallback actual de `5000`.
+- `CHROMA_MAX_REQUEST_BYTES`: limite maximo estimado por request remoto antes de reducir el lote adaptativamente. Default: `52428800`.
+- `CHROMA_REMOTE_MIN_BATCH_SIZE`: tamaño minimo de lote que el writer remoto puede intentar durante un split retry. Default: `25`.
+- `CHROMA_REMOTE_MAX_SPLIT_DEPTH`: profundidad maxima de subdivisiones recuperables para un write remoto. Default: `6`.
 - `CHROMA_PATH`: ruta fisica del indice vectorial solo relevante en `CHROMA_MODE=embedded`. Default: `/app/storage/chroma`.
 - `CHROMA_HNSW_SPACE`: metrica del indice HNSW (`cosine` o `l2`). Default: `cosine`.
 - `MAX_CONTEXT_TOKENS`: limite superior de tokens de contexto armado para LLM. Default: `8000`.
@@ -138,6 +141,7 @@ Notas operativas de storage:
 - Si `CHROMA_MODE=embedded`, `CHROMA_PATH` vuelve a ser relevante, pero ese modo no es el default del runtime.
 - En modo remoto, usa exactamente uno de estos mecanismos: `CHROMA_TOKEN` o `CHROMA_USERNAME` + `CHROMA_PASSWORD`.
 - Si el write-path remoto de Chroma corta conexiones durante ingesta, puedes reducir `CHROMA_REMOTE_BATCH_SIZE_OVERRIDE` de forma gradual; recomendacion operativa: `1000`, luego `500`, luego `250` solo si el fallo persiste.
+- Si mantienes `CHROMA_REMOTE_BATCH_SIZE_OVERRIDE=0`, el runtime puede usar `CHROMA_MAX_REQUEST_BYTES`, `CHROMA_REMOTE_MIN_BATCH_SIZE` y `CHROMA_REMOTE_MAX_SPLIT_DEPTH` para preparar el terreno de batching adaptativo y retries recuperables.
 - Este ajuste apunta principalmente al write-path remoto de ingesta y limpieza por repo; no cambia la semantica de query y no deberia alterar la latencia de busqueda principal.
 
 ### Ingesta asincrona distribuida
@@ -203,6 +207,7 @@ Recomendacion practica:
 - `SCAN_EXCLUDED_DIRS`: carpetas excluidas del escaneo. Default en settings: lista recomendada de directorios comunes de build/cache.
 - `SCAN_EXCLUDED_EXTENSIONS`: extensiones binarias/no-texto excluidas. Default en settings: lista extensa de binarios y artefactos.
 - `SCAN_EXCLUDED_FILES`: nombres de archivo excluidos puntualmente. Default en settings: `.gitignore,.env`.
+- `SCAN_EXCLUDED_PATTERNS`: patrones glob opcionales sobre la ruta relativa del archivo, por ejemplo `docs/*` o `src/*.generated.ts`. Default: vacio.
 
 Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:
 

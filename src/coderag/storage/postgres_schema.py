@@ -9,6 +9,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql.schema import Column
 
 from coderag.storage.postgres_table_names import (
+    POSTGRES_INGESTION_SNAPSHOTS_TABLE,
     POSTGRES_JOBS_TABLE,
     POSTGRES_LEXICAL_CORPUS_TABLE,
     POSTGRES_REPOS_TABLE,
@@ -24,6 +25,9 @@ POSTGRES_JOBS_TABLE_NAME = _physical_table_name(POSTGRES_JOBS_TABLE)
 POSTGRES_REPOS_TABLE_NAME = _physical_table_name(POSTGRES_REPOS_TABLE)
 POSTGRES_LEXICAL_CORPUS_TABLE_NAME = _physical_table_name(
     POSTGRES_LEXICAL_CORPUS_TABLE
+)
+POSTGRES_INGESTION_SNAPSHOTS_TABLE_NAME = _physical_table_name(
+    POSTGRES_INGESTION_SNAPSHOTS_TABLE
 )
 
 

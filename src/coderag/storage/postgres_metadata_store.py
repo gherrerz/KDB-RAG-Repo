@@ -7,12 +7,16 @@ import json
 import re
 from typing import Any
 
-from sqlalchemy import case, delete, literal, select, update, union
+from sqlalchemy import case, delete, func, literal, select, update, union
 from sqlalchemy.dialects.postgresql import insert
 
 from coderag.core.models import JobInfo, JobStatus
 from coderag.storage.base_metadata_store import BaseMetadataStore
-from coderag.storage.postgres_models import JobRecord, RepoRecord
+from coderag.storage.postgres_models import (
+    IngestionSnapshotRecord,
+    JobRecord,
+    RepoRecord,
+)
 from coderag.storage.postgres_session import PostgresSessionFactory
 
 
@@ -54,6 +58,24 @@ def _coerce_datetime_value(value: Any) -> datetime.datetime | None:
     return None
 
 
+def _safe_int(value: Any) -> int:
+    """Convierte métricas heterogéneas a entero sin lanzar excepciones."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value: Any) -> float | None:
+    """Convierte métricas heterogéneas a float opcional."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _job_record_to_job_info(record: JobRecord) -> JobInfo:
     """Convierte un registro ORM de jobs al modelo de dominio expuesto."""
     logs = record.logs.splitlines() if record.logs else []
@@ -69,6 +91,68 @@ def _job_record_to_job_info(record: JobRecord) -> JobInfo:
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
+
+
+def _snapshot_record_to_payload(
+    record: IngestionSnapshotRecord,
+) -> dict[str, object | None]:
+    """Convierte una fila ORM de snapshot al payload público operativo."""
+    return {
+        "snapshot_id": int(record.id),
+        "repo_id": record.repo_id,
+        "job_id": record.job_id,
+        "snapshot_at": record.snapshot_at,
+        "job_status": record.job_status,
+        "error_message": record.error_message,
+        "retryable_error": bool(record.retryable_error),
+        "workspace_retained": bool(record.workspace_retained),
+        "workspace_cleanup_attempted": bool(
+            record.workspace_cleanup_attempted
+        ),
+        "workspace_cleanup_succeeded": bool(
+            record.workspace_cleanup_succeeded
+        ),
+        "clone_ms": record.clone_ms,
+        "scan_ms": record.scan_ms,
+        "chunk_ms": record.chunk_ms,
+        "vector_total_ms": record.vector_total_ms,
+        "lexical_ms": record.lexical_ms,
+        "graph_ms": record.graph_ms,
+        "readiness_ms": record.readiness_ms,
+        "ingestion_total_ms": record.ingestion_total_ms,
+        "files_visited": int(record.files_visited),
+        "files_scanned": int(record.files_scanned),
+        "excluded_dir_count": int(record.excluded_dir_count),
+        "excluded_extension_count": int(record.excluded_extension_count),
+        "excluded_file_count": int(record.excluded_file_count),
+        "excluded_size_count": int(record.excluded_size_count),
+        "excluded_decode_count": int(record.excluded_decode_count),
+        "excluded_pattern_count": int(record.excluded_pattern_count),
+        "visited_dirs": int(record.visited_dirs),
+        "pruned_dirs": int(record.pruned_dirs),
+        "symbols_count": int(record.symbols_count),
+        "chunks_count": int(record.chunks_count),
+        "languages_detected_count": int(record.languages_detected_count),
+        "vector_collections_written": int(record.vector_collections_written),
+        "vector_initial_batch_size": int(record.vector_initial_batch_size),
+        "vector_effective_batch_size": int(record.vector_effective_batch_size),
+        "vector_split_count": int(record.vector_split_count),
+        "vector_recovered_retry_count": int(
+            record.vector_recovered_retry_count
+        ),
+        "vector_payload_too_large_events": int(
+            record.vector_payload_too_large_events
+        ),
+        "vector_proxy_reset_events": int(record.vector_proxy_reset_events),
+        "vector_upstream_restarting_events": int(
+            record.vector_upstream_restarting_events
+        ),
+        "vector_documents_written": int(record.vector_documents_written),
+        "semantic_enabled": bool(record.semantic_enabled),
+        "semantic_status": record.semantic_status,
+        "semantic_relations_count": int(record.semantic_relations_count),
+        "semantic_unresolved_count": int(record.semantic_unresolved_count),
+    }
 
 
 class PostgresMetadataStore(BaseMetadataStore):
@@ -346,19 +430,145 @@ class PostgresMetadataStore(BaseMetadataStore):
             session.commit()
         return int(result.rowcount or 0)
 
+    def list_repo_ingest_snapshots(
+        self,
+        repo_id: str,
+        *,
+        limit: int = 20,
+    ) -> list[dict[str, object | None]]:
+        """Lista snapshots operativos históricos del repo en orden descendente."""
+        normalized_limit = max(int(limit), 1)
+        statement = (
+            select(IngestionSnapshotRecord)
+            .where(IngestionSnapshotRecord.repo_id == repo_id)
+            .order_by(
+                IngestionSnapshotRecord.snapshot_at.desc(),
+                IngestionSnapshotRecord.id.desc(),
+            )
+            .limit(normalized_limit)
+        )
+        with self._session_factory.get_session() as session:
+            rows = session.execute(statement).scalars().all()
+        return [_snapshot_record_to_payload(row) for row in rows]
+
+    def delete_repo_ingest_snapshots(self, repo_id: str) -> int:
+        """Elimina snapshots históricos del repositorio y devuelve filas."""
+        statement = delete(IngestionSnapshotRecord).where(
+            IngestionSnapshotRecord.repo_id == repo_id
+        )
+        with self._session_factory.get_session() as session:
+            result = session.execute(statement)
+            session.commit()
+        return int(result.rowcount or 0)
+
     def delete_repo_data(self, repo_id: str) -> dict[str, int]:
         """Elimina metadata de repositorio y jobs, retornando conteos por tabla."""
+        snapshots_deleted = self.delete_repo_ingest_snapshots(repo_id)
         jobs_deleted = self.delete_repo_jobs(repo_id)
         repos_deleted = self.delete_repo_runtime(repo_id)
         return {
+            "snapshots_deleted": snapshots_deleted,
             "jobs_deleted": jobs_deleted,
             "repos_deleted": repos_deleted,
-            "total": jobs_deleted + repos_deleted,
+            "total": snapshots_deleted + jobs_deleted + repos_deleted,
         }
+
+    def record_ingest_snapshot(
+        self,
+        *,
+        repo_id: str,
+        job_id: str,
+        job_status: str,
+        error_message: str | None,
+        diagnostics: dict[str, object],
+        snapshot_at: datetime.datetime,
+    ) -> None:
+        """Persiste una foto operativa por job y retiene solo las últimas N por repo."""
+        scan_stats = diagnostics.get("scan_stats") if isinstance(diagnostics, dict) else {}
+        vector_index = diagnostics.get("vector_index") if isinstance(diagnostics, dict) else {}
+        semantic_graph = diagnostics.get("semantic_graph") if isinstance(diagnostics, dict) else {}
+        coverage = diagnostics.get("coverage") if isinstance(diagnostics, dict) else {}
+
+        if not isinstance(scan_stats, dict):
+            scan_stats = {}
+        if not isinstance(vector_index, dict):
+            vector_index = {}
+        if not isinstance(semantic_graph, dict):
+            semantic_graph = {}
+        if not isinstance(coverage, dict):
+            coverage = {}
+
+        insert_stmt = insert(IngestionSnapshotRecord).values(
+            repo_id=repo_id,
+            job_id=job_id,
+            snapshot_at=snapshot_at,
+            job_status=job_status,
+            error_message=error_message,
+            retryable_error=bool(diagnostics.get("retryable_error", False)),
+            workspace_retained=bool(diagnostics.get("workspace_retained", True)),
+            workspace_cleanup_attempted=bool(diagnostics.get("workspace_cleanup_attempted", False)),
+            workspace_cleanup_succeeded=bool(diagnostics.get("workspace_cleanup_succeeded", False)),
+            clone_ms=_safe_float(diagnostics.get("clone_ms")),
+            scan_ms=_safe_float(diagnostics.get("scan_ms")),
+            chunk_ms=_safe_float(diagnostics.get("chunk_ms")),
+            vector_total_ms=_safe_float(diagnostics.get("vector_total_ms")),
+            lexical_ms=_safe_float(diagnostics.get("lexical_ms")),
+            graph_ms=_safe_float(diagnostics.get("graph_ms")),
+            readiness_ms=_safe_float(diagnostics.get("readiness_ms")),
+            ingestion_total_ms=_safe_float(diagnostics.get("ingestion_total_ms")),
+            files_visited=_safe_int(scan_stats.get("visited")),
+            files_scanned=_safe_int(scan_stats.get("scanned")),
+            excluded_dir_count=_safe_int(scan_stats.get("excluded_dir")),
+            excluded_extension_count=_safe_int(scan_stats.get("excluded_extension")),
+            excluded_file_count=_safe_int(scan_stats.get("excluded_file")),
+            excluded_size_count=_safe_int(scan_stats.get("excluded_size")),
+            excluded_decode_count=_safe_int(scan_stats.get("excluded_decode")),
+            excluded_pattern_count=_safe_int(scan_stats.get("excluded_pattern")),
+            visited_dirs=_safe_int(scan_stats.get("visited_dirs")),
+            pruned_dirs=_safe_int(scan_stats.get("pruned_dirs")),
+            symbols_count=_safe_int(coverage.get("chunks")),
+            chunks_count=_safe_int(coverage.get("chunks")),
+            languages_detected_count=_safe_int(len(coverage.get("languages", {})))
+            if isinstance(coverage.get("languages", {}), dict)
+            else 0,
+            vector_collections_written=_safe_int(vector_index.get("collections_written")),
+            vector_initial_batch_size=_safe_int(vector_index.get("initial_batch_size")),
+            vector_effective_batch_size=_safe_int(vector_index.get("effective_batch_size")),
+            vector_split_count=_safe_int(vector_index.get("split_count")),
+            vector_recovered_retry_count=_safe_int(vector_index.get("recovered_retry_count")),
+            vector_payload_too_large_events=_safe_int(vector_index.get("payload_too_large_events")),
+            vector_proxy_reset_events=_safe_int(vector_index.get("proxy_reset_events")),
+            vector_upstream_restarting_events=_safe_int(vector_index.get("upstream_restarting_events")),
+            vector_documents_written=_safe_int(vector_index.get("documents_written")),
+            semantic_enabled=bool(semantic_graph.get("enabled", False)),
+            semantic_status=(str(semantic_graph.get("status")) if semantic_graph.get("status") is not None else None),
+            semantic_relations_count=_safe_int(semantic_graph.get("relation_counts")),
+            semantic_unresolved_count=_safe_int(semantic_graph.get("unresolved_count")),
+        )
+
+        retention_limit = 50
+        with self._session_factory.get_session() as session:
+            session.execute(insert_stmt)
+            retention_subquery = (
+                select(IngestionSnapshotRecord.id)
+                .where(IngestionSnapshotRecord.repo_id == repo_id)
+                .order_by(
+                    IngestionSnapshotRecord.snapshot_at.desc(),
+                    IngestionSnapshotRecord.id.desc(),
+                )
+                .offset(retention_limit)
+            )
+            session.execute(
+                delete(IngestionSnapshotRecord).where(
+                    IngestionSnapshotRecord.id.in_(retention_subquery)
+                )
+            )
+            session.commit()
 
     def reset_all(self) -> None:
         """Elimina todos los jobs y repos. Usar solo en reset global."""
         with self._session_factory.get_session() as session:
+            session.execute(delete(IngestionSnapshotRecord))
             session.execute(delete(JobRecord))
             session.execute(delete(RepoRecord))
             session.commit()

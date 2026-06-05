@@ -321,7 +321,12 @@ def test_delete_repo_storage_uses_vector_helper(
 
     class FakeMetadataStore:
         def delete_repo_data(self, repo_id: str) -> dict[str, int]:
-            return {"jobs_deleted": 0, "repos_deleted": 0, "total": 0}
+            return {
+                "snapshots_deleted": 0,
+                "jobs_deleted": 0,
+                "repos_deleted": 0,
+                "total": 0,
+            }
 
     monkeypatch.setattr(reset_service, "GraphBuilder", FakeGraphBuilder)
     monkeypatch.setattr(reset_service, "_workspace_repo_paths", lambda root, repo_id: [])
@@ -340,6 +345,7 @@ def test_delete_repo_storage_uses_vector_helper(
     assert counts["chroma_total"] == 5
     assert counts["chroma_code_symbols"] == 3
     assert counts["chroma_code_files"] == 2
+    assert counts["metadata_snapshots"] == 0
 
 
 def test_delete_repo_storage_warns_when_metadata_backend_is_unavailable(

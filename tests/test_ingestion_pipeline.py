@@ -108,6 +108,92 @@ def test_index_lexical_backend_requires_postgres(
         pipeline._index_lexical_backend("r1", scanned, symbols)
 
 
+def test_index_vectors_publishes_vector_metrics_into_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agrega métricas vectoriales por colección al diagnostics sink."""
+    scanned = [ScannedFile(path="a.py", language="python", content="def a():\n pass")]
+    symbols = [
+        SymbolChunk(
+            id="s1",
+            repo_id="r1",
+            path="a.py",
+            language="python",
+            symbol_name="a",
+            symbol_type="function",
+            start_line=1,
+            end_line=2,
+            snippet="def a():\n pass",
+        )
+    ]
+    diagnostics: dict[str, object] = {}
+
+    class _FakeEmbedder:
+        def __init__(self, provider=None, model=None) -> None:
+            del provider, model
+
+        def embed_texts(
+            self,
+            texts: list[str],
+            progress_callback=None,
+        ) -> list[list[float]]:
+            del progress_callback
+            return [[0.1, 0.2] for _ in texts]
+
+    class _FakeChroma:
+        def upsert(
+            self,
+            collection_name: str,
+            ids: list[str],
+            documents: list[str],
+            embeddings: list[list[float]],
+            metadatas: list[dict[str, object]],
+        ) -> dict[str, int | str | None]:
+            del ids, documents, embeddings, metadatas
+            if collection_name == "code_symbols":
+                return {
+                    "collection_name": collection_name,
+                    "requested_batch_size": 100,
+                    "effective_batch_size": 50,
+                    "split_count": 1,
+                    "recovered_retry_count": 1,
+                    "payload_too_large_events": 1,
+                    "proxy_reset_events": 0,
+                    "upstream_restarting_events": 0,
+                    "documents_written": 1,
+                }
+            return {
+                "collection_name": collection_name,
+                "requested_batch_size": 100,
+                "effective_batch_size": 100,
+                "split_count": 0,
+                "recovered_retry_count": 0,
+                "payload_too_large_events": 0,
+                "proxy_reset_events": 0,
+                "upstream_restarting_events": 0,
+                "documents_written": 1,
+            }
+
+    monkeypatch.setattr(pipeline, "EmbeddingClient", _FakeEmbedder)
+    monkeypatch.setattr(pipeline, "ChromaIndex", _FakeChroma)
+
+    pipeline._index_vectors(
+        repo_id="r1",
+        scanned_files=scanned,
+        symbols=symbols,
+        diagnostics_sink=diagnostics,
+    )
+
+    vector_index = diagnostics["vector_index"]
+    assert vector_index["collections_written"] == 3
+    assert vector_index["initial_batch_size"] == 100
+    assert vector_index["effective_batch_size"] == 50
+    assert vector_index["split_count"] == 1
+    assert vector_index["recovered_retry_count"] == 1
+    assert vector_index["payload_too_large_events"] == 1
+    assert vector_index["documents_written"] == 3
+
+
 def _patch_pipeline_settings(
     patch_module_settings,
     tmp_path: Path,
@@ -160,20 +246,25 @@ def test_ingest_repository_continues_on_graph_failure(
         excluded_dirs: set[str] | None = None,
         excluded_extensions: set[str] | None = None,
         excluded_files: set[str] | None = None,
+        excluded_patterns: set[str] | None = None,
     ) -> tuple[list[ScannedFile], dict[str, int]]:
         received_scan_args["repo_path"] = repo_path
         received_scan_args["max_file_size"] = max_file_size
         received_scan_args["excluded_dirs"] = excluded_dirs or set()
         received_scan_args["excluded_extensions"] = excluded_extensions or set()
         received_scan_args["excluded_files"] = excluded_files or set()
+        received_scan_args["excluded_patterns"] = excluded_patterns or set()
         return scanned, {
             "visited": 1,
+            "visited_dirs": 1,
             "scanned": 1,
             "excluded_dir": 0,
             "excluded_extension": 0,
             "excluded_file": 0,
+            "excluded_pattern": 0,
             "excluded_size": 0,
             "excluded_decode": 0,
+            "pruned_dirs": 0,
         }
 
     patch_module_settings(
@@ -183,6 +274,7 @@ def test_ingest_repository_continues_on_graph_failure(
         scan_excluded_dirs=".git,node_modules",
         scan_excluded_extensions=".png,.zip",
         scan_excluded_files=".gitignore,.env",
+        scan_excluded_patterns="",
     )
     monkeypatch.setattr(
         pipeline,
@@ -252,6 +344,7 @@ def test_ingest_repository_continues_on_graph_failure(
     assert ".zip" in received_scan_args["excluded_extensions"]
     assert ".gitignore" in received_scan_args["excluded_files"]
     assert ".env" in received_scan_args["excluded_files"]
+    assert received_scan_args["excluded_patterns"] == set()
     assert any("Observabilidad símbolos:" in item for item in logs)
     assert any("Advertencia: no se pudo indexar grafo Neo4j" in item for item in logs)
     assert any("neo4j:7687" in item for item in logs)

@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import stat
 from threading import Lock, Thread
+from time import perf_counter
 import time
 from types import TracebackType
 from uuid import uuid4
@@ -149,9 +150,14 @@ def _execute_ingest_job(
                     "Advertencia: no se pudo eliminar el workspace local tras la ingesta."
                 )
         job.progress = 1.0
+        readiness_started_at = perf_counter()
         readiness = get_repo_query_status(
             repo_id=repo_id,
             listed_in_catalog=True,
+        )
+        job.diagnostics["readiness_ms"] = round(
+            (perf_counter() - readiness_started_at) * 1000.0,
+            2,
         )
         if readiness.get("query_ready"):
             job.status = JobStatus.completed
@@ -171,6 +177,15 @@ def _execute_ingest_job(
         job.logs.append(f"Error: {exc}")
     finally:
         job.updated_at = datetime.datetime.now(datetime.UTC)
+        if job.repo_id:
+            store.record_ingest_snapshot(
+                repo_id=job.repo_id,
+                job_id=job.id,
+                job_status=job.status.value,
+                error_message=job.error,
+                diagnostics=job.diagnostics,
+                snapshot_at=job.updated_at,
+            )
         store.upsert_job(job)
 
     return job
@@ -268,6 +283,21 @@ class JobManager:
     def get_repo_runtime(self, repo_id: str) -> dict[str, str | None] | None:
         """Devuelve metadata runtime de la última ingesta del repositorio."""
         return self.store.get_repo_runtime(repo_id)
+
+    def list_repo_ingest_snapshots(
+        self,
+        repo_id: str,
+        *,
+        limit: int = 20,
+    ) -> list[dict[str, object | None]]:
+        """Devuelve historial operativo de ingestas para un repositorio."""
+        normalized_repo_id = repo_id.strip()
+        if not normalized_repo_id:
+            return []
+        return self.store.list_repo_ingest_snapshots(
+            normalized_repo_id,
+            limit=limit,
+        )
 
     def touch_repo_last_queried_at(self, repo_id: str) -> int:
         """Marca el repositorio con la fecha de su última consulta válida."""

@@ -118,10 +118,38 @@ def test_scan_repository_with_stats_reports_exclusion_reasons(tmp_path: Path) ->
 
     scanned_paths = {item.path for item in scanned}
     assert "src/ok.py" in scanned_paths
-    assert stats["visited"] >= 4
+    assert stats["visited"] == 3
     assert stats["excluded_dir"] >= 1
     assert stats["excluded_extension"] >= 1
     assert stats["excluded_size"] >= 1
+    assert stats["visited_dirs"] >= 2
+    assert stats["pruned_dirs"] >= 1
+
+
+def test_scan_repository_prunes_excluded_dirs_before_visiting_nested_files(
+    tmp_path: Path,
+) -> None:
+    """No recorre archivos dentro de directorios excluidos cuando poda el árbol."""
+    (tmp_path / "src").mkdir(parents=True)
+    (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+    (tmp_path / "src" / "ok.py").write_text("print('ok')\n", encoding="utf-8")
+    (tmp_path / "node_modules" / "pkg" / "lib.js").write_text(
+        "console.log(1);\n",
+        encoding="utf-8",
+    )
+
+    scanned, stats = scan_repository_with_stats(
+        tmp_path,
+        max_file_size=100_000,
+        excluded_dirs={"node_modules"},
+        excluded_extensions=set(),
+        excluded_files=set(),
+    )
+
+    assert {item.path for item in scanned} == {"src/ok.py"}
+    assert stats["visited"] == 1
+    assert stats["excluded_dir"] == 1
+    assert stats["pruned_dirs"] == 1
 
 
 def test_scan_repository_preserves_jsx_and_tsx_languages(tmp_path: Path) -> None:
@@ -149,3 +177,33 @@ def test_scan_repository_preserves_jsx_and_tsx_languages(tmp_path: Path) -> None
 
     assert language_by_path["app/page.tsx"] == "typescript"
     assert language_by_path["components/button.jsx"] == "javascript"
+
+
+def test_scan_repository_excludes_paths_by_glob_pattern(tmp_path: Path) -> None:
+    """Permite excluir rutas relativas completas usando patrones glob."""
+    (tmp_path / "src").mkdir(parents=True)
+    (tmp_path / "docs").mkdir(parents=True)
+    (tmp_path / "src" / "secret.generated.ts").write_text(
+        "export const secret = 1;\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "keep.ts").write_text(
+        "export const keep = 1;\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs" / "draft.md").write_text("draft\n", encoding="utf-8")
+
+    scanned, stats = scan_repository_with_stats(
+        tmp_path,
+        max_file_size=100_000,
+        excluded_dirs=set(),
+        excluded_extensions=set(),
+        excluded_files=set(),
+        excluded_patterns={"src/*.generated.ts", "docs/*"},
+    )
+
+    scanned_paths = {item.path for item in scanned}
+    assert "src/keep.ts" in scanned_paths
+    assert "src/secret.generated.ts" not in scanned_paths
+    assert "docs/draft.md" not in scanned_paths
+    assert stats["excluded_pattern"] == 2

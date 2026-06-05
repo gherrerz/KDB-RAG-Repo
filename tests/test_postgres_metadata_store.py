@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from sqlalchemy.dialects import postgresql
 
 from coderag.core.models import JobInfo, JobStatus
-from coderag.storage.postgres_models import JobRecord
+from coderag.storage.postgres_models import IngestionSnapshotRecord, JobRecord
 from coderag.storage.postgres_metadata_store import PostgresMetadataStore
 
 
@@ -244,6 +244,186 @@ def test_upsert_repo_runtime_executes_upsert_and_commits() -> None:
     session.commit.assert_called_once_with()
 
 
+def test_record_ingest_snapshot_executes_insert_and_retention_delete() -> None:
+    """record_ingest_snapshot inserta snapshot y aplica retención por repo."""
+    session = MagicMock()
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    store.record_ingest_snapshot(
+        repo_id="r1",
+        job_id="job-1",
+        job_status="completed",
+        error_message=None,
+        diagnostics={
+            "retryable_error": False,
+            "workspace_retained": True,
+            "scan_stats": {"visited": 3, "scanned": 2},
+            "coverage": {"chunks": 4, "languages": {"python": 2}},
+            "vector_index": {"collections_written": 3, "documents_written": 9},
+            "semantic_graph": {
+                "enabled": True,
+                "status": "ok",
+                "relation_counts": 5,
+            },
+        },
+        snapshot_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    assert session.execute.call_count == 2
+    insert_stmt = session.execute.call_args_list[0].args[0]
+    compiled_insert = insert_stmt.compile(dialect=postgresql.dialect())
+    assert compiled_insert.params["repo_id"] == "r1"
+    assert compiled_insert.params["job_id"] == "job-1"
+    assert compiled_insert.params["files_visited"] == 3
+    assert compiled_insert.params["vector_collections_written"] == 3
+
+    delete_stmt = session.execute.call_args_list[1].args[0]
+    compiled_delete = delete_stmt.compile(dialect=postgresql.dialect())
+    assert IngestionSnapshotRecord.__tablename__ in str(compiled_delete)
+    session.commit.assert_called_once_with()
+
+
+def test_list_repo_ingest_snapshots_returns_public_operational_shape() -> None:
+    """list_repo_ingest_snapshots debe mapear el modelo ORM al contrato público."""
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = [
+        IngestionSnapshotRecord(
+            id=7,
+            repo_id="r1",
+            job_id="job-7",
+            snapshot_at=datetime.datetime(2026, 5, 23, 12, 0, tzinfo=datetime.UTC),
+            job_status="completed",
+            error_message=None,
+            retryable_error=False,
+            workspace_retained=True,
+            workspace_cleanup_attempted=False,
+            workspace_cleanup_succeeded=False,
+            clone_ms=1.5,
+            scan_ms=2.5,
+            chunk_ms=3.5,
+            vector_total_ms=4.5,
+            lexical_ms=5.5,
+            graph_ms=6.5,
+            readiness_ms=7.5,
+            ingestion_total_ms=8.5,
+            files_visited=10,
+            files_scanned=9,
+            excluded_dir_count=1,
+            excluded_extension_count=2,
+            excluded_file_count=3,
+            excluded_size_count=4,
+            excluded_decode_count=5,
+            excluded_pattern_count=6,
+            visited_dirs=7,
+            pruned_dirs=8,
+            symbols_count=11,
+            chunks_count=12,
+            languages_detected_count=2,
+            vector_collections_written=3,
+            vector_initial_batch_size=100,
+            vector_effective_batch_size=50,
+            vector_split_count=2,
+            vector_recovered_retry_count=1,
+            vector_payload_too_large_events=1,
+            vector_proxy_reset_events=0,
+            vector_upstream_restarting_events=0,
+            vector_documents_written=42,
+            semantic_enabled=True,
+            semantic_status="ok",
+            semantic_relations_count=5,
+            semantic_unresolved_count=1,
+        )
+    ]
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    result = store.list_repo_ingest_snapshots("r1", limit=5)
+
+    statement = session.execute.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert compiled.params["repo_id_1"] == "r1"
+    assert compiled.params["param_1"] == 5
+    assert result == [
+        {
+            "snapshot_id": 7,
+            "repo_id": "r1",
+            "job_id": "job-7",
+            "snapshot_at": datetime.datetime(
+                2026,
+                5,
+                23,
+                12,
+                0,
+                tzinfo=datetime.UTC,
+            ),
+            "job_status": "completed",
+            "error_message": None,
+            "retryable_error": False,
+            "workspace_retained": True,
+            "workspace_cleanup_attempted": False,
+            "workspace_cleanup_succeeded": False,
+            "clone_ms": 1.5,
+            "scan_ms": 2.5,
+            "chunk_ms": 3.5,
+            "vector_total_ms": 4.5,
+            "lexical_ms": 5.5,
+            "graph_ms": 6.5,
+            "readiness_ms": 7.5,
+            "ingestion_total_ms": 8.5,
+            "files_visited": 10,
+            "files_scanned": 9,
+            "excluded_dir_count": 1,
+            "excluded_extension_count": 2,
+            "excluded_file_count": 3,
+            "excluded_size_count": 4,
+            "excluded_decode_count": 5,
+            "excluded_pattern_count": 6,
+            "visited_dirs": 7,
+            "pruned_dirs": 8,
+            "symbols_count": 11,
+            "chunks_count": 12,
+            "languages_detected_count": 2,
+            "vector_collections_written": 3,
+            "vector_initial_batch_size": 100,
+            "vector_effective_batch_size": 50,
+            "vector_split_count": 2,
+            "vector_recovered_retry_count": 1,
+            "vector_payload_too_large_events": 1,
+            "vector_proxy_reset_events": 0,
+            "vector_upstream_restarting_events": 0,
+            "vector_documents_written": 42,
+            "semantic_enabled": True,
+            "semantic_status": "ok",
+            "semantic_relations_count": 5,
+            "semantic_unresolved_count": 1,
+        }
+    ]
+
+
+def test_delete_repo_ingest_snapshots_returns_deleted_rows() -> None:
+    """delete_repo_ingest_snapshots debe propagar el rowcount del delete."""
+    session = MagicMock()
+    session.execute.return_value = SimpleNamespace(rowcount=3)
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    deleted = store.delete_repo_ingest_snapshots("r1")
+
+    statement = session.execute.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert IngestionSnapshotRecord.__tablename__ in str(compiled)
+    assert compiled.params["repo_id_1"] == "r1"
+    assert deleted == 3
+    session.commit.assert_called_once_with()
+
+
 def test_get_repo_runtime_returns_expected_keys() -> None:
     """get_repo_runtime debe preservar las claves públicas actuales."""
     session = MagicMock()
@@ -401,16 +581,22 @@ def test_delete_repo_data_returns_aggregated_counts() -> None:
         "postgresql://fake/db",
         session_factory=_session_factory_mock(MagicMock()),
     )
+    store.delete_repo_ingest_snapshots = MagicMock(return_value=2)
     store.delete_repo_jobs = MagicMock(return_value=4)
     store.delete_repo_runtime = MagicMock(return_value=1)
 
     result = store.delete_repo_data("r1")
 
-    assert result == {"jobs_deleted": 4, "repos_deleted": 1, "total": 5}
+    assert result == {
+        "snapshots_deleted": 2,
+        "jobs_deleted": 4,
+        "repos_deleted": 1,
+        "total": 7,
+    }
 
 
 def test_reset_all_executes_delete_on_both_tables_and_commits() -> None:
-    """reset_all debe borrar jobs y repos dentro de una transacción."""
+    """reset_all debe borrar snapshots, jobs y repos dentro de una transacción."""
     session = MagicMock()
     store = PostgresMetadataStore(
         "postgresql://fake/db",
@@ -419,5 +605,5 @@ def test_reset_all_executes_delete_on_both_tables_and_commits() -> None:
 
     store.reset_all()
 
-    assert session.execute.call_count == 2
+    assert session.execute.call_count == 3
     session.commit.assert_called_once_with()

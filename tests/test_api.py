@@ -557,6 +557,99 @@ def test_list_repos_returns_repo_id_catalog(monkeypatch) -> None:
     ]
 
 
+def test_list_repo_snapshots_returns_operational_history(monkeypatch) -> None:
+    """Devuelve snapshots operativos persistidos para un repositorio conocido."""
+
+    def fake_list_repo_ingest_snapshots(
+        repo_id: str,
+        *,
+        limit: int = 20,
+    ) -> list[dict[str, object]]:
+        assert repo_id == "mall"
+        assert limit == 5
+        return [
+            {
+                "snapshot_id": 9,
+                "repo_id": "mall",
+                "job_id": "job-9",
+                "snapshot_at": "2026-05-23T12:00:00+00:00",
+                "job_status": "completed",
+                "error_message": None,
+                "retryable_error": False,
+                "workspace_retained": True,
+                "workspace_cleanup_attempted": False,
+                "workspace_cleanup_succeeded": False,
+                "clone_ms": 10.0,
+                "scan_ms": 11.0,
+                "chunk_ms": 12.0,
+                "vector_total_ms": 13.0,
+                "lexical_ms": 14.0,
+                "graph_ms": 15.0,
+                "readiness_ms": 16.0,
+                "ingestion_total_ms": 17.0,
+                "files_visited": 100,
+                "files_scanned": 80,
+                "excluded_dir_count": 1,
+                "excluded_extension_count": 2,
+                "excluded_file_count": 3,
+                "excluded_size_count": 4,
+                "excluded_decode_count": 5,
+                "excluded_pattern_count": 6,
+                "visited_dirs": 10,
+                "pruned_dirs": 2,
+                "symbols_count": 30,
+                "chunks_count": 40,
+                "languages_detected_count": 3,
+                "vector_collections_written": 3,
+                "vector_initial_batch_size": 100,
+                "vector_effective_batch_size": 50,
+                "vector_split_count": 2,
+                "vector_recovered_retry_count": 1,
+                "vector_payload_too_large_events": 1,
+                "vector_proxy_reset_events": 0,
+                "vector_upstream_restarting_events": 0,
+                "vector_documents_written": 120,
+                "semantic_enabled": True,
+                "semantic_status": "ok",
+                "semantic_relations_count": 7,
+                "semantic_unresolved_count": 1,
+            }
+        ]
+
+    monkeypatch.setattr(server.jobs, "list_repo_ids", lambda: ["mall"])
+    monkeypatch.setattr(
+        server.jobs,
+        "list_repo_ingest_snapshots",
+        fake_list_repo_ingest_snapshots,
+    )
+    client = TestClient(app)
+
+    response = client.get("/repos/mall/snapshots?limit=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["repo_id"] == "mall"
+    assert payload["snapshots"][0]["snapshot_id"] == 9
+    assert payload["snapshots"][0]["vector_documents_written"] == 120
+
+
+def test_list_repo_snapshots_returns_404_for_unknown_repo(monkeypatch) -> None:
+    """Retorna 404 cuando el repo no existe y tampoco tiene snapshots persistidos."""
+
+    monkeypatch.setattr(server.jobs, "list_repo_ids", lambda: [])
+    monkeypatch.setattr(
+        server.jobs,
+        "list_repo_ingest_snapshots",
+        lambda repo_id, limit=20: [],
+    )
+    client = TestClient(app)
+
+    response = client.get("/repos/unknown/snapshots")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Repositorio no encontrado: unknown"
+
+
 def test_ingest_repo_returns_503_when_enqueue_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

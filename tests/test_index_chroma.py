@@ -20,8 +20,11 @@ class _FakeCollection:
     ) -> None:
         """Inicialice el estado de colección falsa."""
         self.calls: list[int] = []
+        self.attempts: list[int] = []
         self.fail_once = fail_once
         self.error_once = error_once
+        self.error_if_batch_size_gt: int | None = None
+        self.error_on_large_batch: Exception | None = None
         self.repo_ids: list[str] = []
         self.metadata: dict[str, Any] = {}
 
@@ -33,6 +36,7 @@ class _FakeCollection:
         metadatas: list[dict[str, Any]],
     ) -> None:
         """Registre el tamaño de la llamada y, opcionalmente, simule el error de la primera llamada."""
+        self.attempts.append(len(ids))
         if self.fail_once:
             self.fail_once = False
             raise InvalidDimensionException("dim")
@@ -40,6 +44,12 @@ class _FakeCollection:
             error = self.error_once
             self.error_once = None
             raise error
+        if (
+            self.error_if_batch_size_gt is not None
+            and len(ids) > self.error_if_batch_size_gt
+            and self.error_on_large_batch is not None
+        ):
+            raise self.error_on_large_batch
         self.calls.append(len(ids))
 
     def query(self, **kwargs: Any) -> dict[str, list[list[Any]]]:
@@ -535,6 +545,93 @@ def test_remote_upsert_wraps_payload_too_large_with_batch_hint(
     assert "señal=payload_grande" in message
     assert "lote=2" in message
     assert "CHROMA_REMOTE_BATCH_SIZE_OVERRIDE" in message
+
+
+def test_remote_upsert_splits_recoverable_payload_error_until_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recupera writes remotos grandes partiendo el lote hasta que entran."""
+    import coderag.ingestion.index_chroma as module
+
+    fake_client = _FakeClient()
+    collection = _FakeCollection()
+    collection.error_if_batch_size_gt = 1
+    collection.error_on_large_batch = RuntimeError("413 request entity too large")
+    fake_client.collections["code_symbols"] = collection
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="",
+        chroma_username="",
+        chroma_password="",
+        chroma_remote_batch_size_override=4,
+        chroma_remote_min_batch_size=1,
+        chroma_remote_max_split_depth=6,
+        resolve_chroma_hnsw_space=lambda: "cosine",
+    )
+
+    def _fake_http_client(host: str, port: int, headers: dict[str, str]) -> _FakeClient:
+        del host, port, headers
+        return fake_client
+
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module.chromadb, "HttpClient", _fake_http_client)
+    module.ChromaIndex.reset_shared_state()
+
+    index = module.ChromaIndex()
+    index.upsert(
+        "code_symbols",
+        [f"id{i}" for i in range(4)],
+        ["x"] * 4,
+        [[0.1, 0.2]] * 4,
+        [{"i": i} for i in range(4)],
+    )
+
+    assert collection.calls == [1, 1, 1, 1]
+    assert 4 in collection.attempts
+    assert 2 in collection.attempts
+
+
+def test_remote_request_budget_reduces_initial_batch_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reduce el lote inicial remoto cuando la estimación supera el budget."""
+    fake_client = _FakeClient()
+
+    import coderag.ingestion.index_chroma as module
+
+    settings = SimpleNamespace(
+        chroma_mode="remote",
+        chroma_host="chroma.example.local",
+        chroma_port=8443,
+        chroma_token="",
+        chroma_username="",
+        chroma_password="",
+        chroma_remote_batch_size_override=0,
+        chroma_max_request_bytes=1500,
+        resolve_chroma_hnsw_space=lambda: "cosine",
+    )
+
+    def _fake_http_client(host: str, port: int, headers: dict[str, str]) -> _FakeClient:
+        del host, port, headers
+        return fake_client
+
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module.chromadb, "HttpClient", _fake_http_client)
+    module.ChromaIndex.reset_shared_state()
+
+    index = module.ChromaIndex()
+    index.upsert(
+        "code_symbols",
+        [f"id{i}" for i in range(4)],
+        ["x" * 1000] * 4,
+        [[0.1, 0.2]] * 4,
+        [{"i": i} for i in range(4)],
+    )
+
+    assert fake_client.collections["code_symbols"].calls == [1, 1, 1, 1]
 
 
 def test_remote_init_wraps_collection_open_error(

@@ -198,7 +198,7 @@ def _parse_csv_set(raw_value: str, prefix_dot: bool = False) -> set[str]:
 
 def _read_scan_filters_from_settings(
     settings: object,
-) -> tuple[int, set[str], set[str], set[str]]:
+) -> tuple[int, set[str], set[str], set[str], set[str]]:
     """Lee y valida filtros de escaneo definidos en variables de entorno."""
     max_file_size = getattr(settings, "scan_max_file_size_bytes", None)
     excluded_dirs_raw = str(getattr(settings, "scan_excluded_dirs", "") or "").strip()
@@ -206,6 +206,9 @@ def _read_scan_filters_from_settings(
         getattr(settings, "scan_excluded_extensions", "") or ""
     ).strip()
     excluded_files_raw = str(getattr(settings, "scan_excluded_files", "") or "").strip()
+    excluded_patterns_raw = str(
+        getattr(settings, "scan_excluded_patterns", "") or ""
+    ).strip()
 
     if max_file_size is None or int(max_file_size) <= 0:
         raise RuntimeError(
@@ -223,7 +226,14 @@ def _read_scan_filters_from_settings(
     excluded_dirs = _parse_csv_set(excluded_dirs_raw, prefix_dot=False)
     excluded_extensions = _parse_csv_set(excluded_extensions_raw, prefix_dot=True)
     excluded_files = _parse_csv_set(excluded_files_raw, prefix_dot=False)
-    return int(max_file_size), excluded_dirs, excluded_extensions, excluded_files
+    excluded_patterns = _parse_csv_set(excluded_patterns_raw, prefix_dot=False)
+    return (
+        int(max_file_size),
+        excluded_dirs,
+        excluded_extensions,
+        excluded_files,
+        excluded_patterns,
+    )
 
 
 def _run_semantic_extractor(
@@ -317,8 +327,10 @@ def ingest_repository(
 ) -> str:
     """Ejecute la ingesta completa del repositorio y devuelva el identificador del repositorio."""
     settings = get_settings()
+    ingestion_started_at = perf_counter()
     effective_auth = auth if auth is not None else RepoAuthConfig()
     logger("Clonando repositorio...")
+    clone_started_at = perf_counter()
     repo_id, repo_path = clone_repository(
         repo_url=repo_url,
         destination_root=settings.workspace_path,
@@ -341,6 +353,11 @@ def ingest_repository(
             getattr(settings, "git_ssh_strict_host_key_checking", "yes")
         ),
     )
+    if diagnostics_sink is not None:
+        diagnostics_sink["clone_ms"] = round(
+            (perf_counter() - clone_started_at) * 1000.0,
+            2,
+        )
 
     if _repo_has_existing_index_data(repo_id=repo_id, logger=logger):
         logger(
@@ -360,15 +377,18 @@ def ingest_repository(
         excluded_dirs,
         excluded_extensions,
         excluded_files,
+        excluded_patterns,
     ) = _read_scan_filters_from_settings(settings)
 
     logger("Escaneando archivos...")
+    scan_started_at = perf_counter()
     scanned_files, scan_stats = scan_repository_with_stats(
         repo_path,
         max_file_size=max_file_size,
         excluded_dirs=excluded_dirs,
         excluded_extensions=excluded_extensions,
         excluded_files=excluded_files,
+        excluded_patterns=excluded_patterns,
     )
     logger(
         "Escaneo: visitados={visited}, indexados={scanned}, excluidos_dir={excluded_dir}, "
@@ -377,8 +397,15 @@ def ingest_repository(
             **scan_stats
         )
     )
+    if diagnostics_sink is not None:
+        diagnostics_sink["scan_ms"] = round(
+            (perf_counter() - scan_started_at) * 1000.0,
+            2,
+        )
+        diagnostics_sink["scan_stats"] = dict(scan_stats)
 
     logger("Extrayendo símbolos...")
+    chunk_started_at = perf_counter()
     symbol_chunks = extract_symbol_chunks(repo_id=repo_id, scanned_files=scanned_files)
     language_counts: dict[str, int] = {}
     for item in scanned_files:
@@ -388,8 +415,19 @@ def ingest_repository(
         f"lenguajes={language_counts}"
     )
     logger(_symbol_observability_summary(scanned_files, symbol_chunks))
+    if diagnostics_sink is not None:
+        diagnostics_sink["chunk_ms"] = round(
+            (perf_counter() - chunk_started_at) * 1000.0,
+            2,
+        )
+        diagnostics_sink["coverage"] = {
+            "files": len(scanned_files),
+            "chunks": len(symbol_chunks),
+            "languages": dict(language_counts),
+        }
 
     logger("Generando embeddings...")
+    vector_started_at = perf_counter()
     _index_vectors(
         repo_id,
         scanned_files,
@@ -397,12 +435,25 @@ def ingest_repository(
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,
         logger=logger,
+        diagnostics_sink=diagnostics_sink,
     )
+    if diagnostics_sink is not None:
+        diagnostics_sink["vector_total_ms"] = round(
+            (perf_counter() - vector_started_at) * 1000.0,
+            2,
+        )
 
     logger("Construyendo indice lexico...")
+    lexical_started_at = perf_counter()
     _index_lexical_backend(repo_id, scanned_files, symbol_chunks)
+    if diagnostics_sink is not None:
+        diagnostics_sink["lexical_ms"] = round(
+            (perf_counter() - lexical_started_at) * 1000.0,
+            2,
+        )
 
     logger("Construyendo grafo Neo4j...")
+    graph_started_at = perf_counter()
     try:
         _index_graph(
             repo_id,
@@ -413,8 +464,19 @@ def ingest_repository(
         )
     except Exception as exc:
         logger(f"Advertencia: no se pudo indexar grafo Neo4j ({exc})")
+    finally:
+        if diagnostics_sink is not None:
+            diagnostics_sink["graph_ms"] = round(
+                (perf_counter() - graph_started_at) * 1000.0,
+                2,
+            )
 
     logger("Ingesta finalizada")
+    if diagnostics_sink is not None:
+        diagnostics_sink["ingestion_total_ms"] = round(
+            (perf_counter() - ingestion_started_at) * 1000.0,
+            2,
+        )
     return repo_id
 
 
@@ -425,6 +487,7 @@ def _index_vectors(
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
     logger: LoggerFn | None = None,
+    diagnostics_sink: dict[str, object] | None = None,
 ) -> None:
     """Generar y conservar vectores para símbolos/archivos/módulos."""
     chroma = ChromaIndex()
@@ -432,6 +495,7 @@ def _index_vectors(
         provider=embedding_provider,
         model=embedding_model,
     )
+    vector_metrics: list[dict[str, int | str | None]] = []
 
     def _progress_logger(stage_name: str, total_items: int) -> LoggerFn | None:
         """Construye un logger de progreso por hitos de 10% para embeddings."""
@@ -472,13 +536,13 @@ def _index_vectors(
         }
         for chunk in symbols
     ]
-    chroma.upsert(
+    vector_metrics.append(chroma.upsert(
         collection_name="code_symbols",
         ids=[chunk.id for chunk in symbols],
         documents=symbol_texts,
         embeddings=symbol_embeddings,
         metadatas=symbol_meta,
-    )
+    ))
 
     file_ids = [f"{repo_id}:{item.path}" for item in scanned_files]
     file_docs = [summarize_file(item) for item in scanned_files]
@@ -497,13 +561,13 @@ def _index_vectors(
         }
         for index, item in enumerate(scanned_files)
     ]
-    chroma.upsert(
+    vector_metrics.append(chroma.upsert(
         collection_name="code_files",
         ids=file_ids,
         documents=file_docs,
         embeddings=file_embeddings,
         metadatas=file_meta,
-    )
+    ))
 
     module_summaries = summarize_modules(scanned_files)
     module_names = list(module_summaries.keys())
@@ -524,13 +588,54 @@ def _index_vectors(
         }
         for index in range(len(module_ids))
     ]
-    chroma.upsert(
+    vector_metrics.append(chroma.upsert(
         collection_name="code_modules",
         ids=module_ids,
         documents=module_docs,
         embeddings=module_embeddings,
         metadatas=module_meta,
-    )
+    ))
+
+    if diagnostics_sink is not None:
+        effective_batch_sizes = [
+            int(item["effective_batch_size"])
+            for item in vector_metrics
+            if item.get("effective_batch_size") is not None
+        ]
+        diagnostics_sink["vector_index"] = {
+            "collections_written": len(vector_metrics),
+            "initial_batch_size": max(
+                int(item["requested_batch_size"])
+                for item in vector_metrics
+            )
+            if vector_metrics
+            else 0,
+            "effective_batch_size": min(effective_batch_sizes)
+            if effective_batch_sizes
+            else 0,
+            "split_count": sum(int(item["split_count"] or 0) for item in vector_metrics),
+            "recovered_retry_count": sum(
+                int(item["recovered_retry_count"] or 0)
+                for item in vector_metrics
+            ),
+            "payload_too_large_events": sum(
+                int(item["payload_too_large_events"] or 0)
+                for item in vector_metrics
+            ),
+            "proxy_reset_events": sum(
+                int(item["proxy_reset_events"] or 0) for item in vector_metrics
+            ),
+            "upstream_restarting_events": sum(
+                int(item["upstream_restarting_events"] or 0)
+                for item in vector_metrics
+            ),
+            "documents_written": sum(
+                int(item["documents_written"] or 0) for item in vector_metrics
+            ),
+            "collections": {
+                str(item["collection_name"]): dict(item) for item in vector_metrics
+            },
+        }
 
 
 def _index_lexical_backend(

@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import json
 from threading import Lock
 from typing import Any
 import gc
@@ -20,6 +21,7 @@ COLLECTIONS = [
     "infra_ci",
 ]
 CHROMA_HNSW_SPACES = {"l2", "cosine"}
+_REMOTE_CHROMA_ERROR_PREFIX = "No se pudo completar la operación de Chroma remoto"
 
 
 def _build_remote_auth_header(settings: Any) -> str | None:
@@ -171,6 +173,36 @@ def _resolve_remote_batch_size_override(settings: Any) -> int | None:
     return override
 
 
+def _resolve_remote_max_request_bytes(settings: Any) -> int:
+    """Obtiene el presupuesto máximo estimado por request remoto."""
+    raw_value = getattr(settings, "chroma_max_request_bytes", 50 * 1024 * 1024)
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return 50 * 1024 * 1024
+    return max(1, value)
+
+
+def _resolve_remote_min_batch_size(settings: Any) -> int:
+    """Obtiene el tamaño mínimo de lote permitido para split retry."""
+    raw_value = getattr(settings, "chroma_remote_min_batch_size", 25)
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return 25
+    return max(1, value)
+
+
+def _resolve_remote_max_split_depth(settings: Any) -> int:
+    """Obtiene la profundidad máxima de split retry remoto."""
+    raw_value = getattr(settings, "chroma_remote_max_split_depth", 6)
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return 6
+    return max(1, value)
+
+
 def _is_payload_too_large_error(exc: Exception) -> bool:
     """Detecta respuestas compatibles con payload demasiado grande."""
     message = str(exc).lower()
@@ -233,7 +265,8 @@ def _build_remote_chroma_remediation_hint(signal: str | None) -> str:
     """Devuelve una pista operativa breve según la señal detectada."""
     if signal == "payload_grande":
         return (
-            " Reduce CHROMA_REMOTE_BATCH_SIZE_OVERRIDE y vuelve a intentar."
+            " Reduce CHROMA_REMOTE_BATCH_SIZE_OVERRIDE o ajusta "
+            "CHROMA_MAX_REQUEST_BYTES y vuelve a intentar."
         )
     if signal == "proxy_reset":
         return (
@@ -246,6 +279,60 @@ def _build_remote_chroma_remediation_hint(signal: str | None) -> str:
             "pod remoto de Chroma."
         )
     return ""
+
+
+def _estimate_upsert_request_bytes(
+    ids: list[str],
+    documents: list[str],
+    embeddings: list[list[float]],
+    metadatas: list[dict[str, Any]],
+) -> int:
+    """Estima el tamaño serializado del payload de un upsert remoto."""
+    payload = {
+        "ids": ids,
+        "documents": documents,
+        "embeddings": embeddings,
+        "metadatas": metadatas,
+    }
+    return len(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    )
+
+
+def _is_wrapped_remote_chroma_error(exc: Exception) -> bool:
+    """Detecta errores remotos ya sanitizados para no duplicar wrapping."""
+    return isinstance(exc, RuntimeError) and str(exc).startswith(
+        _REMOTE_CHROMA_ERROR_PREFIX
+    )
+
+
+def _is_recoverable_remote_upsert_error(exc: Exception) -> bool:
+    """Marca errores remotos recuperables mediante reducción de lote."""
+    return _is_payload_too_large_error(exc) or _is_proxy_reset_error(exc)
+
+
+def _build_upsert_metrics(
+    *,
+    collection_name: str,
+    requested_batch_size: int,
+) -> dict[str, int | str | None]:
+    """Inicializa métricas operativas para una llamada de upsert."""
+    return {
+        "collection_name": collection_name,
+        "requested_batch_size": max(1, requested_batch_size),
+        "effective_batch_size": None,
+        "split_count": 0,
+        "recovered_retry_count": 0,
+        "payload_too_large_events": 0,
+        "proxy_reset_events": 0,
+        "upstream_restarting_events": 0,
+        "documents_written": 0,
+    }
 
 
 class ChromaIndex:
@@ -492,10 +579,14 @@ class ChromaIndex:
         documents: list[str],
         embeddings: list[list[float]],
         metadatas: list[dict[str, Any]],
-    ) -> None:
+    ) -> dict[str, int | str | None]:
         """Insertar o actualizar vectores y metadatos en la colección."""
         settings = get_settings()
         batch_size = self._max_batch_size()
+        metrics = _build_upsert_metrics(
+            collection_name=collection_name,
+            requested_batch_size=batch_size,
+        )
         try:
             self._upsert_batched(
                 collection_name=collection_name,
@@ -504,12 +595,17 @@ class ChromaIndex:
                 embeddings=embeddings,
                 metadatas=metadatas,
                 batch_size=batch_size,
+                metrics=metrics,
             )
         except Exception as exc:
             if _is_missing_collection_error(exc):
                 # Recupera referencias stale tras reset concurrente/externo.
                 self.__class__.reset_shared_state()
                 self.__init__()
+                metrics = _build_upsert_metrics(
+                    collection_name=collection_name,
+                    requested_batch_size=batch_size,
+                )
                 try:
                     self._upsert_batched(
                         collection_name=collection_name,
@@ -518,9 +614,12 @@ class ChromaIndex:
                         embeddings=embeddings,
                         metadatas=metadatas,
                         batch_size=batch_size,
+                        metrics=metrics,
                     )
                 except Exception as retry_exc:
                     if settings.chroma_mode == "remote":
+                        if _is_wrapped_remote_chroma_error(retry_exc):
+                            raise retry_exc
                         raise RuntimeError(
                             build_remote_chroma_error_message(
                                 settings,
@@ -531,7 +630,7 @@ class ChromaIndex:
                             )
                         ) from retry_exc
                     raise
-                return
+                return metrics
             if not _is_dimension_mismatch_error(exc):
                 if _is_space_mismatch_error(exc):
                     raise RuntimeError(
@@ -539,6 +638,8 @@ class ChromaIndex:
                         "CHROMA_HNSW_SPACE y recrea índices antes de reintentar."
                     ) from exc
                 if settings.chroma_mode == "remote":
+                    if _is_wrapped_remote_chroma_error(exc):
+                        raise exc
                     raise RuntimeError(
                         build_remote_chroma_error_message(
                             settings,
@@ -554,6 +655,138 @@ class ChromaIndex:
                 f"'{collection_name}'. Ajusta el modelo o limpia índices de "
                 "forma controlada antes de reintentar."
             ) from exc
+        return metrics
+
+    def _resolve_effective_batch_size(
+        self,
+        settings: Any,
+        *,
+        ids: list[str],
+        documents: list[str],
+        embeddings: list[list[float]],
+        metadatas: list[dict[str, Any]],
+        start: int,
+        batch_size: int,
+    ) -> int:
+        """Ajusta el lote inicial remoto según el presupuesto estimado."""
+        if str(getattr(settings, "chroma_mode", "") or "").strip().lower() != "remote":
+            return batch_size
+
+        upper_bound = min(batch_size, len(ids) - start)
+        if upper_bound <= 1:
+            return upper_bound
+
+        max_request_bytes = _resolve_remote_max_request_bytes(settings)
+
+        def fits(candidate_size: int) -> bool:
+            end = start + candidate_size
+            estimated_size = _estimate_upsert_request_bytes(
+                ids[start:end],
+                documents[start:end],
+                embeddings[start:end],
+                metadatas[start:end],
+            )
+            return estimated_size <= max_request_bytes
+
+        if fits(upper_bound):
+            return upper_bound
+
+        low = 1
+        high = upper_bound
+        best = 1
+        while low <= high:
+            mid = (low + high) // 2
+            if fits(mid):
+                best = mid
+                low = mid + 1
+            else:
+                high = mid - 1
+        return best
+
+    def _upsert_batch_with_retry(
+        self,
+        settings: Any,
+        *,
+        collection_name: str,
+        ids: list[str],
+        documents: list[str],
+        embeddings: list[list[float]],
+        metadatas: list[dict[str, Any]],
+        metrics: dict[str, int | str | None],
+        split_depth: int = 0,
+    ) -> None:
+        """Intenta escribir un lote y lo subdivide si el fallo remoto es recuperable."""
+        current_effective = int(metrics.get("effective_batch_size") or 0)
+        if current_effective <= 0 or len(ids) < current_effective:
+            metrics["effective_batch_size"] = len(ids)
+        try:
+            self.collections[collection_name].upsert(
+                ids=ids,
+                documents=documents,
+                embeddings=embeddings,
+                metadatas=metadatas,
+            )
+            metrics["documents_written"] = int(metrics["documents_written"] or 0) + len(ids)
+            return
+        except Exception as exc:
+            signal = _detect_remote_chroma_error_signal(exc)
+            if signal == "payload_grande":
+                metrics["payload_too_large_events"] = (
+                    int(metrics["payload_too_large_events"] or 0) + 1
+                )
+            elif signal == "proxy_reset":
+                metrics["proxy_reset_events"] = (
+                    int(metrics["proxy_reset_events"] or 0) + 1
+                )
+            elif signal == "upstream_reiniciando":
+                metrics["upstream_restarting_events"] = (
+                    int(metrics["upstream_restarting_events"] or 0) + 1
+                )
+            if (
+                str(getattr(settings, "chroma_mode", "") or "").strip().lower()
+                == "remote"
+                and _is_recoverable_remote_upsert_error(exc)
+                and len(ids) > _resolve_remote_min_batch_size(settings)
+                and split_depth < _resolve_remote_max_split_depth(settings)
+            ):
+                metrics["split_count"] = int(metrics["split_count"] or 0) + 1
+                metrics["recovered_retry_count"] = (
+                    int(metrics["recovered_retry_count"] or 0) + 1
+                )
+                midpoint = max(1, len(ids) // 2)
+                self._upsert_batch_with_retry(
+                    settings,
+                    collection_name=collection_name,
+                    ids=ids[:midpoint],
+                    documents=documents[:midpoint],
+                    embeddings=embeddings[:midpoint],
+                    metadatas=metadatas[:midpoint],
+                    metrics=metrics,
+                    split_depth=split_depth + 1,
+                )
+                self._upsert_batch_with_retry(
+                    settings,
+                    collection_name=collection_name,
+                    ids=ids[midpoint:],
+                    documents=documents[midpoint:],
+                    embeddings=embeddings[midpoint:],
+                    metadatas=metadatas[midpoint:],
+                    metrics=metrics,
+                    split_depth=split_depth + 1,
+                )
+                return
+
+            if str(getattr(settings, "chroma_mode", "") or "").strip().lower() == "remote":
+                raise RuntimeError(
+                    build_remote_chroma_error_message(
+                        settings,
+                        operation="upsert",
+                        exc=exc,
+                        collection_name=collection_name,
+                        batch_size=len(ids),
+                    )
+                ) from exc
+            raise
 
     def _max_batch_size(self) -> int:
         """Devuelve el tamaño de lote máximo seguro admitido por el tiempo de ejecución de Chroma."""
@@ -577,16 +810,32 @@ class ChromaIndex:
         embeddings: list[list[float]],
         metadatas: list[dict[str, Any]],
         batch_size: int,
+        metrics: dict[str, int | str | None],
     ) -> None:
         """Realiza upsert por lotes para evitar límites de tamaño en Chroma."""
-        for index in range(0, len(ids), batch_size):
-            end = index + batch_size
-            self.collections[collection_name].upsert(
+        settings = get_settings()
+        index = 0
+        while index < len(ids):
+            effective_batch_size = self._resolve_effective_batch_size(
+                settings,
+                ids=ids,
+                documents=documents,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                start=index,
+                batch_size=batch_size,
+            )
+            end = index + effective_batch_size
+            self._upsert_batch_with_retry(
+                settings,
+                collection_name=collection_name,
                 ids=ids[index:end],
                 documents=documents[index:end],
                 embeddings=embeddings[index:end],
                 metadatas=metadatas[index:end],
+                metrics=metrics,
             )
+            index = end
 
     def query(
         self,

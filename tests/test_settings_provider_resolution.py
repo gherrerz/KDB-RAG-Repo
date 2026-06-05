@@ -165,6 +165,38 @@ def test_chroma_remote_auth_rejects_password_without_username() -> None:
         Settings(CHROMA_PASSWORD="svc-pass", _env_file=None)
 
 
+def test_chroma_remote_batching_settings_have_safe_defaults() -> None:
+    """Expone defaults seguros para el writer remoto adaptativo de Chroma."""
+    settings = Settings(_env_file=None)
+
+    assert settings.chroma_remote_batch_size_override == 0
+    assert settings.chroma_max_request_bytes == 50 * 1024 * 1024
+    assert settings.chroma_remote_min_batch_size == 25
+    assert settings.chroma_remote_max_split_depth == 6
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value", "message"),
+    [
+        ("CHROMA_MAX_REQUEST_BYTES", 0, "CHROMA_MAX_REQUEST_BYTES"),
+        ("CHROMA_REMOTE_MIN_BATCH_SIZE", 0, "CHROMA_REMOTE_MIN_BATCH_SIZE"),
+        (
+            "CHROMA_REMOTE_MAX_SPLIT_DEPTH",
+            0,
+            "CHROMA_REMOTE_MAX_SPLIT_DEPTH",
+        ),
+    ],
+)
+def test_chroma_remote_batching_settings_reject_non_positive_values(
+    field_name: str,
+    field_value: int,
+    message: str,
+) -> None:
+    """Rechaza parámetros operativos no positivos del writer remoto."""
+    with pytest.raises(ValueError, match=message):
+        Settings(**{field_name: field_value}, _env_file=None)
+
+
 def test_postgres_dsn_is_empty_without_host() -> None:
     """Deshabilita Postgres cuando no hay host configurado."""
     settings = Settings(POSTGRES_HOST="", _env_file=None)

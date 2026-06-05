@@ -533,6 +533,76 @@ class RepoRuntimeEntry(BaseModel):
     )
 
 
+class RepoIngestionSnapshotEntry(BaseModel):
+    """Representa una foto operativa histórica de ingesta por repositorio."""
+
+    snapshot_id: int = Field(description="Identificador interno del snapshot.")
+    repo_id: str = Field(description="Identificador público del repositorio.")
+    job_id: str = Field(description="Identificador del job que originó la foto.")
+    snapshot_at: datetime = Field(description="Fecha de captura del snapshot.")
+    job_status: str = Field(description="Estado final del job asociado.")
+    error_message: str | None = Field(
+        default=None,
+        description="Mensaje de error persistido cuando la ingesta falló.",
+    )
+    retryable_error: bool = Field(
+        description="Indica si el error fue marcado como reintentable.",
+    )
+    workspace_retained: bool = Field(
+        description="Indica si el workspace temporal quedó retenido.",
+    )
+    workspace_cleanup_attempted: bool = Field(
+        description="Indica si se intentó limpiar el workspace temporal.",
+    )
+    workspace_cleanup_succeeded: bool = Field(
+        description="Indica si la limpieza del workspace terminó correctamente.",
+    )
+    clone_ms: float | None = Field(default=None)
+    scan_ms: float | None = Field(default=None)
+    chunk_ms: float | None = Field(default=None)
+    vector_total_ms: float | None = Field(default=None)
+    lexical_ms: float | None = Field(default=None)
+    graph_ms: float | None = Field(default=None)
+    readiness_ms: float | None = Field(default=None)
+    ingestion_total_ms: float | None = Field(default=None)
+    files_visited: int = Field(default=0)
+    files_scanned: int = Field(default=0)
+    excluded_dir_count: int = Field(default=0)
+    excluded_extension_count: int = Field(default=0)
+    excluded_file_count: int = Field(default=0)
+    excluded_size_count: int = Field(default=0)
+    excluded_decode_count: int = Field(default=0)
+    excluded_pattern_count: int = Field(default=0)
+    visited_dirs: int = Field(default=0)
+    pruned_dirs: int = Field(default=0)
+    symbols_count: int = Field(default=0)
+    chunks_count: int = Field(default=0)
+    languages_detected_count: int = Field(default=0)
+    vector_collections_written: int = Field(default=0)
+    vector_initial_batch_size: int = Field(default=0)
+    vector_effective_batch_size: int = Field(default=0)
+    vector_split_count: int = Field(default=0)
+    vector_recovered_retry_count: int = Field(default=0)
+    vector_payload_too_large_events: int = Field(default=0)
+    vector_proxy_reset_events: int = Field(default=0)
+    vector_upstream_restarting_events: int = Field(default=0)
+    vector_documents_written: int = Field(default=0)
+    semantic_enabled: bool = Field(default=False)
+    semantic_status: str | None = Field(default=None)
+    semantic_relations_count: int = Field(default=0)
+    semantic_unresolved_count: int = Field(default=0)
+
+
+class RepoIngestionSnapshotsResponse(BaseModel):
+    """Respuesta con historial operativo de snapshots para un repositorio."""
+
+    repo_id: str = Field(description="Identificador público del repositorio.")
+    snapshots: list["RepoIngestionSnapshotEntry"] = Field(
+        default_factory=list,
+        description="Snapshots operativos ordenados del más nuevo al más antiguo.",
+    )
+
+
 class RepoLastQueryStaleResponse(BaseModel):
     """Respuesta para repositorios sin consultas desde una fecha dada."""
 

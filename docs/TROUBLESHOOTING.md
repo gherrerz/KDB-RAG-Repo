@@ -44,6 +44,7 @@ Causas probables:
 Acción recomendada:
 
 - Si ves `señal=payload_grande`, reduce `CHROMA_REMOTE_BATCH_SIZE_OVERRIDE` de forma gradual: `1000`, luego `500`, luego `250` solo si el fallo persiste.
+- Si quieres mantener el override en `0`, revisa `CHROMA_MAX_REQUEST_BYTES`, `CHROMA_REMOTE_MIN_BATCH_SIZE` y `CHROMA_REMOTE_MAX_SPLIT_DEPTH` para que el runtime tenga limites operativos explicitos antes de activar el write-path adaptativo.
 - Si ves `señal=proxy_reset`, revisa timeouts, resets o límites de body en proxy, ingress, Envoy o service mesh entre la API y Chroma.
 - Si ves `señal=upstream_reiniciando`, revisa estado del servicio remoto, eventos del deployment y reinicios del pod de Chroma.
 - Reintenta la ingesta solo después de corregir la causa operativa, especialmente si el fallo ocurrió durante `code_symbols`, que suele ser el payload más voluminoso.

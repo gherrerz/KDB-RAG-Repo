@@ -132,6 +132,19 @@ Notas de catálogo:
   - `requested_embedding_model: str | null`
 - Response schema: `RepoQueryStatusResponse`
 
+#### GET /repos/{repo_id}/snapshots
+
+Retorna el historial operativo persistido de ingestas para un repositorio,
+ordenado del snapshot más reciente al más antiguo.
+
+- Path params:
+  - `repo_id: str`
+- Query params:
+  - `limit: int = 20` (min `1`, max `100`)
+- Response schema: `RepoIngestionSnapshotsResponse`
+- Error responses:
+  - `404`: repo no encontrado (`detail` es string)
+
 #### GET /providers/models
 
 Retorna catálogo de modelos por provider y kind.
@@ -212,6 +225,11 @@ Notas de comportamiento:
 
 Elimina datos del repositorio en todas las capas de storage.
 
+Notas de comportamiento:
+
+- El borrado incluye snapshots operativos históricos persistidos en metadata,
+  además de jobs, runtime, Chroma, capa léxica, Neo4j y workspace local.
+
 - Path params:
   - `repo_id: str`
 - Response schema: `RepoDeleteResponse`
@@ -256,6 +274,7 @@ Notas de comportamiento:
 | GET | `/repos` | `JobManager.list_repo_catalog` | N/A | `RepoCatalogResponse` |
 | GET | `/repos/last-query/stale` | `JobManager.list_stale_repos` | Query params | `RepoLastQueryStaleResponse` |
 | GET | `/repos/{repo_id}/status` | `get_repo_query_status` | Path/query params | `RepoQueryStatusResponse` |
+| GET | `/repos/{repo_id}/snapshots` | `JobManager.list_repo_ingest_snapshots` | Path/query params | `RepoIngestionSnapshotsResponse` |
 | GET | `/providers/models` | `discover_models` | Query params | `ProviderModelCatalogResponse` |
 | GET | `/health` | `run_storage_preflight` | N/A | `StorageHealthResponse` |
 | GET | `/admin/chroma/diagnostics` | `build_managed_vector_index` + Chroma diagnostics | Query params | `ChromaDiagnosticsResponse` |

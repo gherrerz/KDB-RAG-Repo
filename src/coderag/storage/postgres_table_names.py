@@ -3,3 +3,4 @@
 POSTGRES_JOBS_TABLE = "Tbl_Repository_Jobs"
 POSTGRES_REPOS_TABLE = "Tbl_Repository_Repos"
 POSTGRES_LEXICAL_CORPUS_TABLE = "Tbl_Repository_LexicalCorpus"
+POSTGRES_INGESTION_SNAPSHOTS_TABLE = "Tbl_Repository_IngestionSnapshots"

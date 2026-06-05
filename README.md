@@ -405,6 +405,7 @@ Rutas principales:
 - GET /repos
 - DELETE /repos/{repo_id}
 - GET /repos/{repo_id}/status
+- GET /repos/{repo_id}/snapshots
 - GET /providers/models
 - GET /health
 - GET /admin/chroma/diagnostics
@@ -425,6 +426,7 @@ Si recibes errores durante ingesta o consulta:
 Atajo de diagnostico:
 
 - Readiness por repo: GET /repos/{repo_id}/status
+- Historial operativo por repo: GET /repos/{repo_id}/snapshots
 - Salud de storage: GET /health
 - Diagnostico de colecciones Chroma: GET /admin/chroma/diagnostics
 - Query directa controlada a Chroma: POST /admin/chroma/query

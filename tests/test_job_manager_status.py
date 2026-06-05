@@ -2,6 +2,7 @@
 
 import datetime
 from contextlib import contextmanager, nullcontext
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -173,6 +174,25 @@ def test_job_manager_marks_completed_when_repo_query_ready(
             "url": "https://github.com/acme/ready.git",
             "branch": "main",
         }
+    ]
+
+
+def test_job_manager_lists_repo_ingest_snapshots_from_store() -> None:
+    """Expone snapshots operativos del repo a través del backend persistente."""
+    manager = JobManager()
+    manager.store = MagicMock()
+    manager.store.list_repo_ingest_snapshots.return_value = [
+        {"snapshot_id": 1, "repo_id": "repo-ready", "job_id": "j1"}
+    ]
+
+    snapshots = manager.list_repo_ingest_snapshots(" repo-ready ", limit=7)
+
+    manager.store.list_repo_ingest_snapshots.assert_called_once_with(
+        "repo-ready",
+        limit=7,
+    )
+    assert snapshots == [
+        {"snapshot_id": 1, "repo_id": "repo-ready", "job_id": "j1"}
     ]
 
 

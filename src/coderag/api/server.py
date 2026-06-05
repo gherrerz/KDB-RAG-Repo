@@ -24,6 +24,8 @@ from coderag.core.models import (
     QueryRequest,
     QueryResponse,
     RepoCatalogEntry,
+    RepoIngestionSnapshotEntry,
+    RepoIngestionSnapshotsResponse,
     RepoLastQueryStaleResponse,
     RepoRuntimeEntry,
     RetrievalQueryRequest,
@@ -640,6 +642,43 @@ def list_repos() -> RepoCatalogResponse:
     return RepoCatalogResponse(
         repo_ids=[item.repo_id for item in repositories],
         repositories=repositories,
+    )
+
+
+@app.get(
+    "/repos/{repo_id}/snapshots",
+    response_model=RepoIngestionSnapshotsResponse,
+    tags=["Catalogo"],
+    summary="Listar snapshots operativos por repositorio",
+    description=(
+        "Retorna el historial operativo persistido de ingestas para un repo, "
+        "ordenado del snapshot más reciente al más antiguo."
+    ),
+)
+def list_repo_ingest_snapshots(
+    repo_id: str,
+    limit: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+        description="Cantidad máxima de snapshots a devolver.",
+    ),
+) -> RepoIngestionSnapshotsResponse:
+    """Devuelve historial operativo de ingestas persistido por repositorio."""
+    job_manager = get_job_manager()
+    snapshots = job_manager.list_repo_ingest_snapshots(repo_id, limit=limit)
+    known_repo_ids = set(job_manager.list_repo_ids())
+    if not snapshots and repo_id not in known_repo_ids:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Repositorio no encontrado: {repo_id}",
+        )
+    return RepoIngestionSnapshotsResponse(
+        repo_id=repo_id,
+        snapshots=[
+            RepoIngestionSnapshotEntry(**item)
+            for item in snapshots
+        ],
     )
 
 

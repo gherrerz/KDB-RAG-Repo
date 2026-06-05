@@ -76,3 +76,31 @@ class BaseMetadataStore(ABC):
     @abstractmethod
     def delete_repo_data(self, repo_id: str) -> dict[str, int]:
         """Elimina metadata de repositorio y jobs, retornando conteos por tabla."""
+
+    def list_repo_ingest_snapshots(
+        self,
+        repo_id: str,
+        *,
+        limit: int = 20,
+    ) -> list[dict[str, object | None]]:
+        """Lista snapshots operativos históricos para un repositorio."""
+        del repo_id, limit
+        return []
+
+    def delete_repo_ingest_snapshots(self, repo_id: str) -> int:
+        """Elimina snapshots históricos del repositorio cuando el backend lo soporta."""
+        del repo_id
+        return 0
+
+    def record_ingest_snapshot(
+        self,
+        *,
+        repo_id: str,
+        job_id: str,
+        job_status: str,
+        error_message: str | None,
+        diagnostics: dict[str, object],
+        snapshot_at: datetime.datetime,
+    ) -> None:
+        """Persiste una foto operativa de ingesta cuando el backend lo soporta."""
+        del repo_id, job_id, job_status, error_message, diagnostics, snapshot_at
