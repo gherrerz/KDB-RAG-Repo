@@ -9,7 +9,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 from coderag.core.settings import resolve_postgres_dsn
 from coderag.storage.postgres_schema import (
@@ -97,6 +97,49 @@ def _read_database_heads(factory: PostgresSessionFactory) -> set[str]:
             opts={"version_table": _DEFAULT_ALEMBIC_VERSION_TABLE},
         )
         return set(context.get_current_heads())
+
+
+def _ensure_alembic_version_table_capacity(
+    factory: PostgresSessionFactory,
+    *,
+    expected_heads: set[str],
+    current_heads: set[str],
+) -> bool:
+    """Enscha version_num si la tabla de Alembic quedó con un VARCHAR corto."""
+    required_length = max(
+        [len(_REPO_LAST_QUERIED_AT_BASE_REVISION), 32]
+        + [len(head) for head in expected_heads]
+        + [len(head) for head in current_heads],
+    )
+
+    with factory.get_connection() as connection:
+        inspector = inspect(connection)
+        if not inspector.has_table(_DEFAULT_ALEMBIC_VERSION_TABLE):
+            return False
+
+        version_column = None
+        for column in inspector.get_columns(_DEFAULT_ALEMBIC_VERSION_TABLE):
+            if str(column.get("name") or "").strip().lower() == "version_num":
+                version_column = column
+                break
+
+        if version_column is None:
+            return False
+
+        current_length = getattr(version_column.get("type"), "length", None)
+        if current_length is None or int(current_length) >= required_length:
+            return False
+
+        quoted_table = connection.dialect.identifier_preparer.quote(
+            _DEFAULT_ALEMBIC_VERSION_TABLE
+        )
+        connection.execute(
+            text(
+                f"ALTER TABLE {quoted_table} "
+                "ALTER COLUMN version_num TYPE TEXT"
+            )
+        )
+        return True
 
 
 def _classify_legacy_schema(factory: PostgresSessionFactory) -> LegacySchemaState:
@@ -217,6 +260,11 @@ def ensure_postgres_schema_ready(
     config = _build_alembic_config(postgres_dsn)
     expected_heads = set(ScriptDirectory.from_config(config).get_heads())
     current_heads = _read_database_heads(factory)
+    _ensure_alembic_version_table_capacity(
+        factory,
+        expected_heads=expected_heads,
+        current_heads=current_heads,
+    )
     action = "validated"
 
     if policy == "auto_upgrade":

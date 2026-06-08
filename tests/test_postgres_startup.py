@@ -65,6 +65,12 @@ def test_development_upgrades_when_database_is_behind(
         "from_config",
         lambda config: SimpleNamespace(get_heads=lambda: ["0001_initial_postgres_schema"]),
     )
+    capacity_mock = MagicMock(return_value=False)
+    monkeypatch.setattr(
+        postgres_startup,
+        "_ensure_alembic_version_table_capacity",
+        capacity_mock,
+    )
     upgrade_mock = MagicMock()
     monkeypatch.setattr(postgres_startup.command, "upgrade", upgrade_mock)
     monkeypatch.setattr(postgres_startup.command, "stamp", MagicMock())
@@ -73,6 +79,11 @@ def test_development_upgrades_when_database_is_behind(
 
     assert result["policy"] == "auto_upgrade"
     assert result["action"] == "upgraded"
+    capacity_mock.assert_called_once_with(
+        factory,
+        expected_heads={"0001_initial_postgres_schema"},
+        current_heads=set(),
+    )
     upgrade_mock.assert_called_once()
 
 
@@ -279,3 +290,126 @@ def test_read_database_heads_uses_repo_version_table(
 
     assert heads == {"0001_initial_postgres_schema"}
     assert captured["opts"] == {"version_table": "alembic_version_repo"}
+
+
+def test_ensure_alembic_version_table_capacity_alters_short_version_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensancha alembic_version_repo.version_num cuando el ancho queda corto."""
+
+    class _FakeConnection:
+        def __init__(self) -> None:
+            self.executed: list[object] = []
+            self.dialect = SimpleNamespace(
+                identifier_preparer=SimpleNamespace(quote=lambda value: value)
+            )
+
+        def execute(self, statement: object) -> None:
+            self.executed.append(statement)
+
+    class _ConnectionContext:
+        def __init__(self, connection: _FakeConnection) -> None:
+            self._connection = connection
+
+        def __enter__(self) -> _FakeConnection:
+            return self._connection
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            tb: object,
+        ) -> bool:
+            return False
+
+    fake_connection = _FakeConnection()
+    factory = SimpleNamespace(
+        get_connection=lambda: _ConnectionContext(fake_connection)
+    )
+
+    class _FakeInspector:
+        def has_table(self, table_name: str) -> bool:
+            return table_name == "alembic_version_repo"
+
+        def get_columns(self, table_name: str) -> list[dict[str, object]]:
+            assert table_name == "alembic_version_repo"
+            return [
+                {
+                    "name": "version_num",
+                    "type": SimpleNamespace(length=32),
+                }
+            ]
+
+    monkeypatch.setattr(postgres_startup, "inspect", lambda conn: _FakeInspector())
+
+    changed = postgres_startup._ensure_alembic_version_table_capacity(
+        factory,
+        expected_heads={"0004_add_ingestion_snapshots_table"},
+        current_heads={"0003_add_repo_last_queried_at"},
+    )
+
+    assert changed is True
+    assert len(fake_connection.executed) == 1
+    assert str(fake_connection.executed[0]) == (
+        "ALTER TABLE alembic_version_repo ALTER COLUMN version_num TYPE TEXT"
+    )
+
+
+def test_ensure_alembic_version_table_capacity_skips_when_column_is_wide_enough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No altera la tabla de Alembic si version_num ya soporta el head actual."""
+
+    class _FakeConnection:
+        def __init__(self) -> None:
+            self.executed: list[object] = []
+            self.dialect = SimpleNamespace(
+                identifier_preparer=SimpleNamespace(quote=lambda value: value)
+            )
+
+        def execute(self, statement: object) -> None:
+            self.executed.append(statement)
+
+    class _ConnectionContext:
+        def __init__(self, connection: _FakeConnection) -> None:
+            self._connection = connection
+
+        def __enter__(self) -> _FakeConnection:
+            return self._connection
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            tb: object,
+        ) -> bool:
+            return False
+
+    fake_connection = _FakeConnection()
+    factory = SimpleNamespace(
+        get_connection=lambda: _ConnectionContext(fake_connection)
+    )
+
+    class _FakeInspector:
+        def has_table(self, table_name: str) -> bool:
+            return table_name == "alembic_version_repo"
+
+        def get_columns(self, table_name: str) -> list[dict[str, object]]:
+            assert table_name == "alembic_version_repo"
+            return [
+                {
+                    "name": "version_num",
+                    "type": SimpleNamespace(length=128),
+                }
+            ]
+
+    monkeypatch.setattr(postgres_startup, "inspect", lambda conn: _FakeInspector())
+
+    changed = postgres_startup._ensure_alembic_version_table_capacity(
+        factory,
+        expected_heads={"0004_add_ingestion_snapshots_table"},
+        current_heads={"0003_add_repo_last_queried_at"},
+    )
+
+    assert changed is False
+    assert fake_connection.executed == []
