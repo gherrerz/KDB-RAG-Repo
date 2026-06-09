@@ -17,6 +17,33 @@ def test_is_module_query_detects_spanish_and_english_terms() -> None:
     assert not query_service._is_module_query("donde se define auth")
 
 
+def test_extract_literal_symbol_candidates_detects_standalone_snake_case() -> None:
+    """Extrae símbolos standalone tipo snake_case en queries naturales."""
+    assert query_service._extract_literal_symbol_candidates(
+        "donde esta run_retrieval_query"
+    ) == ["run_retrieval_query"]
+
+
+def test_resolve_repo_file_path_uses_resolved_repo_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Resuelve archivos relativos usando la raíz compartida del repo."""
+    repo_root = tmp_path / "repo"
+    target_file = repo_root / "src" / "coderag" / "api" / "query_service.py"
+    target_file.parent.mkdir(parents=True)
+    target_file.write_text("print('ok')\n", encoding="utf-8")
+
+    monkeypatch.setattr(query_service, "_resolve_repo_root", lambda _repo_id: repo_root)
+
+    resolved = query_service._resolve_repo_file_path(
+        "repo1",
+        "src/coderag/api/query_service.py",
+    )
+
+    assert resolved == target_file
+
+
 @pytest.mark.parametrize(
     ("query", "expected"),
     [
@@ -171,6 +198,66 @@ def test_build_internal_file_importer_seed_chunks_adds_missing_importer_paths() 
     assert seed_count == 1
     assert seed_chunks[0].metadata["path"] == "src/coderag/jobs/worker.py"
     assert seed_chunks[0].metadata["kind"] == "graph_file_importer_seed"
+
+
+def test_refine_top_unique_symbol_span_replaces_owner_file_with_exact_span(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Sustituye el file chunk dueño por el span exacto cuando el símbolo es único."""
+    repo_root = tmp_path / "repo1"
+    target_file = repo_root / "src" / "coderag" / "api" / "query_service.py"
+    target_file.parent.mkdir(parents=True)
+    target_file.write_text(
+        "def helper():\n    return 1\n\n"
+        "def run_retrieval_query(repo_id, query, top_n, top_k):\n"
+        "    return query\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        query_service,
+        "_resolve_literal_symbol_match",
+        lambda repo_id, query: (
+            target_file,
+            "src/coderag/api/query_service.py",
+            4,
+            5,
+            "run_retrieval_query",
+            "exact_symbol_unique",
+        ),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_resolve_repo_file_path",
+        lambda repo_id, relative_path: target_file,
+    )
+
+    reranked = [
+        RetrievalChunk(
+            id="owner-file",
+            text='"""Orquestación de consultas de un extremo a otro para Hybrid RAG + GraphRAG."""',
+            score=0.55,
+            metadata={
+                "path": "src/coderag/api/query_service.py",
+                "start_line": 1,
+                "end_line": 1287,
+                "kind": "code_chunk",
+            },
+        )
+    ]
+
+    refined = query_service._refine_top_unique_symbol_span(
+        repo_id="repo1",
+        query="donde esta run_retrieval_query",
+        reranked=reranked,
+    )
+
+    assert refined[0].metadata["symbol_name"] == "run_retrieval_query"
+    assert refined[0].metadata["start_line"] == 4
+    assert refined[0].metadata["end_line"] == 5
+    assert refined[0].metadata["literal_symbol_refined"] is True
+    assert refined[0].text.startswith("def run_retrieval_query")
 
 
 def test_run_retrieval_query_routes_reverse_import_query_graph_first(

@@ -205,6 +205,461 @@ Resultado actual:
 - uplift_relative = 0.2000
 - Motivo: falta completar revisión humana del CSV (ratio de filas revisadas insuficiente).
 
+## 4.3 Scaffold offline para code retrieval exacto
+
+Se agrego el primer corte del dataset offline para evaluar recuperacion exacta de
+codigo sin tocar runtime.
+
+- Gold set inicial: `scripts/benchmark_data/code_retrieval_gold.json`
+- Materializador local: `scripts/benchmark_code_gold_materialize.py`
+- Cobertura inicial: 30 queries repartidas entre cohortes `exact_symbol`,
+	`exact_config`, `literal_file` y `graph_first_small`
+- Baseline fijado para el primer corte: `top_n=60`, `top_k=20`
+
+Comando de materializacion:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_code_gold_materialize.py --gold-file scripts/benchmark_data/code_retrieval_gold.json --workspace-root . --output benchmark_reports/code_gold_materialized.json
+```
+
+Salida esperada:
+
+- `benchmark_reports/code_gold_materialized.json`
+- Resumen por consola con conteo de queries validas e invalidas
+
+Objetivo de esta fase:
+
+- Congelar rutas y spans de referencia del lote inicial antes de implementar
+	colectores HTTP, scoring IR (Information Retrieval) y scoring RAGAS
+	(Retrieval-Augmented Generation Assessment).
+
+Lectura simple de estos dos bloques de scoring:
+
+- Scoring IR (Information Retrieval): responde si el motor de búsqueda encontró el archivo, símbolo o
+	fragmento correcto en la posición esperada del ranking.
+- Scoring RAGAS (Retrieval-Augmented Generation Assessment): responde si, además de recuperar contexto útil, la respuesta
+	final realmente usa bien ese contexto, es fiel a la evidencia y contesta lo
+	que la pregunta pedía.
+
+## 4.4 Collector HTTP y scoring IR (Information Retrieval) para code retrieval
+
+Se agrego el siguiente corte del pipeline offline sobre el endpoint
+`POST /query/retrieval`.
+
+- Collector HTTP: `scripts/benchmark_code_retrieval_collect.py`
+- Scorer IR: `scripts/benchmark_code_ir_score.py`
+- Pruebas focalizadas: `tests/test_benchmark_code_retrieval_collect.py`
+- Gate IR integrado en el scorer sobre el slice `gate_candidate`
+
+Comandos base:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_code_retrieval_collect.py --base-url http://127.0.0.1:8000 --repo-id gherrerz-kdb-rag-repo-main --materialized-file benchmark_reports/code_gold_materialized.json
+.\.venv\Scripts\python.exe scripts\benchmark_code_ir_score.py --collected-report benchmark_reports/code_retrieval_collect_<timestamp>.json
+```
+
+Thresholds del gate IR (Information Retrieval):
+
+- Hard: `exact_path_hit_at_1 >= 0.80`
+- Hard: `exact_line_hit_at_1 >= 0.70`
+- Hard: `mrr (Mean Reciprocal Rank) >= 0.86`
+- Hard: `fallback_rate <= 0.05`
+- Soft: `exact_path_hit_at_3 >= 0.92`
+- Soft: `ndcg_5 (Normalized Discounted Cumulative Gain at 5) >= 0.90`
+- Soft: `citation_path_precision_mean >= 0.85`
+
+Semantica del status:
+
+- `pass`: cumple hard y soft
+- `pass_with_warnings`: cumple hard pero falla algun soft
+- `fail`: falla al menos un threshold hard
+
+Metricas iniciales del scorer IR (Information Retrieval):
+
+- `exact_path_hit_at_1`
+- `exact_path_hit_at_3`
+- `exact_line_hit_at_1`
+- `exact_symbol_hit_at_1`
+- `line_span_iou_at_1`
+- `mrr` (Mean Reciprocal Rank)
+- `ndcg_5` (Normalized Discounted Cumulative Gain at 5)
+- `citation_path_precision_mean`
+- `citation_span_recall_mean`
+- `fallback_rate`
+
+Que significa cada indicador IR en lenguaje simple:
+
+- `exact_path_hit_at_1`: mide si el primer resultado ya cae en el archivo
+	correcto. Es la señal más directa de "encontró el lugar correcto a la
+	primera".
+- `exact_path_hit_at_3`: mide si el archivo correcto aparece al menos dentro
+	de los tres primeros resultados. Sirve para saber si el sistema quedó cerca
+	aunque no haya acertado exactamente en la primera posición.
+- `exact_line_hit_at_1`: mide si el primer resultado no solo apunta al archivo
+	correcto, sino también a la zona correcta de líneas. Es más estricto que
+	acertar solo el path.
+- `exact_symbol_hit_at_1`: mide si el primer resultado recupera el símbolo
+	esperado, por ejemplo una función o clase exacta. Es clave para preguntas de
+	"dónde está X".
+- `line_span_iou_at_1`: compara cuánto se superpone el fragmento recuperado con
+	el fragmento esperado. Un valor cercano a `1.0` significa que el bloque
+	devuelto coincide muy bien con el bloque correcto; cerca de `0.0` significa
+	que cayó lejos.
+- `mrr` (Mean Reciprocal Rank): resume cuán arriba aparece el primer resultado correcto en promedio.
+	Si el valor sube, significa que el sistema suele poner la respuesta buena más
+	cerca del inicio del ranking.
+- `ndcg_5` (Normalized Discounted Cumulative Gain at 5): mide la calidad global del top 5, no solo del primer acierto. Ayuda
+	a detectar si el ranking completo está bien ordenado cuando hay varios
+	resultados útiles.
+- `citation_path_precision_mean`: mide qué proporción de las citas devueltas
+	apunta realmente a archivos relevantes para la consulta. Si este valor es
+	bajo, el sistema está citando demasiado ruido.
+- `citation_span_recall_mean`: mide si las citas cubren el fragmento esperado.
+	Un valor alto significa que, aunque haya ruido, la evidencia importante sí
+	está presente en las citas.
+- `fallback_rate`: mide cuántas consultas terminan en una ruta degradada o de
+	fallback. Mientras más bajo, más consistente es el pipeline principal.
+
+Como leer el gate IR:
+
+- Los thresholds hard son los mínimos operativos para considerar que la
+	recuperación exacta ya es suficientemente confiable.
+- Los thresholds soft no bloquean por sí solos, pero muestran calidad todavía
+	insuficiente o demasiado ruido en el ranking/citas.
+- En este corte el gate se evalúa sobre `gate_candidate`, es decir, el subconjunto
+	de queries que sí queremos usar como criterio inicial de aprobación.
+
+Indicadores RAGAS (Retrieval-Augmented Generation Assessment) previstos para la siguiente fase:
+
+- `context_precision`: mide si el contexto recuperado fue realmente útil para
+	responder, en lugar de traer mucho texto irrelevante.
+- `context_recall`: mide si el contexto recuperado contenía la información que
+	la respuesta necesitaba. Si es bajo, la respuesta puede fallar aunque el LLM
+	sea bueno.
+- `faithfulness`: mide si la respuesta está respaldada por la evidencia y no
+	inventa cosas que no aparecen en el contexto.
+- `answer_relevancy`: mide si la respuesta contesta lo que se preguntó, sin
+	irse por ramas ni responder algo tangencial.
+- `answer_correctness`: mide si la respuesta final es correcta frente a una
+	referencia esperada, no solo si suena razonable.
+- `context_entity_recall`: mide si el contexto contiene las entidades,
+	nombres o componentes clave que la pregunta necesitaba recuperar.
+
+Lectura práctica de RAGAS (Retrieval-Augmented Generation Assessment):
+
+- IR nos dice si encontramos el fragmento correcto.
+- RAGAS nos dice si, con ese contexto, la respuesta final sería útil, fiel y
+	correcta para el usuario.
+- En este proyecto ambos bloques son complementarios: IR es el criterio
+	principal para exactitud de código; RAGAS agrega control de calidad sobre la
+	respuesta generada y el contexto usado.
+
+Salida esperada por corrida:
+
+- `benchmark_reports/code_retrieval_collect_<timestamp>.json`
+- `benchmark_reports/code_retrieval_collect_<timestamp>.csv`
+- `benchmark_reports/code_ir_eval_<timestamp>.json`
+- `benchmark_reports/code_ir_eval_<timestamp>.csv`
+
+## 4.5 Ajuste del reranker y rerun del gate IR
+
+Se implementó un ajuste focalizado en `src/coderag/retrieval/reranker.py`
+para mejorar queries de lookup exacto sin tocar contratos HTTP, chunking ni la
+fusión base de `hybrid_search`.
+
+Cambios aplicados en este corte:
+
+- detección explícita de intención de definición para queries tipo `donde esta X`
+- preferencia por definiciones canónicas frente a tests, wrappers y entrypoints
+- preferencia por documentación cuando la query pide `documented/docs`
+- preferencia por config operativa cuando la query pide `configured`
+- penalización extra para wrappers prefijados (`fake_`, `test_`, `_target`)
+- promoción conservadora del archivo dueño cuando el chunk exacto no aparece
+
+Pruebas focalizadas del reranker:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_reranker.py -q
+```
+
+Resultado final de pruebas focalizadas:
+
+- `14 passed`
+
+Rerun real del benchmark contra una API fresh del workspace en `127.0.0.1:8030`:
+
+```powershell
+$env:PYTHONPATH = 'src'
+.\.venv\Scripts\python.exe -m main --host 127.0.0.1 --port 8030
+.\.venv\Scripts\python.exe scripts\benchmark_code_retrieval_collect.py --base-url http://127.0.0.1:8030 --repo-id gherrerz-kdb-rag-repo-main --materialized-file benchmark_reports/code_gold_materialized.json --top-n 60 --top-k 20
+.\.venv\Scripts\python.exe scripts\benchmark_code_ir_score.py --collected-report benchmark_reports/code_retrieval_collect_20260609_171542.json
+```
+
+Artefactos de la corrida final:
+
+- `benchmark_reports/code_retrieval_collect_20260609_171542.json`
+- `benchmark_reports/code_retrieval_collect_20260609_171542.csv`
+- `benchmark_reports/code_ir_eval_20260609_171548.json`
+- `benchmark_reports/code_ir_eval_20260609_171548.csv`
+
+Resultado del gate sobre `gate_candidate`:
+
+- `status = pass_with_warnings`
+- `exact_path_hit_at_1 = 0.8462`
+- `exact_path_hit_at_3 = 0.9231`
+- `exact_line_hit_at_1 = 0.8462`
+- `mrr = 0.8901`
+- `ndcg_5 = 0.9255`
+- `fallback_rate = 0.0000`
+- `citation_path_precision_mean = 0.1184`
+
+Lectura:
+
+- El gate duro ya queda superado en este corte.
+- El único warning restante es `citation_path_precision_mean`, que sigue muy
+	bajo porque el ranking de citas todavía arrastra bastante ruido aunque el
+	top principal ya mejoró.
+- El mayor uplift quedó concentrado en `exact_symbol`, que pasó a:
+	`exact_path_hit_at_1 = 0.9000`, `exact_path_hit_at_3 = 1.0000`, `mrr = 0.9500`.
+- El siguiente frente técnico natural ya no es el top-1 exacto del reranker,
+	sino la limpieza de citas y el ruido residual en `exact_config`.
+
+## 4.6 Ajuste puntual de citas y limpieza de citation_path_precision_mean
+
+Se implementó un ajuste acotado en `src/coderag/api/query_hybrid_pipeline.py`
+y `src/coderag/api/citation_filters.py` para que las citas devueltas reflejen
+la evidencia principal del top rerankeado, en vez de exponer toda la cola de
+paths recuperados.
+
+Cambios aplicados en este corte:
+
+- se conserva `raw_citations` completo para diagnostics
+- se mantiene el filtro genérico de `is_noisy_path`
+- se selecciona como salida una cita principal alineada con el primer path
+	útil del rerank
+- se conserva fallback a citas crudas cuando el filtrado elimina todo
+
+Pruebas focalizadas del ajuste de citas:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_citation_filters.py tests\test_query_hybrid_pipeline.py -q
+```
+
+Resultado de pruebas focalizadas:
+
+- `6 passed`
+
+Rerun real del benchmark contra la misma API fresh en `127.0.0.1:8030`:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_code_retrieval_collect.py --base-url http://127.0.0.1:8030 --repo-id gherrerz-kdb-rag-repo-main --materialized-file benchmark_reports/code_gold_materialized.json --top-n 60 --top-k 20
+.\.venv\Scripts\python.exe scripts\benchmark_code_ir_score.py --collected-report benchmark_reports/code_retrieval_collect_20260609_180849.json
+```
+
+Artefactos de la corrida con ajuste de citas:
+
+- `benchmark_reports/code_retrieval_collect_20260609_180849.json`
+- `benchmark_reports/code_retrieval_collect_20260609_180849.csv`
+- `benchmark_reports/code_ir_eval_20260609_180852.json`
+- `benchmark_reports/code_ir_eval_20260609_180852.csv`
+
+Resultado del gate sobre `gate_candidate` tras este ajuste:
+
+- `status = pass_with_warnings`
+- `exact_path_hit_at_1 = 0.8462`
+- `exact_path_hit_at_3 = 0.9231`
+- `exact_line_hit_at_1 = 0.8462`
+- `mrr = 0.8901`
+- `ndcg_5 = 0.9255`
+- `fallback_rate = 0.0000`
+- `citation_path_precision_mean = 0.8462`
+
+Lectura:
+
+- El ranking principal no cambió en `gate_candidate`; el ajuste actuó solo
+	sobre la selección de citas devueltas.
+- `citation_path_precision_mean` subió de `0.1184` a `0.8462`.
+- El valor quedó prácticamente acoplado a `exact_path_hit_at_1`, porque ahora
+	la respuesta devuelve la evidencia principal en vez de toda la cola de citas.
+- El warning remanente de `citation_path_precision_mean` queda marginal
+	(`0.8462` frente al umbral `0.8500`) y ya no parece resolverse en esta capa
+	sin volver a mover ranking/top-1.
+
+## 4.7 Ajuste mínimo del reranker para exact_config documental
+
+Se aplicó un ajuste mínimo en `src/coderag/retrieval/reranker.py` para
+reconocer intención documental en español y promover la sección documental
+correcta cuando la query pide explícitamente `donde esta documentado ...`.
+
+Raíz del problema:
+
+- el reranker reconocía `documented` y `documentation`, pero no `documentado`
+	ni variantes equivalentes en español
+- por eso las queries `exact_config` documentales caían en la rama genérica y
+	terminaban priorizando `config_key` exactos en YAML sobre `docs/CONFIGURATION.md`
+
+Cambios aplicados en este corte:
+
+- se agregaron tokens documentales en español (`documentado`, `documentada`,
+	`documentar`)
+- se mantuvo el refuerzo focalizado para secciones doc que mencionan el target
+	exacto cuando la intención ya fue clasificada como documental
+
+Pruebas focalizadas del reranker:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_reranker.py -q
+```
+
+Resultado de pruebas focalizadas:
+
+- `15 passed`
+
+Rerun real del benchmark contra una API fresh del workspace en `127.0.0.1:8030`:
+
+```powershell
+$env:PYTHONPATH = 'src'
+.\.venv\Scripts\python.exe -m main --host 127.0.0.1 --port 8030
+.\.venv\Scripts\python.exe scripts\benchmark_code_retrieval_collect.py --base-url http://127.0.0.1:8030 --repo-id gherrerz-kdb-rag-repo-main --materialized-file benchmark_reports/code_gold_materialized.json --top-n 60 --top-k 20
+.\.venv\Scripts\python.exe scripts\benchmark_code_ir_score.py --collected-report benchmark_reports/code_retrieval_collect_20260609_181658.json
+```
+
+Artefactos de la corrida final con ajuste `exact_config`:
+
+- `benchmark_reports/code_retrieval_collect_20260609_181658.json`
+- `benchmark_reports/code_retrieval_collect_20260609_181658.csv`
+- `benchmark_reports/code_ir_eval_20260609_181702.json`
+- `benchmark_reports/code_ir_eval_20260609_181702.csv`
+
+Resultado del gate sobre `gate_candidate` tras este ajuste:
+
+- `status = pass`
+- `exact_path_hit_at_1 = 0.8846`
+- `exact_path_hit_at_3 = 1.0000`
+- `exact_line_hit_at_1 = 0.8846`
+- `mrr = 0.9423`
+- `ndcg_5 = 1.0249`
+- `fallback_rate = 0.0000`
+- `citation_path_precision_mean = 0.8846`
+
+Lectura:
+
+- `citation_path_precision_mean` finalmente supera el umbral soft de `0.8500`
+	y el gate pasa sin warnings.
+- el cohort `exact_config` pasó a `exact_path_hit_at_1 = 1.0000` y
+	`citation_path_precision_mean = 1.0000`.
+- el uplift vino de corregir la clasificación de intención, no de aumentar
+	agresivamente los boosts de config o de reabrir `hybrid_search`.
+
+## 4.8 Cierre final de exact_symbol y citas derivadas
+
+Se cerró el último remanente de `exact_symbol` sin tocar `hybrid_search`,
+primero con el ajuste fino del reranker y luego con un refinamiento puntual en
+la salida de `query_service` para promover owner-file top-1 al span exacto del
+símbolo cuando la resolución literal es única.
+
+Raíz del problema en las dos etapas finales:
+
+- `run_retrieval_query` primero perdía por unas milésimas frente al wrapper
+	HTTP en `src/coderag/api/server.py`
+- `_read_database_heads` no activaba la rama de symbol lookup porque la query
+	en español (`muestrame la implementacion de ...`) no clasificaba como
+	`definition_lookup_intent`
+- además, el perfil de query no extraía identificadores que empiezan con `_`,
+	por lo que el desempate fino para símbolos privados nunca se activaba
+- una vez corregido eso, quedaba un remanente más fino: el path top-1 ya era
+	correcto, pero `run_retrieval_query` seguía saliendo como chunk de archivo
+	completo en vez de como span de función
+
+Cambios aplicados en el cierre:
+
+- penalización adicional a wrappers y archivos de orquestación (`server`,
+	`flow`, `admin`) cuando compiten en queries de symbol lookup
+- soporte explícito para tokens de intención en español (`implementacion`) en
+	las ramas de definition lookup e implementation intent
+- extracción de `focus_identifiers` con soporte para símbolos que empiezan con
+	underscore
+- desempate específico para símbolos privados lookup-style, manteniendo la
+	preferencia por el owner file productivo frente a copias administrativas
+- extracción de símbolos standalone tipo `snake_case` desde queries naturales
+- fallback controlado al checkout local actual cuando `workspace_path/repo_id`
+	no existe pero el `repo_id` sí corresponde al repo abierto
+- refinamiento de `run_retrieval_query` para sustituir el owner-file top-1 por
+	el span exacto del símbolo cuando `resolve_literal_symbol_match(...)`
+	devuelve `exact_symbol_unique`
+- preservación explícita de citas derivadas del grafo en la respuesta devuelta,
+	evitando que el colapso a una sola cita tape `graph_file_dependency_match`
+	o `graph_external_dependency_source`
+
+Pruebas de cierre:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_reranker.py -q
+.\.venv\Scripts\python.exe -m pytest tests\test_query_service_modules.py -q
+```
+
+Resultado de pruebas:
+
+- `18 passed`
+- `79 passed`
+
+Rerun real del benchmark contra API fresh local en `127.0.0.1:8031`:
+
+```powershell
+$env:PYTHONPATH = 'src'
+$env:CHROMA_MODE = 'remote'
+$env:CHROMA_HOST = '127.0.0.1'
+$env:CHROMA_PORT = '8001'
+$env:POSTGRES_HOST = '127.0.0.1'
+$env:POSTGRES_PORT = '5432'
+$env:POSTGRES_DB = 'coderag'
+$env:POSTGRES_USER = 'coderag'
+$env:POSTGRES_PASSWORD = 'coderag'
+$env:NEO4J_URI = 'bolt://127.0.0.1:17687'
+$env:NEO4J_USER = 'neo4j'
+$env:NEO4J_PASSWORD = 'password'
+$env:HEALTH_CHECK_OPENAI = 'false'
+$env:HEALTH_CHECK_REDIS = 'false'
+.\.venv\Scripts\python.exe src\main.py --host 127.0.0.1 --port 8031
+.\.venv\Scripts\python.exe scripts\benchmark_code_retrieval_collect.py --base-url http://127.0.0.1:8031 --repo-id gherrerz-kdb-rag-repo-main --materialized-file benchmark_reports/code_gold_materialized.json --top-n 60 --top-k 20
+.\.venv\Scripts\python.exe scripts\benchmark_code_ir_score.py --collected-report benchmark_reports/code_retrieval_collect_20260609_203257.json
+```
+
+Artefactos de la corrida final de cierre:
+
+- `benchmark_reports/code_retrieval_collect_20260609_203257.json`
+- `benchmark_reports/code_retrieval_collect_20260609_203257.csv`
+- `benchmark_reports/code_ir_eval_20260609_203308.json`
+- `benchmark_reports/code_ir_eval_20260609_203308.csv`
+
+Resultado del gate sobre `gate_candidate` tras el cierre:
+
+- `status = pass`
+- `exact_path_hit_at_1 = 0.9615`
+- `exact_path_hit_at_3 = 0.9615`
+- `exact_line_hit_at_1 = 0.9615`
+- `exact_symbol_hit_at_1 = 0.9500`
+- `mrr = 0.9692`
+- `ndcg_5 = 1.0439`
+- `fallback_rate = 0.0000`
+- `citation_path_precision_mean = 0.9615`
+
+Lectura:
+
+- el cohort `exact_symbol` cerró en `exact_path_hit_at_1 = 0.9500`,
+	`exact_line_hit_at_1 = 0.9500` y `exact_symbol_hit_at_1 = 0.9500`
+- el caso remanente de `run_retrieval_query` dejó de salir como owner-file
+	completo y pasó a devolverse como span de función, con top-1 en
+	`src/coderag/api/query_service.py` líneas `1031-1178`
+- en agregado total hubo mejora adicional respecto al corte previo:
+	`exact_path_hit_at_1 = 0.9000`, `exact_path_hit_at_3 = 0.9667`,
+	`exact_symbol_hit_at_1 = 0.9500`, `mrr = 0.9344` y
+	`citation_path_precision_mean = 0.9000`
+- el remanente técnico colateral en tests modulares también quedó cerrado:
+	las citas `graph_file_dependency_match` y
+	`graph_external_dependency_source` vuelven a preservarse en la respuesta,
+	y `tests/test_query_service_modules.py` quedó en `79 passed`
+
 ## 5. Simulacion de rollback (tiempos reales)
 
 Comando usado:

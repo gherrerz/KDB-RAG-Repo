@@ -1,0 +1,500 @@
+{
+  "dataset_name": "code_retrieval_gold_v1",
+  "repo_id": "gherrerz-kdb-rag-repo-main",
+  "defaults": {
+    "top_n": 60,
+    "top_k": 20
+  },
+  "queries": [
+    {
+      "id": "exact_symbol_build_alembic_config",
+      "query": "donde esta implementada la funcion _build_alembic_config",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/storage/postgres_startup.py",
+      "expected_start_line": 80,
+      "expected_end_line": null,
+      "symbol_name": "_build_alembic_config",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "La funcion _build_alembic_config esta en src/coderag/storage/postgres_startup.py y prepara la configuracion de Alembic para el DSN recibido.",
+      "acceptable_alternatives": [
+        {
+          "path": "src/coderag/storage/postgres_schema_admin.py",
+          "start_line": 59,
+          "end_line": null,
+          "symbol_name": "_build_alembic_config",
+          "kind": "function",
+          "reason": "Implementacion administrativa relacionada para operaciones de schema admin."
+        }
+      ]
+    },
+    {
+      "id": "exact_symbol_read_database_heads",
+      "query": "muestrame la implementacion de _read_database_heads",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/storage/postgres_startup.py",
+      "expected_start_line": 92,
+      "expected_end_line": null,
+      "symbol_name": "_read_database_heads",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "_read_database_heads esta en src/coderag/storage/postgres_startup.py y lee las revisiones presentes en alembic_version."
+    },
+    {
+      "id": "exact_symbol_classify_legacy_schema",
+      "query": "donde esta _classify_legacy_schema",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/storage/postgres_startup.py",
+      "expected_start_line": 145,
+      "expected_end_line": null,
+      "symbol_name": "_classify_legacy_schema",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "_classify_legacy_schema esta en src/coderag/storage/postgres_startup.py y clasifica el estado de compatibilidad del esquema legado."
+    },
+    {
+      "id": "exact_symbol_resolve_startup_policy",
+      "query": "donde se resuelve la politica de startup de postgres _resolve_startup_policy",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/storage/postgres_startup.py",
+      "expected_start_line": 188,
+      "expected_end_line": null,
+      "symbol_name": "_resolve_startup_policy",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "_resolve_startup_policy esta en src/coderag/storage/postgres_startup.py y decide entre auto_upgrade y validate segun settings."
+    },
+    {
+      "id": "exact_symbol_build_revision_error",
+      "query": "donde se construye el error de revision _build_revision_error",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/storage/postgres_startup.py",
+      "expected_start_line": 199,
+      "expected_end_line": null,
+      "symbol_name": "_build_revision_error",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "_build_revision_error esta en src/coderag/storage/postgres_startup.py y arma el RuntimeError para revisiones incompatibles o faltantes."
+    },
+    {
+      "id": "exact_symbol_build_incompatible_legacy_schema_error",
+      "query": "donde se construye el error de esquema legado incompatible _build_incompatible_legacy_schema_error",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/storage/postgres_startup.py",
+      "expected_start_line": 223,
+      "expected_end_line": null,
+      "symbol_name": "_build_incompatible_legacy_schema_error",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "_build_incompatible_legacy_schema_error esta en src/coderag/storage/postgres_startup.py y genera el error cuando el esquema legacy no es compatible con Alembic."
+    },
+    {
+      "id": "exact_symbol_ensure_postgres_schema_ready",
+      "query": "donde esta ensure_postgres_schema_ready",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/storage/postgres_startup.py",
+      "expected_start_line": 232,
+      "expected_end_line": null,
+      "symbol_name": "ensure_postgres_schema_ready",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "ensure_postgres_schema_ready esta en src/coderag/storage/postgres_startup.py y valida o migra el esquema Postgres al iniciar el runtime."
+    },
+    {
+      "id": "exact_symbol_run_retrieval_query",
+      "query": "donde esta run_retrieval_query",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/api/query_service.py",
+      "expected_start_line": 965,
+      "expected_end_line": null,
+      "symbol_name": "run_retrieval_query",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "run_retrieval_query esta en src/coderag/api/query_service.py y ejecuta retrieval-only con literal mode, graph-first y pipeline hibrido."
+    },
+    {
+      "id": "exact_symbol_run_query",
+      "query": "donde esta run_query",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/api/query_service.py",
+      "expected_start_line": 1111,
+      "expected_end_line": null,
+      "symbol_name": "run_query",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "run_query esta en src/coderag/api/query_service.py y orquesta inventory, literal mode, retrieval, expansion de grafo y resolucion final de respuesta."
+    },
+    {
+      "id": "exact_symbol_build_retrieval_answer",
+      "query": "donde se arma la respuesta textual de retrieval _build_retrieval_answer",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/api/query_service.py",
+      "expected_start_line": 623,
+      "expected_end_line": null,
+      "symbol_name": "_build_retrieval_answer",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "_build_retrieval_answer esta en src/coderag/api/query_service.py y genera el texto extractivo para la respuesta retrieval-only."
+    },
+    {
+      "id": "exact_symbol_build_query_diagnostics",
+      "query": "donde esta build_query_diagnostics",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/api/query_diagnostics.py",
+      "expected_start_line": 22,
+      "expected_end_line": null,
+      "symbol_name": "build_query_diagnostics",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "build_query_diagnostics esta en src/coderag/api/query_diagnostics.py y arma el payload de diagnosticos para /query."
+    },
+    {
+      "id": "exact_symbol_build_retrieval_diagnostics",
+      "query": "donde esta build_retrieval_diagnostics",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/api/query_diagnostics.py",
+      "expected_start_line": 158,
+      "expected_end_line": null,
+      "symbol_name": "build_retrieval_diagnostics",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "build_retrieval_diagnostics esta en src/coderag/api/query_diagnostics.py y arma el payload de diagnosticos para retrieval-only."
+    },
+    {
+      "id": "exact_symbol_is_literal_code_query",
+      "query": "donde esta is_literal_code_query",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/api/literal_mode.py",
+      "expected_start_line": 40,
+      "expected_end_line": null,
+      "symbol_name": "is_literal_code_query",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "is_literal_code_query esta en src/coderag/api/literal_mode.py y detecta consultas que piden codigo literal o archivo completo."
+    },
+    {
+      "id": "exact_symbol_resolve_literal_file_match",
+      "query": "donde esta resolve_literal_file_match",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/api/literal_mode.py",
+      "expected_start_line": 134,
+      "expected_end_line": null,
+      "symbol_name": "resolve_literal_file_match",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "resolve_literal_file_match esta en src/coderag/api/literal_mode.py y resuelve coincidencias exactas de archivo para literal mode."
+    },
+    {
+      "id": "exact_symbol_resolve_literal_symbol_match",
+      "query": "donde esta resolve_literal_symbol_match",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/api/literal_mode.py",
+      "expected_start_line": 239,
+      "expected_end_line": null,
+      "symbol_name": "resolve_literal_symbol_match",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "resolve_literal_symbol_match esta en src/coderag/api/literal_mode.py y busca un simbolo unico exacto dentro del workspace del repo."
+    },
+    {
+      "id": "exact_symbol_hybrid_search",
+      "query": "donde esta hybrid_search",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/retrieval/hybrid_search.py",
+      "expected_start_line": 266,
+      "expected_end_line": null,
+      "symbol_name": "hybrid_search",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "hybrid_search esta en src/coderag/retrieval/hybrid_search.py y fusiona recuperacion vectorial y lexical con ajustes por identificadores."
+    },
+    {
+      "id": "exact_symbol_candidate_top_n",
+      "query": "donde se calcula _candidate_top_n",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/retrieval/hybrid_search.py",
+      "expected_start_line": 259,
+      "expected_end_line": null,
+      "symbol_name": "_candidate_top_n",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "_candidate_top_n esta en src/coderag/retrieval/hybrid_search.py y amplia el pool de candidatos para consultas de identificadores exactos."
+    },
+    {
+      "id": "exact_symbol_score_chunk",
+      "query": "donde esta _score_chunk",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/retrieval/reranker.py",
+      "expected_start_line": 308,
+      "expected_end_line": null,
+      "symbol_name": "_score_chunk",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "_score_chunk esta en src/coderag/retrieval/reranker.py y aplica heuristicas de intencion, tipo de simbolo y path para reranking."
+    },
+    {
+      "id": "exact_symbol_rerank",
+      "query": "donde esta rerank",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/retrieval/reranker.py",
+      "expected_start_line": 396,
+      "expected_end_line": null,
+      "symbol_name": "rerank",
+      "expected_kind": "function",
+      "gate_candidate": true,
+      "reference_answer": "rerank esta en src/coderag/retrieval/reranker.py y reordena candidatos con diversidad por archivo e intencion de la consulta."
+    },
+    {
+      "id": "exact_class_retrieval_chunk",
+      "query": "donde esta definida la clase RetrievalChunk",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_symbol",
+      "expected_path": "src/coderag/core/models.py",
+      "expected_start_line": 965,
+      "expected_end_line": null,
+      "symbol_name": "RetrievalChunk",
+      "expected_kind": "class",
+      "gate_candidate": true,
+      "reference_answer": "RetrievalChunk esta en src/coderag/core/models.py y define el contrato interno del chunk recuperado antes de adaptarlo a la respuesta publica."
+    },
+    {
+      "id": "exact_config_workspace_path_settings",
+      "query": "donde se configura WORKSPACE_PATH en settings",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_config",
+      "expected_path": "src/coderag/core/settings.py",
+      "expected_start_line": 236,
+      "expected_end_line": 238,
+      "symbol_name": null,
+      "expected_kind": "config_key",
+      "gate_candidate": true,
+      "reference_answer": "WORKSPACE_PATH se declara en src/coderag/core/settings.py como workspace_path con alias WORKSPACE_PATH.",
+      "acceptable_alternatives": [
+        {
+          "path": "k8s/base/api-configmap.yaml",
+          "start_line": 51,
+          "end_line": 51,
+          "symbol_name": null,
+          "kind": "config_key",
+          "reason": "Valor operativo expuesto por el ConfigMap de la API."
+        },
+        {
+          "path": "docs/CONFIGURATION.md",
+          "start_line": 95,
+          "end_line": 95,
+          "symbol_name": null,
+          "kind": "documentation",
+          "reason": "Referencia documental del parametro."
+        }
+      ]
+    },
+    {
+      "id": "exact_config_retain_workspace_settings",
+      "query": "donde se configura RETAIN_WORKSPACE_AFTER_INGEST en settings",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_config",
+      "expected_path": "src/coderag/core/settings.py",
+      "expected_start_line": 240,
+      "expected_end_line": 242,
+      "symbol_name": null,
+      "expected_kind": "config_key",
+      "gate_candidate": true,
+      "reference_answer": "RETAIN_WORKSPACE_AFTER_INGEST se declara en src/coderag/core/settings.py como retain_workspace_after_ingest con alias RETAIN_WORKSPACE_AFTER_INGEST.",
+      "acceptable_alternatives": [
+        {
+          "path": "k8s/base/api-configmap.yaml",
+          "start_line": 52,
+          "end_line": 52,
+          "symbol_name": null,
+          "kind": "config_key",
+          "reason": "Valor operativo expuesto por el ConfigMap de la API."
+        },
+        {
+          "path": "docs/CONFIGURATION.md",
+          "start_line": 96,
+          "end_line": 96,
+          "symbol_name": null,
+          "kind": "documentation",
+          "reason": "Referencia documental del parametro."
+        }
+      ]
+    },
+    {
+      "id": "exact_config_workspace_path_configmap",
+      "query": "donde aparece WORKSPACE_PATH en el configmap de la API",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_config",
+      "expected_path": "k8s/base/api-configmap.yaml",
+      "expected_start_line": 51,
+      "expected_end_line": 51,
+      "symbol_name": null,
+      "expected_kind": "config_key",
+      "gate_candidate": true,
+      "reference_answer": "WORKSPACE_PATH aparece en k8s/base/api-configmap.yaml con el valor /app/storage/workspace.",
+      "acceptable_alternatives": [
+        {
+          "path": "src/coderag/core/settings.py",
+          "start_line": 236,
+          "end_line": 238,
+          "symbol_name": null,
+          "kind": "config_key",
+          "reason": "Declaracion canonica del parametro en settings."
+        },
+        {
+          "path": "docs/CONFIGURATION.md",
+          "start_line": 95,
+          "end_line": 95,
+          "symbol_name": null,
+          "kind": "documentation",
+          "reason": "Referencia documental del parametro."
+        }
+      ]
+    },
+    {
+      "id": "exact_config_retain_workspace_configmap",
+      "query": "donde aparece RETAIN_WORKSPACE_AFTER_INGEST en el configmap de la API",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_config",
+      "expected_path": "k8s/base/api-configmap.yaml",
+      "expected_start_line": 52,
+      "expected_end_line": 52,
+      "symbol_name": null,
+      "expected_kind": "config_key",
+      "gate_candidate": true,
+      "reference_answer": "RETAIN_WORKSPACE_AFTER_INGEST aparece en k8s/base/api-configmap.yaml con el valor false.",
+      "acceptable_alternatives": [
+        {
+          "path": "src/coderag/core/settings.py",
+          "start_line": 240,
+          "end_line": 242,
+          "symbol_name": null,
+          "kind": "config_key",
+          "reason": "Declaracion canonica del parametro en settings."
+        },
+        {
+          "path": "docs/CONFIGURATION.md",
+          "start_line": 96,
+          "end_line": 96,
+          "symbol_name": null,
+          "kind": "documentation",
+          "reason": "Referencia documental del parametro."
+        }
+      ]
+    },
+    {
+      "id": "exact_config_chroma_host_docs",
+      "query": "donde esta documentado CHROMA_HOST",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_config",
+      "expected_path": "docs/CONFIGURATION.md",
+      "expected_start_line": 51,
+      "expected_end_line": 51,
+      "symbol_name": null,
+      "expected_kind": "documentation",
+      "gate_candidate": true,
+      "reference_answer": "CHROMA_HOST esta documentado en docs/CONFIGURATION.md como host del servicio Chroma remoto."
+    },
+    {
+      "id": "exact_config_query_max_seconds_docs",
+      "query": "donde esta documentado QUERY_MAX_SECONDS",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "exact_config",
+      "expected_path": "docs/CONFIGURATION.md",
+      "expected_start_line": 64,
+      "expected_end_line": 64,
+      "symbol_name": null,
+      "expected_kind": "documentation",
+      "gate_candidate": true,
+      "reference_answer": "QUERY_MAX_SECONDS esta documentado en docs/CONFIGURATION.md como limite global de latencia para query API."
+    },
+    {
+      "id": "literal_file_query_service",
+      "query": "dame el archivo completo query_service.py",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "literal_file",
+      "expected_path": "src/coderag/api/query_service.py",
+      "expected_start_line": null,
+      "expected_end_line": null,
+      "symbol_name": null,
+      "expected_kind": "file",
+      "gate_candidate": false,
+      "reference_answer": "La solicitud literal debe resolver el archivo src/coderag/api/query_service.py como target completo del workspace local."
+    },
+    {
+      "id": "literal_file_postgres_startup",
+      "query": "dame el archivo completo postgres_startup.py",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "literal_file",
+      "expected_path": "src/coderag/storage/postgres_startup.py",
+      "expected_start_line": null,
+      "expected_end_line": null,
+      "symbol_name": null,
+      "expected_kind": "file",
+      "gate_candidate": false,
+      "reference_answer": "La solicitud literal debe resolver el archivo src/coderag/storage/postgres_startup.py como target completo del workspace local."
+    },
+    {
+      "id": "graph_first_importers_ensure_postgres_schema_ready",
+      "query": "que archivos importan ensure_postgres_schema_ready",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "graph_first_small",
+      "expected_path": "src/coderag/api/server.py",
+      "expected_start_line": 47,
+      "expected_end_line": 47,
+      "symbol_name": null,
+      "expected_kind": "import_site",
+      "gate_candidate": false,
+      "reference_answer": "ensure_postgres_schema_ready es importado por src/coderag/api/server.py y tambien por src/coderag/jobs/rq_worker.py y src/coderag/storage/postgres_schema_admin.py.",
+      "acceptable_alternatives": [
+        {
+          "path": "src/coderag/jobs/rq_worker.py",
+          "start_line": 11,
+          "end_line": 11,
+          "symbol_name": null,
+          "kind": "import_site",
+          "reason": "Worker que importa y ejecuta startup Postgres."
+        },
+        {
+          "path": "src/coderag/storage/postgres_schema_admin.py",
+          "start_line": 20,
+          "end_line": 20,
+          "symbol_name": null,
+          "kind": "import_site",
+          "reason": "Modulo administrativo que reutiliza el startup helper."
+        }
+      ]
+    },
+    {
+      "id": "graph_first_run_retrieval_query_api_callsite",
+      "query": "que archivo llama run_retrieval_query desde la API",
+      "preferred_endpoint": "query/retrieval",
+      "cohort": "graph_first_small",
+      "expected_path": "src/coderag/api/server.py",
+      "expected_start_line": 589,
+      "expected_end_line": 612,
+      "symbol_name": null,
+      "expected_kind": "call_site",
+      "gate_candidate": false,
+      "reference_answer": "run_retrieval_query es importado y llamado desde src/coderag/api/server.py para atender el endpoint de retrieval-only."
+    }
+  ]
+}

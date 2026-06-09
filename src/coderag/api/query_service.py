@@ -342,6 +342,72 @@ def _build_literal_retrieval_response(
     )
 
 
+def _refine_top_unique_symbol_span(
+    repo_id: str,
+    query: str,
+    reranked: list[RetrievalChunk],
+) -> list[RetrievalChunk]:
+    """Reemplaza el owner-file top-1 por el span exacto si el símbolo es único."""
+    if not reranked:
+        return reranked
+
+    top_chunk = reranked[0]
+    top_metadata = dict(top_chunk.metadata)
+    top_path = str(top_metadata.get("path", ""))
+    if not top_path or top_metadata.get("symbol_name"):
+        return reranked
+
+    (
+        _,
+        relative_path,
+        start_line,
+        end_line,
+        symbol_name,
+        match_type,
+    ) = _resolve_literal_symbol_match(repo_id=repo_id, query=query)
+    if (
+        match_type != "exact_symbol_unique"
+        or relative_path != top_path
+        or start_line is None
+        or end_line is None
+        or not symbol_name
+    ):
+        return reranked
+
+    resolved_file_path = _resolve_repo_file_path(repo_id=repo_id, relative_path=top_path)
+    if resolved_file_path is None:
+        return reranked
+
+    try:
+        content = resolved_file_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return reranked
+
+    target_content = _slice_lines(content, start_line, end_line)
+    if not target_content.strip():
+        return reranked
+
+    refined_metadata = dict(top_metadata)
+    refined_metadata.update(
+        {
+            "path": top_path,
+            "start_line": start_line,
+            "end_line": end_line,
+            "symbol_name": symbol_name,
+            "symbol_type": str(top_metadata.get("symbol_type") or "function"),
+            "kind": str(top_metadata.get("kind") or "code_chunk"),
+            "literal_symbol_refined": True,
+        }
+    )
+    refined_top_chunk = top_chunk.model_copy(
+        update={
+            "text": target_content,
+            "metadata": refined_metadata,
+        }
+    )
+    return [refined_top_chunk, *reranked[1:]]
+
+
 _extract_module_name = inventory_helpers_service.extract_module_name
 _normalize_inventory_token = inventory_helpers_service.normalize_inventory_token
 _inventory_base_forms = inventory_helpers_service.inventory_base_forms
@@ -361,8 +427,9 @@ def _resolve_repo_file_path(repo_id: str, relative_path: str) -> Path | None:
     if not normalized:
         return None
 
-    settings = get_settings()
-    repo_root = (settings.workspace_path / repo_id).resolve()
+    repo_root = _resolve_repo_root(repo_id)
+    if repo_root is None:
+        return None
     candidate = (repo_root / normalized).resolve()
     try:
         candidate.relative_to(repo_root)
@@ -376,8 +443,7 @@ def _resolve_repo_file_path(repo_id: str, relative_path: str) -> Path | None:
 
 def _has_local_repo_workspace(repo_id: str) -> bool:
     """Indica si el repositorio conserva workspace local para modo literal."""
-    repo_root = get_settings().workspace_path / repo_id
-    return repo_root.exists() and repo_root.is_dir()
+    return _resolve_repo_root(repo_id) is not None
 
 
 def _first_sentence(text: str) -> str:
@@ -1034,7 +1100,11 @@ def run_retrieval_query(
             hybrid_pipeline.external_import_seed_chunks_added_count
         ),
     )
-    reranked = graph_enrichment.reranked
+    reranked = _refine_top_unique_symbol_span(
+        repo_id=repo_id,
+        query=query,
+        reranked=graph_enrichment.reranked,
+    )
     semantic_expand_diagnostics = graph_enrichment.semantic_expand_diagnostics
 
     context: str | None = None

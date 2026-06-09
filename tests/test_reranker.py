@@ -292,3 +292,458 @@ def test_rerank_prefers_direct_implementation_over_wrapper_for_execution_query()
     )
 
     assert ranked[0].metadata["path"] == "src/coderag/core/storage_health.py"
+
+
+def test_rerank_prefers_exact_definition_over_test_for_symbol_lookup() -> None:
+    """Prioriza la definición exacta del símbolo frente a tests cercanos."""
+    chunks = [
+        RetrievalChunk(
+            id="test",
+            text=(
+                "def test_run_query_uses_literal_mode():\n"
+                "    result = run_query(query='demo')\n"
+                "    assert result"
+            ),
+            score=0.96,
+            metadata={
+                "path": "tests/test_api.py",
+                "symbol_name": "test_run_query_uses_literal_mode",
+                "symbol_type": "function",
+                "start_line": 10,
+                "end_line": 12,
+            },
+        ),
+        RetrievalChunk(
+            id="definition",
+            text="def run_query(request: dict) -> dict:\n    return {}",
+            score=0.78,
+            metadata={
+                "path": "src/coderag/api/query_service.py",
+                "symbol_name": "run_query",
+                "symbol_type": "function",
+                "start_line": 100,
+                "end_line": 101,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="where is run_query implemented",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["symbol_name"] == "run_query"
+
+
+def test_rerank_prefers_exact_definition_over_api_wrapper_for_symbol_lookup() -> None:
+    """Baja wrappers API cuando la query pide la definición exacta."""
+    chunks = [
+        RetrievalChunk(
+            id="wrapper",
+            text=(
+                "def resolve_query():\n"
+                "    return run_retrieval_query(request='demo')"
+            ),
+            score=0.95,
+            metadata={
+                "path": "src/coderag/api/server.py",
+                "symbol_name": "resolve_query",
+                "symbol_type": "function",
+                "start_line": 40,
+                "end_line": 41,
+            },
+        ),
+        RetrievalChunk(
+            id="definition",
+            text=(
+                "def run_retrieval_query(request: dict) -> dict:\n"
+                "    return {}"
+            ),
+            score=0.76,
+            metadata={
+                "path": "src/coderag/api/query_service.py",
+                "symbol_name": "run_retrieval_query",
+                "symbol_type": "function",
+                "start_line": 220,
+                "end_line": 221,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="where is run_retrieval_query implemented",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["symbol_name"] == "run_retrieval_query"
+
+
+def test_rerank_prefers_documentation_over_runtime_config_for_docs_query() -> None:
+    """Favorece docs cuando la query pide explícitamente documentación."""
+    chunks = [
+        RetrievalChunk(
+            id="config",
+            text="CHROMA_HOST=chromadb",
+            score=0.93,
+            metadata={
+                "path": "docker-compose.yml",
+                "symbol_name": "CHROMA_HOST",
+                "symbol_type": "config_key",
+                "start_line": 10,
+                "end_line": 10,
+            },
+        ),
+        RetrievalChunk(
+            id="docs",
+            text="CHROMA_HOST defines the Chroma service hostname.",
+            score=0.72,
+            metadata={
+                "path": "docs/CONFIGURATION.md",
+                "symbol_name": "CHROMA_HOST",
+                "symbol_type": "section",
+                "start_line": 80,
+                "end_line": 82,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="where is CHROMA_HOST documented",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["path"] == "docs/CONFIGURATION.md"
+
+
+def test_rerank_prefers_runtime_config_over_docs_for_config_query() -> None:
+    """Mantiene preferencia por config operativa cuando la query la pide."""
+    chunks = [
+        RetrievalChunk(
+            id="docs",
+            text="CHROMA_HOST defines the Chroma service hostname.",
+            score=0.94,
+            metadata={
+                "path": "docs/CONFIGURATION.md",
+                "symbol_name": "CHROMA_HOST",
+                "symbol_type": "section",
+                "start_line": 80,
+                "end_line": 82,
+            },
+        ),
+        RetrievalChunk(
+            id="config",
+            text="CHROMA_HOST=chromadb",
+            score=0.73,
+            metadata={
+                "path": "docker-compose.yml",
+                "symbol_name": "CHROMA_HOST",
+                "symbol_type": "config_key",
+                "start_line": 10,
+                "end_line": 10,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="where is CHROMA_HOST configured",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["path"] == "docker-compose.yml"
+
+
+def test_rerank_prefers_documentation_section_over_exact_config_key_for_docs_query() -> None:
+    """Sube la sección documental correcta aunque exista config_key exacta."""
+    chunks = [
+        RetrievalChunk(
+            id="config",
+            text='  QUERY_MAX_SECONDS: "55"',
+            score=4.19,
+            metadata={
+                "path": "k8s/base/api-configmap.yaml",
+                "symbol_name": "QUERY_MAX_SECONDS",
+                "symbol_type": "config_key",
+                "start_line": 55,
+                "end_line": 55,
+            },
+        ),
+        RetrievalChunk(
+            id="docs",
+            text=(
+                "### Retrieval y limites de consulta\n\n"
+                "- `CHROMA_MODE`: modo de acceso a Chroma (`remote`, `embedded`).\n"
+                "- `QUERY_MAX_SECONDS`: limite global de latencia para query API."
+            ),
+            score=-0.36,
+            metadata={
+                "path": "docs/CONFIGURATION.md",
+                "symbol_name": "Retrieval y limites de consulta",
+                "symbol_type": "section",
+                "start_line": 48,
+                "end_line": 68,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="donde esta documentado QUERY_MAX_SECONDS",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["path"] == "docs/CONFIGURATION.md"
+
+
+def test_rerank_detects_spanish_documentation_intent_for_config_docs_query() -> None:
+    """Reconoce `documentado` como intención documental y sube la doc correcta."""
+    chunks = [
+        RetrievalChunk(
+            id="config",
+            text="CHROMA_HOST=chromadb",
+            score=0.93,
+            metadata={
+                "path": "docker-compose.yml",
+                "symbol_name": "CHROMA_HOST",
+                "symbol_type": "config_key",
+                "start_line": 10,
+                "end_line": 10,
+            },
+        ),
+        RetrievalChunk(
+            id="docs",
+            text="CHROMA_HOST define el host remoto de Chroma.",
+            score=0.72,
+            metadata={
+                "path": "docs/CONFIGURATION.md",
+                "symbol_name": "CHROMA_HOST",
+                "symbol_type": "section",
+                "start_line": 80,
+                "end_line": 82,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="donde esta documentado CHROMA_HOST",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["path"] == "docs/CONFIGURATION.md"
+
+
+def test_rerank_penalizes_prefixed_wrapper_symbol_for_lookup_query() -> None:
+    """Baja wrappers prefijados aunque compartan sufijo con el target."""
+    chunks = [
+        RetrievalChunk(
+            id="wrapper",
+            text=(
+                "def fake_run_query(**kwargs):\n"
+                "    return run_query(**kwargs)"
+            ),
+            score=0.97,
+            metadata={
+                "path": "tests/test_api.py",
+                "symbol_name": "fake_run_query",
+                "symbol_type": "function",
+                "start_line": 10,
+                "end_line": 11,
+            },
+        ),
+        RetrievalChunk(
+            id="definition",
+            text="def run_query(request, deps):\n    return {}",
+            score=0.74,
+            metadata={
+                "path": "src/coderag/api/query_service.py",
+                "symbol_name": "run_query",
+                "symbol_type": "function",
+                "start_line": 100,
+                "end_line": 101,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="donde esta run_query",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["symbol_name"] == "run_query"
+
+
+def test_rerank_prefers_owner_file_context_when_symbol_chunk_is_missing() -> None:
+    """Sube el archivo dueño si el chunk exacto no está dentro del candidato."""
+    chunks = [
+        RetrievalChunk(
+            id="wrapper",
+            text=(
+                "def fake_run_retrieval_query(**kwargs):\n"
+                "    return run_retrieval_query(**kwargs)"
+            ),
+            score=0.98,
+            metadata={
+                "path": "tests/test_api.py",
+                "symbol_name": "fake_run_retrieval_query",
+                "symbol_type": "function",
+                "start_line": 10,
+                "end_line": 11,
+            },
+        ),
+        RetrievalChunk(
+            id="owner-file",
+            text=(
+                '"""Orquestación"""\n\n'
+                "def run_retrieval_query(repo_id, query, top_n, top_k):\n"
+                "    return _build_retrieval_answer()"
+            ),
+            score=-0.05,
+            metadata={
+                "path": "src/coderag/api/query_service.py",
+                "start_line": 1,
+                "end_line": 1287,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="donde esta run_retrieval_query",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["path"] == "src/coderag/api/query_service.py"
+
+
+def test_rerank_penalizes_private_wrapper_prefix_for_literal_symbol_lookup() -> None:
+    """Baja wrappers privados que solo delegan al símbolo real."""
+    chunks = [
+        RetrievalChunk(
+            id="wrapper",
+            text=(
+                "def _resolve_literal_symbol_match(repo_id, query):\n"
+                "    return resolve_literal_symbol_match(repo_id, query, hooks={})"
+            ),
+            score=0.94,
+            metadata={
+                "path": "src/coderag/api/query_service.py",
+                "symbol_name": "_resolve_literal_symbol_match",
+                "symbol_type": "function",
+                "start_line": 10,
+                "end_line": 11,
+            },
+        ),
+        RetrievalChunk(
+            id="definition",
+            text=(
+                "def resolve_literal_symbol_match(repo_id, query, *, hooks):\n"
+                "    return (None, None, None, None, None, 'missing_symbol_hint')"
+            ),
+            score=0.78,
+            metadata={
+                "path": "src/coderag/api/literal_mode.py",
+                "symbol_name": "resolve_literal_symbol_match",
+                "symbol_type": "function",
+                "start_line": 60,
+                "end_line": 61,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="donde esta resolve_literal_symbol_match",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["path"] == "src/coderag/api/literal_mode.py"
+
+
+def test_rerank_prefers_owner_file_over_orchestration_full_file_for_run_query() -> None:
+    """Baja archivos flow genéricos cuando compiten con el owner file del símbolo."""
+    chunks = [
+        RetrievalChunk(
+            id="flow-file",
+            text=(
+                '"""Inventory query flow extracted from query service orchestration."""\n'
+                "from time import monotonic"
+            ),
+            score=0.49,
+            metadata={
+                "path": "src/coderag/api/inventory_query_flow.py",
+                "start_line": 1,
+                "end_line": 179,
+            },
+        ),
+        RetrievalChunk(
+            id="owner-file",
+            text='"""Orquestación de consultas de un extremo a otro para Hybrid RAG + GraphRAG."""',
+            score=0.26,
+            metadata={
+                "path": "src/coderag/api/query_service.py",
+                "start_line": 1,
+                "end_line": 1287,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="donde esta run_query",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["path"] == "src/coderag/api/query_service.py"
+
+
+def test_rerank_prefers_runtime_owner_for_private_symbol_lookup() -> None:
+    """Desempata símbolos privados a favor del owner no administrativo."""
+    chunks = [
+        RetrievalChunk(
+            id="admin-copy",
+            text=(
+                "def _read_database_heads(factory):\n"
+                '    """Lee las revisiones aplicadas hoy en la base activa."""\n'
+                "    return set()"
+            ),
+            score=2.50,
+            metadata={
+                "path": "src/coderag/storage/postgres_schema_admin.py",
+                "symbol_name": "_read_database_heads",
+                "symbol_type": "function",
+                "start_line": 71,
+                "end_line": 80,
+            },
+        ),
+        RetrievalChunk(
+            id="runtime-owner",
+            text=(
+                "def _read_database_heads(factory):\n"
+                '    """Lee las revisiones aplicadas actualmente en la base activa."""\n'
+                "    return set()"
+            ),
+            score=2.49,
+            metadata={
+                "path": "src/coderag/storage/postgres_startup.py",
+                "symbol_name": "_read_database_heads",
+                "symbol_type": "function",
+                "start_line": 92,
+                "end_line": 99,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="muestrame la implementacion de _read_database_heads",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["path"] == "src/coderag/storage/postgres_startup.py"
+
+

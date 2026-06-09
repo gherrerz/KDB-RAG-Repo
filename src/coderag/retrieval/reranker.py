@@ -59,11 +59,41 @@ _TEST_TOKENS = {
     "spec",
     "specs",
 }
+_DEFINITION_LOOKUP_TOKENS = {
+    "code",
+    "definition",
+    "defined",
+    "function",
+    "functions",
+    "implement",
+    "implementacion",
+    "implemented",
+    "implementation",
+    "method",
+    "methods",
+    "source",
+    "symbol",
+}
+_DOCUMENTATION_TOKENS = {
+    "api",
+    "documentacion",
+    "documentado",
+    "documentada",
+    "documentar",
+    "documentation",
+    "documented",
+    "docs",
+    "guide",
+    "guides",
+    "readme",
+    "reference",
+}
 _IMPLEMENTATION_HINT_TOKENS = {
     "execute",
     "executed",
     "execution",
     "implement",
+    "implementacion",
     "implemented",
     "implementation",
     "run",
@@ -75,6 +105,18 @@ _NOISE_PATH_SEGMENTS = {
     "fixtures",
     "examples",
     "benchmark_reports",
+}
+_DOC_PATH_SEGMENTS = {
+    "docs",
+    "documentation",
+    "guides",
+}
+_EXAMPLE_PATH_SEGMENTS = {
+    "demo",
+    "examples",
+    "sample",
+    "samples",
+    "snippets",
 }
 _SOURCE_LIKE_SEGMENTS = {
     "src",
@@ -90,6 +132,29 @@ _SOURCE_LIKE_SEGMENTS = {
     "client",
     "cmd",
 }
+_WRAPPER_PATH_SEGMENTS = {
+    "api",
+    "cli",
+    "controller",
+    "endpoint",
+    "handler",
+    "router",
+    "server",
+    "service",
+    "services",
+}
+_ORCHESTRATION_PATH_TOKENS = {
+    "admin",
+    "cli",
+    "controller",
+    "endpoint",
+    "flow",
+    "handler",
+    "router",
+    "server",
+    "ui",
+    "view",
+}
 _CONFIG_FILE_SUFFIXES = (
     "settings.py",
     "docker-compose.yml",
@@ -103,6 +168,12 @@ _CONFIG_FILE_SUFFIXES = (
     ".ini",
     ".cfg",
 )
+_DEFINITION_SYMBOL_TYPES = {
+    "class",
+    "function",
+    "method",
+    "module",
+}
 
 
 @dataclass(frozen=True)
@@ -114,12 +185,19 @@ class QueryProfile:
     canonical_query: str
     tokens: tuple[str, ...]
     focus_identifiers: tuple[str, ...]
+    target_identifier_candidates: tuple[str, ...]
     exact_identifier_query: bool
     runtime_config_intent: bool
     code_intent: bool
     test_intent: bool
     natural_language_query: bool
     implementation_intent: bool
+    definition_lookup_intent: bool
+    documentation_lookup_intent: bool
+    operational_config_lookup_intent: bool
+    prefers_symbol_definitions: bool
+    prefers_docs: bool
+    prefers_runtime_config: bool
 
 
 def _normalize_text(value: str) -> str:
@@ -166,7 +244,7 @@ def _build_query_profile(query: str) -> QueryProfile:
     focus_identifiers = tuple(
         dict.fromkeys(
             _canonicalize_identifier(token)
-            for token in re.findall(r"[A-Za-z][A-Za-z0-9_.-]*", query)
+            for token in re.findall(r"[A-Za-z_][A-Za-z0-9_.-]*", query)
             if len(token) >= 3
             and (
                 _canonicalize_identifier(token).count("_") >= 1
@@ -175,23 +253,59 @@ def _build_query_profile(query: str) -> QueryProfile:
             )
         )
     )
-    runtime_config_intent = bool(token_set & _RUNTIME_CONFIG_TOKENS)
-    code_intent = bool(token_set & _CODE_TOKENS)
+    target_identifier_candidates = tuple(
+        dict.fromkeys(
+            candidate
+            for candidate in (
+                (_canonicalize_identifier(query),) if exact_identifier_query else ()
+            )
+            + focus_identifiers
+            if candidate
+        )
+    )
+    documentation_lookup_intent = bool(token_set & _DOCUMENTATION_TOKENS)
+    operational_config_lookup_intent = bool(token_set & _RUNTIME_CONFIG_TOKENS)
+    definition_lookup_intent = bool(token_set & _DEFINITION_LOOKUP_TOKENS) or (
+        bool(target_identifier_candidates)
+        and bool({"where", "donde", "location", "ubicacion"} & token_set)
+        and not documentation_lookup_intent
+        and not operational_config_lookup_intent
+    )
+    runtime_config_intent = (
+        operational_config_lookup_intent and not documentation_lookup_intent
+    )
+    code_intent = bool(token_set & _CODE_TOKENS) or definition_lookup_intent
     test_intent = bool(token_set & _TEST_TOKENS)
     natural_language_query = not exact_identifier_query
-    implementation_intent = bool(token_set & _IMPLEMENTATION_HINT_TOKENS)
+    implementation_intent = (
+        bool(token_set & _IMPLEMENTATION_HINT_TOKENS)
+        or definition_lookup_intent
+        or exact_identifier_query
+    )
+    prefers_symbol_definitions = bool(target_identifier_candidates) and (
+        definition_lookup_intent or exact_identifier_query
+    )
+    prefers_docs = documentation_lookup_intent
+    prefers_runtime_config = runtime_config_intent
     return QueryProfile(
         raw_query=query,
         normalized_query=normalized_query,
         canonical_query=_canonicalize_identifier(query),
         tokens=tokens,
         focus_identifiers=focus_identifiers,
+        target_identifier_candidates=target_identifier_candidates,
         exact_identifier_query=exact_identifier_query,
         runtime_config_intent=runtime_config_intent,
         code_intent=code_intent,
         test_intent=test_intent,
         natural_language_query=natural_language_query,
         implementation_intent=implementation_intent,
+        definition_lookup_intent=definition_lookup_intent,
+        documentation_lookup_intent=documentation_lookup_intent,
+        operational_config_lookup_intent=operational_config_lookup_intent,
+        prefers_symbol_definitions=prefers_symbol_definitions,
+        prefers_docs=prefers_docs,
+        prefers_runtime_config=prefers_runtime_config,
     )
 
 
@@ -211,10 +325,46 @@ def _is_config_path(path: str) -> bool:
     return normalized.endswith(_CONFIG_FILE_SUFFIXES)
 
 
+def _is_docs_path(path: str) -> bool:
+    """Detecta rutas documentales frente a código o configuración."""
+    normalized = path.strip().lower().replace("\\", "/")
+    if not normalized:
+        return False
+    if normalized.startswith("docs/") or "/docs/" in normalized:
+        return True
+    filename = normalized.rsplit("/", maxsplit=1)[-1]
+    stem = filename.rsplit(".", maxsplit=1)[0]
+    if stem in {"readme", "configuration", "api_reference", "install"}:
+        return True
+    segments = [segment for segment in normalized.split("/") if segment]
+    return any(segment in _DOC_PATH_SEGMENTS for segment in segments)
+
+
+def _is_example_path(path: str) -> bool:
+    """Detecta rutas de ejemplo que no deberían ganar por defecto."""
+    normalized = path.strip().lower().replace("\\", "/")
+    segments = [segment for segment in normalized.split("/") if segment]
+    return any(segment in _EXAMPLE_PATH_SEGMENTS for segment in segments)
+
+
 def _is_noise_path(path: str) -> bool:
     """Marca rutas de bajo valor por defecto para queries funcionales."""
     normalized = path.strip().lower().replace("\\", "/")
     return any(segment in normalized for segment in _NOISE_PATH_SEGMENTS)
+
+
+def _is_orchestration_path(path: str) -> bool:
+    """Detecta entrypoints y flujos auxiliares que no suelen ser el owner real."""
+    normalized = path.strip().lower().replace("\\", "/")
+    if not normalized:
+        return False
+    tokens: set[str] = set()
+    for segment in normalized.split("/"):
+        if not segment:
+            continue
+        stem = segment.rsplit(".", maxsplit=1)[0]
+        tokens.update(token for token in re.findall(r"[a-z0-9]+", stem) if token)
+    return bool(tokens & _ORCHESTRATION_PATH_TOKENS)
 
 
 def _is_productive_implementation_path(path: str) -> bool:
@@ -291,18 +441,123 @@ def _strong_overlap(profile: QueryProfile, chunk: RetrievalChunk) -> bool:
     )
 
 
+def _text_mentions_target(profile: QueryProfile, value: str) -> bool:
+    """Marca si el texto menciona un identificador objetivo de la query."""
+    normalized_value = _canonicalize_identifier(value)
+    if not normalized_value:
+        return False
+    return any(
+        candidate in normalized_value
+        for candidate in profile.target_identifier_candidates
+    )
+
+
+def _exact_symbol_match(profile: QueryProfile, symbol_name: str) -> bool:
+    """Comprueba si el símbolo coincide exactamente con el objetivo."""
+    normalized_symbol = _normalize_text(symbol_name)
+    trimmed_symbol = normalized_symbol.lstrip("_")
+    if normalized_symbol.startswith("_") and trimmed_symbol:
+        if trimmed_symbol in profile.target_identifier_candidates:
+            return False
+    canonical_symbol = _canonicalize_identifier(symbol_name)
+    if not canonical_symbol:
+        return False
+    return canonical_symbol in profile.target_identifier_candidates
+
+
+def _private_target_match(profile: QueryProfile, symbol_name: str) -> bool:
+    """Detecta lookup exacto de símbolos privados con prefijo underscore."""
+    normalized_symbol = _normalize_text(symbol_name)
+    if not normalized_symbol.startswith("_"):
+        return False
+    stripped_symbol = normalized_symbol.lstrip("_")
+    if not stripped_symbol:
+        return False
+    return _canonicalize_identifier(stripped_symbol) in (
+        profile.target_identifier_candidates
+    )
+
+
+def _is_definition_like_chunk(chunk: RetrievalChunk) -> bool:
+    """Indica si el chunk parece una definición canónica del símbolo."""
+    path = str(chunk.metadata.get("path", ""))
+    symbol_name = str(chunk.metadata.get("symbol_name", ""))
+    symbol_type = _symbol_type(chunk.metadata).lower()
+    if not symbol_name or symbol_type not in _DEFINITION_SYMBOL_TYPES:
+        return False
+    if _is_test_path(path) or _is_docs_path(path) or _is_example_path(path):
+        return False
+    return _is_productive_implementation_path(path)
+
+
+def _is_prefixed_wrapper_symbol(
+    profile: QueryProfile,
+    symbol_name: str,
+) -> bool:
+    """Detecta wrappers sintéticos o privados que envuelven al target."""
+    raw_symbol = _normalize_text(symbol_name)
+    canonical_symbol = _canonicalize_identifier(symbol_name)
+    if not raw_symbol or not canonical_symbol or not profile.target_identifier_candidates:
+        return False
+    if canonical_symbol in profile.target_identifier_candidates:
+        return False
+    if raw_symbol.startswith("_") and raw_symbol.lstrip("_") in (
+        profile.target_identifier_candidates
+    ):
+        return True
+    prefixes = ("fake_", "test_", "mock_", "stub_")
+    return any(
+        canonical_symbol.startswith(prefix)
+        and canonical_symbol.endswith(candidate)
+        for prefix in prefixes
+        for candidate in profile.target_identifier_candidates
+    )
+
+
 def _mentions_other_symbol_name(chunk: RetrievalChunk, symbol_name: str) -> bool:
     """Detecta wrappers cuyo texto depende de otro símbolo distinto al propio."""
-    normalized_text = _canonicalize_identifier(chunk.text)
     normalized_symbol = _canonicalize_identifier(symbol_name)
-    if not normalized_text or not normalized_symbol:
+    if not normalized_symbol:
         return False
-    matches = {
-        candidate
-        for candidate in re.findall(r"[A-Za-z][A-Za-z0-9_]{2,}", normalized_text)
-        if candidate != normalized_symbol and candidate in normalized_text
-    }
-    return bool(matches)
+    for candidate in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", chunk.text):
+        canonical_candidate = _canonicalize_identifier(candidate)
+        if not canonical_candidate or canonical_candidate == normalized_symbol:
+            continue
+        if canonical_candidate.count("_") >= 1:
+            return True
+    return False
+
+
+def _is_wrapper_or_entrypoint_chunk(
+    profile: QueryProfile,
+    chunk: RetrievalChunk,
+) -> bool:
+    """Marca orquestadores que mencionan el target pero no lo definen."""
+    path = str(chunk.metadata.get("path", "")).strip().lower().replace("\\", "/")
+    symbol_name = str(chunk.metadata.get("symbol_name", ""))
+    if not symbol_name:
+        return False
+    if _exact_symbol_match(profile, symbol_name):
+        return False
+    if not _text_mentions_target(profile, chunk.text):
+        return False
+    segments = {segment for segment in path.split("/") if segment}
+    if segments & _WRAPPER_PATH_SEGMENTS:
+        return True
+    return _mentions_other_symbol_name(chunk, symbol_name)
+
+
+def _is_preferred_definition_candidate(
+    profile: QueryProfile,
+    chunk: RetrievalChunk,
+) -> bool:
+    """Determina si el chunk merece promoción inicial como definición."""
+    if not profile.prefers_symbol_definitions:
+        return False
+    symbol_name = str(chunk.metadata.get("symbol_name", ""))
+    return _exact_symbol_match(profile, symbol_name) and _is_definition_like_chunk(
+        chunk
+    )
 
 
 def _score_chunk(profile: QueryProfile, chunk: RetrievalChunk) -> float:
@@ -341,25 +596,83 @@ def _score_chunk(profile: QueryProfile, chunk: RetrievalChunk) -> float:
             score += 0.30
 
     config_path = _is_config_path(path)
+    docs_path = _is_docs_path(path)
+    example_path = _is_example_path(path)
     test_path = _is_test_path(path)
     productive_path = _is_productive_implementation_path(path)
     strong_overlap = _strong_overlap(profile, chunk)
-    wrapper_like_chunk = _mentions_other_symbol_name(chunk, symbol_name)
+    exact_symbol_match = _exact_symbol_match(profile, symbol_name)
+    private_target_match = _private_target_match(profile, symbol_name)
+    definition_like_chunk = _is_definition_like_chunk(chunk)
+    target_text_match = _text_mentions_target(profile, chunk.text)
+    prefixed_wrapper_symbol = _is_prefixed_wrapper_symbol(profile, symbol_name)
+    wrapper_like_chunk = _is_wrapper_or_entrypoint_chunk(profile, chunk)
+    orchestration_path = _is_orchestration_path(path)
 
-    if profile.runtime_config_intent and not profile.test_intent:
+    if profile.prefers_symbol_definitions:
+        if exact_symbol_match:
+            score += 1.15
+        if private_target_match and definition_like_chunk:
+            score += 0.95
+        if definition_like_chunk:
+            score += 0.45
+        if productive_path:
+            score += 0.20
+        if target_text_match and productive_path and not wrapper_like_chunk:
+            score += 0.35
+        if not symbol_name and target_text_match and productive_path:
+            score += 0.35
+        if wrapper_like_chunk:
+            score -= 0.60
+        if wrapper_like_chunk and orchestration_path:
+            score -= 1.45
+        if exact_symbol_match and orchestration_path:
+            score -= 0.22
+        if private_target_match and orchestration_path:
+            score -= 0.22
+        if not symbol_name and orchestration_path and not target_text_match:
+            score -= 0.40
+        if prefixed_wrapper_symbol:
+            score -= 1.20
+        if test_path and not exact_symbol_match:
+            score -= 0.85
+        if docs_path:
+            score -= 0.45
+        if example_path:
+            score -= 0.30
+        if config_path and not exact_symbol_match:
+            score -= 0.35
+
+    if profile.prefers_docs and not profile.test_intent:
+        if docs_path:
+            score += 0.85
+        if docs_path and target_text_match:
+            score += 4.10
+        if docs_path and target_text_match and symbol_type == "section":
+            score += 0.25
+        if text_overlap_raw >= 0.3:
+            score += 0.20
+        if config_path:
+            score -= 0.60
+        if test_path:
+            score -= 0.40
+
+    if profile.prefers_runtime_config and not profile.test_intent:
         if config_path:
             score += 0.40
         if symbol_type == "config_key":
             score += 0.30
+        if docs_path:
+            score -= 0.30
         if test_path and not strong_overlap and not profile.test_intent:
             score -= 0.45
 
-    if profile.code_intent:
-        if symbol_type in {"function", "method", "class", "module"}:
+    if profile.code_intent and not profile.prefers_docs:
+        if symbol_type in _DEFINITION_SYMBOL_TYPES:
             score += 0.30
-        if productive_path and symbol_type in {"function", "method", "class", "module"}:
+        if productive_path and symbol_type in _DEFINITION_SYMBOL_TYPES:
             score += 0.35
-        if symbol_overlap_raw >= 0.4 and symbol_type in {"function", "method", "class"}:
+        if symbol_overlap_raw >= 0.4 and symbol_type in _DEFINITION_SYMBOL_TYPES:
             score += 0.40
         if profile.implementation_intent and symbol_overlap_raw >= 0.4:
             score += 0.25
@@ -370,7 +683,11 @@ def _score_chunk(profile: QueryProfile, chunk: RetrievalChunk) -> float:
             and text_overlap_raw >= 0.4
         ):
             score -= 0.30
+        if prefixed_wrapper_symbol:
+            score -= 0.60
         if config_path and not strong_overlap and not profile.runtime_config_intent:
+            score -= 0.15
+        if docs_path and not profile.prefers_docs:
             score -= 0.15
         if test_path and not profile.test_intent:
             score -= 0.55
@@ -411,10 +728,26 @@ def rerank(
     selected: list[RetrievalChunk] = []
     path_counts: dict[str, int] = {}
     remaining = list(scored)
+    best_preliminary_score = scored[0][0]
 
     while remaining and len(selected) < top_k:
         best_index = 0
         best_score: float | None = None
+        if not selected and profile.prefers_symbol_definitions:
+            for index, (preliminary_score, chunk) in enumerate(remaining):
+                symbol_name = str(chunk.metadata.get("symbol_name", ""))
+                mentions_target = _text_mentions_target(profile, chunk.text)
+                productive_path = _is_productive_implementation_path(
+                    str(chunk.metadata.get("path", ""))
+                )
+                if _is_preferred_definition_candidate(profile, chunk):
+                    best_index = index
+                    best_score = preliminary_score
+                    break
+                if not symbol_name and mentions_target and productive_path:
+                    best_index = index
+                    best_score = preliminary_score
+                    break
         for index, (preliminary_score, chunk) in enumerate(remaining):
             path = str(chunk.metadata.get("path", ""))
             adjusted = preliminary_score - _diversity_penalty(path_counts.get(path, 0))

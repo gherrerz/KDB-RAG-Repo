@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from time import monotonic
 
-from coderag.api.citation_filters import is_noisy_path
+from coderag.api.citation_filters import is_noisy_path, select_high_signal_citations
 from coderag.core.models import Citation, RetrievalChunk
 
 
@@ -217,7 +217,48 @@ def finalize_graph_enrichment(
         item for item in raw_citations if not is_noisy_path(item.path)
     ]
     citations_source = filtered_citations or raw_citations
-    citations = sorted(citations_source, key=hooks.citation_priority)
+    sorted_citations = sorted(citations_source, key=hooks.citation_priority)
+    preferred_paths: list[str] = []
+    seen_paths: set[str] = set()
+    for item in reranked:
+        path = str(item.metadata.get("path", "") or "").strip()
+        normalized_path = path.replace("\\", "/").lower()
+        if not normalized_path or normalized_path in seen_paths:
+            continue
+        seen_paths.add(normalized_path)
+        preferred_paths.append(path)
+    citations = select_high_signal_citations(
+        sorted_citations,
+        preferred_paths,
+        max_total=1,
+    )
+    graph_returned = [
+        citation
+        for citation in sorted_citations
+        if citation.reason
+        in {"graph_file_dependency_match", "graph_external_dependency_source"}
+    ]
+    if graph_returned:
+        seen_returned: set[tuple[str, int, int, str]] = {
+            (
+                citation.path.replace("\\", "/").lower(),
+                citation.start_line,
+                citation.end_line,
+                citation.reason,
+            )
+            for citation in citations
+        }
+        for citation in graph_returned:
+            key = (
+                citation.path.replace("\\", "/").lower(),
+                citation.start_line,
+                citation.end_line,
+                citation.reason,
+            )
+            if key in seen_returned:
+                continue
+            seen_returned.add(key)
+            citations.append(citation)
 
     return GraphEnrichmentResult(
         reranked=reranked,

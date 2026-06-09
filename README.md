@@ -550,9 +550,16 @@ Resultado esperado de los ejemplos:
 .\.venv\Scripts\python.exe scripts\benchmark_architecture_queries.py --base-url http://127.0.0.1:8000 --repo-id kdb-rag-repo --top-n 60 --top-k 15
 .\.venv\Scripts\python.exe scripts\benchmark_architecture_quality.py --base-url http://127.0.0.1:8000 --repo-id kdb-rag-repo --top-n 60 --top-k 15
 .\.venv\Scripts\python.exe scripts\benchmark_architecture_facts.py --base-url http://127.0.0.1:8000 --repo-id kdb-rag-repo --gold-file scripts/benchmark_data/architecture_facts_gold.json --top-n 60 --top-k 15
+.\.venv\Scripts\python.exe scripts\benchmark_code_gold_materialize.py --gold-file scripts/benchmark_data/code_retrieval_gold.json --workspace-root . --output benchmark_reports/code_gold_materialized.json
+.\.venv\Scripts\python.exe scripts\benchmark_code_retrieval_collect.py --base-url http://127.0.0.1:8000 --repo-id gherrerz-kdb-rag-repo-main --materialized-file benchmark_reports/code_gold_materialized.json
+.\.venv\Scripts\python.exe scripts\benchmark_code_ir_score.py --collected-report benchmark_reports/code_retrieval_collect_<timestamp>.json
 .\.venv\Scripts\python.exe scripts\benchmark_facts_gate.py --on-report benchmark_reports/architecture_facts_eval_20260324_223605.json --off-report benchmark_reports/architecture_facts_eval_20260324_224016.json --review-csv scripts/benchmark_data/architecture_facts_review_template.csv --min-uplift 0.15 --min-reviewed-ratio 0.90 --min-correct-ratio 0.85
 .\.venv\Scripts\python.exe scripts\benchmark_rollback_simulation.py --repo-id kdb-rag-repo --host 127.0.0.1 --port 8013
 ```
+
+El scorer IR aplica gate integrado sobre `gate_candidate` con salida `pass`,
+`pass_with_warnings` o `fail` y retorna exit code `3` cuando falla algun
+threshold hard.
 
 ## Testing
 

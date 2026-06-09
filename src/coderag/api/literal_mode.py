@@ -37,6 +37,28 @@ class _LiteralResolvedTarget:
     target_content: str
 
 
+def _current_checkout_root() -> Path:
+    """Return the repository root of the running checkout."""
+    return Path(__file__).resolve().parents[3]
+
+
+def _normalize_repo_locator(value: str) -> str:
+    """Normalize repo identifiers and folder names for loose matching."""
+    return re.sub(r"[^a-z0-9]+", "", value.strip().lower())
+
+
+def _repo_id_matches_current_checkout(repo_id: str) -> bool:
+    """Return whether the requested repo id plausibly refers to this checkout."""
+    normalized_repo_id = _normalize_repo_locator(repo_id)
+    normalized_checkout = _normalize_repo_locator(_current_checkout_root().name)
+    if not normalized_repo_id or not normalized_checkout:
+        return False
+    return (
+        normalized_checkout in normalized_repo_id
+        or normalized_repo_id in normalized_checkout
+    )
+
+
 def is_literal_code_query(query: str) -> bool:
     """Detect requests that explicitly ask for literal code output."""
     normalized = query.lower()
@@ -111,6 +133,10 @@ def extract_literal_symbol_candidates(query: str) -> list[str]:
             if token:
                 candidates.append(token)
 
+    for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", query):
+        if token.count("_") >= 1:
+            candidates.append(token)
+
     deduped: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -125,9 +151,12 @@ def extract_literal_symbol_candidates(query: str) -> list[str]:
 def resolve_repo_root(repo_id: str, *, hooks: LiteralModeHooks) -> Path | None:
     """Resolve the local workspace root for a repository."""
     settings = hooks.get_settings()
-    candidate = (settings.workspace_path / repo_id).resolve()
-    if candidate.exists() and candidate.is_dir():
-        return candidate
+    candidates = [(settings.workspace_path / repo_id).resolve()]
+    if _repo_id_matches_current_checkout(repo_id):
+        candidates.append(_current_checkout_root())
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_dir():
+            return candidate
     return None
 
 
