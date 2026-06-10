@@ -553,6 +553,9 @@ Resultado esperado de los ejemplos:
 .\.venv\Scripts\python.exe scripts\benchmark_code_gold_materialize.py --gold-file scripts/benchmark_data/code_retrieval_gold.json --workspace-root . --output benchmark_reports/code_gold_materialized.json
 .\.venv\Scripts\python.exe scripts\benchmark_code_retrieval_collect.py --base-url http://127.0.0.1:8000 --repo-id gherrerz-kdb-rag-repo-main --materialized-file benchmark_reports/code_gold_materialized.json
 .\.venv\Scripts\python.exe scripts\benchmark_code_ir_score.py --collected-report benchmark_reports/code_retrieval_collect_<timestamp>.json
+.\.venv\Scripts\python.exe scripts\benchmark_code_ragas_dataset_materialize.py --gold-file scripts/benchmark_data/code_retrieval_gold.json --materialized-file benchmark_reports/code_gold_materialized.json --output benchmark_reports/code_ragas_dataset_materialized.json
+.\.venv\Scripts\python.exe scripts\benchmark_code_ragas_collect.py --base-url http://127.0.0.1:8000 --dataset-file benchmark_reports/code_ragas_dataset_materialized.json
+.\.venv\Scripts\python.exe scripts\benchmark_code_ragas_score.py --collected-report benchmark_reports/code_ragas_collect_<timestamp>.json --scoring-engine auto
 .\.venv\Scripts\python.exe scripts\benchmark_facts_gate.py --on-report benchmark_reports/architecture_facts_eval_20260324_223605.json --off-report benchmark_reports/architecture_facts_eval_20260324_224016.json --review-csv scripts/benchmark_data/architecture_facts_review_template.csv --min-uplift 0.15 --min-reviewed-ratio 0.90 --min-correct-ratio 0.85
 .\.venv\Scripts\python.exe scripts\benchmark_rollback_simulation.py --repo-id kdb-rag-repo --host 127.0.0.1 --port 8013
 ```
@@ -560,6 +563,23 @@ Resultado esperado de los ejemplos:
 El scorer IR aplica gate integrado sobre `gate_candidate` con salida `pass`,
 `pass_with_warnings` o `fail` y retorna exit code `3` cuando falla algun
 threshold hard.
+
+Para RAGAS, el flujo actual se mantiene 100% offline respecto del runtime:
+el collector congela la respuesta de `POST /query` junto con citas y contextos
+reconstruidos desde workspace. El scorer soporta `--scoring-engine auto`, que
+intenta usar `ragas` real cuando existen dependencias opcionales y proveedor
+configurado; si no, cae al proxy lexical/heurístico local sin romper el
+pipeline. En el estado actual, la ruta real validada por código queda preparada
+para OpenAI; con Vertex el scorer deja fallback explícito porque el smoke local
+falló por compatibilidad de cliente y por `Cloud Resource Manager API`
+deshabilitada en el proyecto de prueba.
+
+Para instalar solo la capa opcional de evaluación RAGAS sin mezclarla con el
+runtime base, usa un overlay dedicado:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-ragas-eval.txt
+```
 
 ## Testing
 

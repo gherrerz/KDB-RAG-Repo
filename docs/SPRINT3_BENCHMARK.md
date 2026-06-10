@@ -660,6 +660,209 @@ Lectura:
 	`graph_external_dependency_source` vuelven a preservarse en la respuesta,
 	y `tests/test_query_service_modules.py` quedó en `79 passed`
 
+## 4.9 Dataset base para RAGAS offline
+
+Se agregó el primer corte de materialización específico para RAGAS, todavía sin
+scoring generativo ni cambios de runtime.
+
+- Materializador: `scripts/benchmark_code_ragas_dataset_materialize.py`
+- Pruebas focalizadas:
+	`tests/test_benchmark_code_ragas_dataset_materialize.py`
+- Artefacto de salida esperado:
+	`benchmark_reports/code_ragas_dataset_materialized.json`
+
+Objetivo de este corte:
+
+- reutilizar el gold set actual y su resolución local ya materializada para
+	producir un dataset estable, apto para un collector posterior contra
+	`POST /query`
+- separar desde el diseño la referencia generativa (`ragas_reference`) de la
+	evidencia de retrieval (`materialized_expected` y alternativas)
+- introducir una capa explícita de elegibilidad (`eligibility`) para permitir
+	adopción gradual de cohortes en RAGAS
+
+Contrato del artefacto materializado RAGAS:
+
+- `dataset_name`, `repo_id`, `defaults`, `generated_at`, `workspace_root`
+- `total_queries`, `valid_queries`, `invalid_queries`
+- `ragas_enabled_queries`, `ragas_disabled_queries`
+- `queries[]` con:
+	`query_id`, `query`, `cohort`, `gate_candidate`, `retrieval_defaults`,
+	`materialized_expected`, `materialized_alternatives`, `ragas_reference`,
+	`eligibility`, `validation_errors`
+
+Bloque `ragas_reference` por query:
+
+- `reference_answer`
+- `answer_type`
+- `eval_mode`
+- `requires_citations`
+- `reference_context_hints`
+- `reference_claims`
+- `reference_entities`
+
+Bloque `eligibility` por query:
+
+- `valid`
+- `ragas_enabled`
+- `disabled_reasons`
+
+Decisión operativa inicial en este corte:
+
+- `literal_file` queda deshabilitado por defecto para la primera ola RAGAS
+- `exact_symbol`, `exact_config` y `graph_first_small` pueden quedar
+	habilitados si ya tienen `reference_answer` y la query materializada es
+	válida
+
+Comando base:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_code_ragas_dataset_materialize.py --gold-file scripts/benchmark_data/code_retrieval_gold.json --materialized-file benchmark_reports/code_gold_materialized.json --output benchmark_reports/code_ragas_dataset_materialized.json
+```
+
+## 4.10 Collector y scoring RAGAS offline
+
+Se completó el segundo y tercer corte del flujo RAGAS sin tocar el runtime.
+
+- Collector HTTP: `scripts/benchmark_code_ragas_collect.py`
+- Scorer/reportes offline: `scripts/benchmark_code_ragas_score.py`
+- Pruebas focalizadas: `tests/test_benchmark_code_ragas_pipeline.py`
+
+Objetivo de este corte:
+
+- congelar respuestas reales de `POST /query` a partir del dataset RAGAS ya
+	materializado
+- reconstruir `retrieved_contexts` offline desde `citations`, leyendo spans del
+	workspace o usando `snippet_preview` materializado como fallback
+- desacoplar el scoring de la disponibilidad de la librería `ragas`, usando un
+	proxy lexical/heurístico reproducible sobre artefactos congelados
+
+Contrato del collector:
+
+- entrada: `benchmark_reports/code_ragas_dataset_materialized.json`
+- salida JSON: `benchmark_reports/code_ragas_collect_<timestamp>.json`
+- salida CSV: `benchmark_reports/code_ragas_collect_<timestamp>.csv`
+- por query conserva:
+	`payload`, `response_body`, `answer_text`, `citations`,
+	`retrieved_contexts`, `ragas_reference`, `materialized_expected`,
+	`materialized_alternatives`, `score_eligible`, `score_skip_reason`
+
+Reglas de elegibilidad para scoring:
+
+- respuesta HTTP `200`
+- `answer_text` no vacío
+- `fallback_used = false`
+- citas presentes cuando `requires_citations = true`
+- al menos un `retrieved_context` reconstruido
+
+Comando base del collector:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_code_ragas_collect.py --base-url http://127.0.0.1:8000 --dataset-file benchmark_reports/code_ragas_dataset_materialized.json
+```
+
+Contrato del scorer offline:
+
+- entrada: `benchmark_reports/code_ragas_collect_<timestamp>.json`
+- salida JSON: `benchmark_reports/code_ragas_eval_<timestamp>.json`
+- salida CSV: `benchmark_reports/code_ragas_eval_<timestamp>.csv`
+- métricas agregadas: `answer_relevancy`, `answer_correctness`,
+	`faithfulness`, `context_precision`, `context_recall`,
+	`context_entity_recall`, `scored_rate`, `fallback_rate`
+- cortes agregados: `overall`, `gate_candidate`, `by_cohort`, `skipped_rows`
+- gate integrado: `pass`, `pass_with_warnings` o `fail`, con exit code `3`
+	cuando falla un threshold hard
+
+Comando base del scorer:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_code_ragas_score.py --collected-report benchmark_reports/code_ragas_collect_<timestamp>.json --scoring-engine auto
+```
+
+Nota operativa:
+
+- el scorer soporta `auto`, `proxy` y `ragas`
+- `auto` intenta usar `ragas` real solo cuando hay dependencias opcionales y
+	proveedor configurado; si no, cae a `offline_lexical_proxy`
+- para no contaminar el runtime base, las dependencias opcionales de evaluación
+	se aíslan en `requirements-ragas-eval.txt`
+
+Corrida real validada en esta iteración:
+
+- collector JSON:
+	`benchmark_reports/code_ragas_collect_20260609_221528.json`
+- collector CSV:
+	`benchmark_reports/code_ragas_collect_20260609_221528.csv`
+- scorer JSON:
+	`benchmark_reports/code_ragas_eval_20260609_221535.json`
+- scorer CSV:
+	`benchmark_reports/code_ragas_eval_20260609_221535.csv`
+
+Resultado agregado observado:
+
+- `queries_count = 28`
+- `successful_queries = 28`
+- `score_eligible_queries = 28`
+- `scored_rate = 1.0`
+- `answer_relevancy = 0.9339`
+- `answer_correctness = 0.3196`
+- `faithfulness = 0.5972`
+- `context_precision = 0.1994`
+- `context_recall = 0.8476`
+- `context_entity_recall = 0.9286`
+- `fallback_rate = 0.0`
+
+Gate sobre `gate_candidate`:
+
+- estado: `fail`
+- hard pass: `answer_relevancy`, `faithfulness`,
+	`context_entity_recall`, `scored_rate`
+- hard fail: `answer_correctness`
+- soft fail: `context_precision`
+
+Lectura operativa:
+
+- el pipeline offline quedó estable y 100% evaluable sobre las 28 queries
+	habilitadas
+- el runtime respondió sin fallos ni fallback en esta corrida
+- la cobertura de contexto es alta (`context_recall` y
+	`context_entity_recall`), pero el proxy actual penaliza fuerte la
+	corrección de respuesta y la precisión de contexto, por lo que el siguiente
+	paso natural es calibrar el scorer o reemplazarlo por `ragas` real antes de
+	usar estos thresholds como gate de release
+
+Calibración aplicada en el siguiente corte:
+
+- `answer_correctness` del proxy ya no depende casi por completo de F1 estricto
+	contra la referencia corta; ahora combina F1, recall de referencia, cobertura
+	de claims y recall de entidades
+- `context_precision` del proxy pasó a ponderar más el ranking temprano de
+	contextos que el volumen bruto de citas retornadas
+- el scorer quedó preparado para `ragas` real mediante `--scoring-engine auto`
+	con fallback explícito si faltan proveedor o credenciales
+
+Resultado calibrado del proxy sobre el mismo collector real:
+
+- scorer JSON:
+	`benchmark_reports/code_ragas_eval_20260610_003243.json`
+- scorer CSV:
+	`benchmark_reports/code_ragas_eval_20260610_003243.csv`
+- `scoring_engine = offline_lexical_proxy`
+- `answer_correctness = 0.6160`
+- `context_precision = 0.3195`
+- gate sobre `gate_candidate = pass_with_warnings`
+- hard fails: ninguno
+- soft fail remanente: `context_precision`
+
+Estado del engine `ragas` real tras el smoke de integración:
+
+- la librería y el schema ya quedan cableados en el scorer
+- `auto` intenta `ragas` real y deja `engine_notes` cuando cae a proxy
+- la ruta real validada por implementación quedó preparada para OpenAI
+- el smoke con Vertex no quedó habilitado en esta iteración por dos bloqueos
+	externos/reales: `Cloud Resource Manager API` deshabilitada en el proyecto de
+	prueba y compatibilidad incompleta del client moderno requerido por `ragas`
+
 ## 5. Simulacion de rollback (tiempos reales)
 
 Comando usado:

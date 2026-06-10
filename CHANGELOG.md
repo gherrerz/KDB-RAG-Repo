@@ -8,6 +8,12 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Added
 
+- Flujo offline RAGAS para benchmark de respuestas completas de código, con
+    dataset materializado, collector contra `POST /query`, reconstrucción local
+    de contextos citados y scorer con selección `auto/proxy/ragas`, fallback
+    seguro al proxy local y overlay opcional de dependencias en
+    `requirements-ragas-eval.txt`, además de calibración del proxy para reducir
+    el castigo a respuestas largas pero correctamente fundamentadas.
 - Archivos de dependencias separados para runtime, desktop, desarrollo y
     entorno completo local:
     `requirements-runtime.txt`, `requirements-desktop.txt`,
