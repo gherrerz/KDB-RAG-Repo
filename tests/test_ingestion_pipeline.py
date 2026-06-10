@@ -191,7 +191,105 @@ def test_index_vectors_publishes_vector_metrics_into_diagnostics(
     assert vector_index["split_count"] == 1
     assert vector_index["recovered_retry_count"] == 1
     assert vector_index["payload_too_large_events"] == 1
+    expected_tokens = pipeline._estimate_embedding_tokens_read(
+        ["def a():\n pass"]
+        + ["Archivo: a.py\nLenguaje: python\nLineas: 2\nExtracto:\ndef a():\n pass"]
+        + ["Modulo: .\nArchivos: 1\nLenguajes: python"]
+    )
+    assert vector_index["embedding_tokens_read_estimated"] == expected_tokens
     assert vector_index["documents_written"] == 3
+
+
+def test_ingest_repository_publishes_repo_size_mb_into_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    patch_module_settings,
+) -> None:
+    """Publica repo_size_mb usando solo el contenido realmente leído."""
+    scanned = [
+        ScannedFile(path="a.py", language="python", content="hola"),
+        ScannedFile(path="b.py", language="python", content="mundo"),
+    ]
+    symbols = [
+        SymbolChunk(
+            id="s1",
+            repo_id="r1",
+            path="a.py",
+            language="python",
+            symbol_name="a",
+            symbol_type="function",
+            start_line=1,
+            end_line=1,
+            snippet="hola",
+        )
+    ]
+    diagnostics: dict[str, object] = {}
+
+    _patch_pipeline_settings(patch_module_settings, tmp_path)
+    monkeypatch.setattr(
+        pipeline,
+        "clone_repository",
+        lambda repo_url, destination_root, branch, commit, **kwargs: (
+            "r1",
+            tmp_path,
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "scan_repository_with_stats",
+        lambda *args, **kwargs: (
+            scanned,
+            {
+                "visited": 2,
+                "visited_dirs": 1,
+                "scanned": 2,
+                "excluded_dir": 0,
+                "excluded_extension": 0,
+                "excluded_file": 0,
+                "excluded_pattern": 0,
+                "excluded_size": 0,
+                "excluded_decode": 0,
+                "pruned_dirs": 0,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "extract_symbol_chunks",
+        lambda repo_id, scanned_files: symbols,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_vectors",
+        lambda repo_id, s, c, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_lexical_backend",
+        lambda repo_id, scanned_files, chunks: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_index_graph",
+        lambda repo_id, scanned_files, chunks, logger=None, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_repo_has_existing_index_data",
+        lambda repo_id, logger: False,
+    )
+
+    pipeline.ingest_repository(
+        provider="github",
+        repo_url="https://example.com/repo.git",
+        branch="main",
+        commit=None,
+        token=None,
+        logger=lambda message: None,
+        diagnostics_sink=diagnostics,
+    )
+
+    assert diagnostics["repo_size_mb"] == 0.0
 
 
 def _patch_pipeline_settings(

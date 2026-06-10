@@ -3,6 +3,7 @@
 from collections import Counter
 from collections import defaultdict
 from inspect import signature
+from math import ceil
 from time import perf_counter
 from typing import Callable
 
@@ -57,6 +58,25 @@ _FILE_IMPORT_RESOLUTION_METHOD_ALIASES = {
     "local_type": "local_path",
     "unresolved": "unresolved",
 }
+
+
+def _calculate_repo_size_mb(scanned_files: list[ScannedFile]) -> float:
+    """Calcula el tamaño decimal del contenido realmente leído por la ingesta."""
+    total_bytes = sum(len(item.content.encode("utf-8")) for item in scanned_files)
+    return round(total_bytes / 1_000_000, 2)
+
+
+def _estimate_text_tokens(text: str) -> int:
+    """Estima tokens a partir de longitud de texto sin depender del provider."""
+    normalized = text.strip()
+    if not normalized:
+        return 0
+    return max(1, ceil(len(normalized) / 4))
+
+
+def _estimate_embedding_tokens_read(texts: list[str]) -> int:
+    """Estima tokens de entrada leídos por la etapa de embeddings."""
+    return sum(_estimate_text_tokens(text) for text in texts)
 
 
 def _symbol_observability_summary(
@@ -403,6 +423,7 @@ def ingest_repository(
             2,
         )
         diagnostics_sink["scan_stats"] = dict(scan_stats)
+        diagnostics_sink["repo_size_mb"] = _calculate_repo_size_mb(scanned_files)
 
     logger("Extrayendo símbolos...")
     chunk_started_at = perf_counter()
@@ -597,6 +618,9 @@ def _index_vectors(
     ))
 
     if diagnostics_sink is not None:
+        embedding_tokens_read_estimated = _estimate_embedding_tokens_read(
+            symbol_texts + file_docs + module_docs
+        )
         effective_batch_sizes = [
             int(item["effective_batch_size"])
             for item in vector_metrics
@@ -629,6 +653,7 @@ def _index_vectors(
                 int(item["upstream_restarting_events"] or 0)
                 for item in vector_metrics
             ),
+            "embedding_tokens_read_estimated": embedding_tokens_read_estimated,
             "documents_written": sum(
                 int(item["documents_written"] or 0) for item in vector_metrics
             ),

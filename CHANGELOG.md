@@ -8,6 +8,10 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Added
 
+- Nuevos indicadores operativos en `GET /repos/{repo_id}/snapshots`:
+    `repo_size_mb` para el tamaño efectivamente leído del repositorio y
+    `embedding_tokens_read_estimated` para el estimado de tokens enviados a la
+    etapa de embeddings.
 - Flujo offline RAGAS para benchmark de respuestas completas de código, con
     dataset materializado, collector contra `POST /query`, reconstrucción local
     de contextos citados y scorer con selección `auto/proxy/ragas`, fallback

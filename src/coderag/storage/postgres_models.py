@@ -93,6 +93,7 @@ class IngestionSnapshotRecord(PostgresDeclarativeBase):
     graph_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     readiness_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     ingestion_total_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    repo_size_mb: Mapped[float | None] = mapped_column(Float, nullable=True)
     files_visited: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     files_scanned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     excluded_dir_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -115,6 +116,11 @@ class IngestionSnapshotRecord(PostgresDeclarativeBase):
     vector_proxy_reset_events: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     vector_upstream_restarting_events: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     vector_documents_written: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    embedding_tokens_read_estimated: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
     semantic_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     semantic_status: Mapped[str | None] = mapped_column(Text, nullable=True)
     semantic_relations_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

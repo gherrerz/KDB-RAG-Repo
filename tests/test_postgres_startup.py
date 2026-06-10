@@ -344,7 +344,7 @@ def test_ensure_alembic_version_table_capacity_alters_short_version_column(
 
     changed = postgres_startup._ensure_alembic_version_table_capacity(
         factory,
-        expected_heads={"0004_add_ingestion_snapshots_table"},
+        expected_heads={"0005_add_snapshot_repo_size_and_embedding_tokens"},
         current_heads={"0003_add_repo_last_queried_at"},
     )
 
@@ -407,7 +407,7 @@ def test_ensure_alembic_version_table_capacity_skips_when_column_is_wide_enough(
 
     changed = postgres_startup._ensure_alembic_version_table_capacity(
         factory,
-        expected_heads={"0004_add_ingestion_snapshots_table"},
+        expected_heads={"0005_add_snapshot_repo_size_and_embedding_tokens"},
         current_heads={"0003_add_repo_last_queried_at"},
     )
 

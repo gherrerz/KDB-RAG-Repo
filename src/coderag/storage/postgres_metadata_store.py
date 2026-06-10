@@ -120,6 +120,7 @@ def _snapshot_record_to_payload(
         "graph_ms": record.graph_ms,
         "readiness_ms": record.readiness_ms,
         "ingestion_total_ms": record.ingestion_total_ms,
+        "repo_size_mb": record.repo_size_mb,
         "files_visited": int(record.files_visited),
         "files_scanned": int(record.files_scanned),
         "excluded_dir_count": int(record.excluded_dir_count),
@@ -148,6 +149,9 @@ def _snapshot_record_to_payload(
             record.vector_upstream_restarting_events
         ),
         "vector_documents_written": int(record.vector_documents_written),
+        "embedding_tokens_read_estimated": int(
+            record.embedding_tokens_read_estimated
+        ),
         "semantic_enabled": bool(record.semantic_enabled),
         "semantic_status": record.semantic_status,
         "semantic_relations_count": int(record.semantic_relations_count),
@@ -516,6 +520,7 @@ class PostgresMetadataStore(BaseMetadataStore):
             graph_ms=_safe_float(diagnostics.get("graph_ms")),
             readiness_ms=_safe_float(diagnostics.get("readiness_ms")),
             ingestion_total_ms=_safe_float(diagnostics.get("ingestion_total_ms")),
+            repo_size_mb=_safe_float(diagnostics.get("repo_size_mb")),
             files_visited=_safe_int(scan_stats.get("visited")),
             files_scanned=_safe_int(scan_stats.get("scanned")),
             excluded_dir_count=_safe_int(scan_stats.get("excluded_dir")),
@@ -540,6 +545,9 @@ class PostgresMetadataStore(BaseMetadataStore):
             vector_proxy_reset_events=_safe_int(vector_index.get("proxy_reset_events")),
             vector_upstream_restarting_events=_safe_int(vector_index.get("upstream_restarting_events")),
             vector_documents_written=_safe_int(vector_index.get("documents_written")),
+            embedding_tokens_read_estimated=_safe_int(
+                vector_index.get("embedding_tokens_read_estimated")
+            ),
             semantic_enabled=bool(semantic_graph.get("enabled", False)),
             semantic_status=(str(semantic_graph.get("status")) if semantic_graph.get("status") is not None else None),
             semantic_relations_count=_safe_int(semantic_graph.get("relation_counts")),

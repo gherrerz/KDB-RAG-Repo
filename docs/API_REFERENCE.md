@@ -137,6 +137,16 @@ Notas de catálogo:
 Retorna el historial operativo persistido de ingestas para un repositorio,
 ordenado del snapshot más reciente al más antiguo.
 
+Notas de comportamiento:
+
+- Cada snapshot incluye `repo_size_mb`, calculado sobre el contenido UTF-8 que
+  la etapa de scan leyó efectivamente durante la ingesta y expresado en MB
+  decimales (`bytes / 1_000_000`) con 2 decimales.
+- Cada snapshot incluye `embedding_tokens_read_estimated`, un estimado de los
+  tokens de entrada enviados a embeddings a partir de los textos realmente
+  procesados por la etapa vectorial. Cuando no hay textos para embeddings, el
+  valor es `0`.
+
 - Path params:
   - `repo_id: str`
 - Query params:

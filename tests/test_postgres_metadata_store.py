@@ -260,9 +260,14 @@ def test_record_ingest_snapshot_executes_insert_and_retention_delete() -> None:
         diagnostics={
             "retryable_error": False,
             "workspace_retained": True,
+            "repo_size_mb": 1.23,
             "scan_stats": {"visited": 3, "scanned": 2},
             "coverage": {"chunks": 4, "languages": {"python": 2}},
-            "vector_index": {"collections_written": 3, "documents_written": 9},
+            "vector_index": {
+                "collections_written": 3,
+                "documents_written": 9,
+                "embedding_tokens_read_estimated": 321,
+            },
             "semantic_graph": {
                 "enabled": True,
                 "status": "ok",
@@ -279,6 +284,8 @@ def test_record_ingest_snapshot_executes_insert_and_retention_delete() -> None:
     assert compiled_insert.params["job_id"] == "job-1"
     assert compiled_insert.params["files_visited"] == 3
     assert compiled_insert.params["vector_collections_written"] == 3
+    assert compiled_insert.params["repo_size_mb"] == 1.23
+    assert compiled_insert.params["embedding_tokens_read_estimated"] == 321
 
     delete_stmt = session.execute.call_args_list[1].args[0]
     compiled_delete = delete_stmt.compile(dialect=postgresql.dialect())
@@ -309,6 +316,7 @@ def test_list_repo_ingest_snapshots_returns_public_operational_shape() -> None:
             graph_ms=6.5,
             readiness_ms=7.5,
             ingestion_total_ms=8.5,
+            repo_size_mb=1.23,
             files_visited=10,
             files_scanned=9,
             excluded_dir_count=1,
@@ -331,6 +339,7 @@ def test_list_repo_ingest_snapshots_returns_public_operational_shape() -> None:
             vector_proxy_reset_events=0,
             vector_upstream_restarting_events=0,
             vector_documents_written=42,
+            embedding_tokens_read_estimated=321,
             semantic_enabled=True,
             semantic_status="ok",
             semantic_relations_count=5,
@@ -375,6 +384,7 @@ def test_list_repo_ingest_snapshots_returns_public_operational_shape() -> None:
             "graph_ms": 6.5,
             "readiness_ms": 7.5,
             "ingestion_total_ms": 8.5,
+            "repo_size_mb": 1.23,
             "files_visited": 10,
             "files_scanned": 9,
             "excluded_dir_count": 1,
@@ -397,6 +407,7 @@ def test_list_repo_ingest_snapshots_returns_public_operational_shape() -> None:
             "vector_proxy_reset_events": 0,
             "vector_upstream_restarting_events": 0,
             "vector_documents_written": 42,
+            "embedding_tokens_read_estimated": 321,
             "semantic_enabled": True,
             "semantic_status": "ok",
             "semantic_relations_count": 5,

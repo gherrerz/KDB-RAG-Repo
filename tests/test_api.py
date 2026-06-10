@@ -587,6 +587,7 @@ def test_list_repo_snapshots_returns_operational_history(monkeypatch) -> None:
                 "graph_ms": 15.0,
                 "readiness_ms": 16.0,
                 "ingestion_total_ms": 17.0,
+                "repo_size_mb": 1.23,
                 "files_visited": 100,
                 "files_scanned": 80,
                 "excluded_dir_count": 1,
@@ -609,6 +610,7 @@ def test_list_repo_snapshots_returns_operational_history(monkeypatch) -> None:
                 "vector_proxy_reset_events": 0,
                 "vector_upstream_restarting_events": 0,
                 "vector_documents_written": 120,
+                "embedding_tokens_read_estimated": 321,
                 "semantic_enabled": True,
                 "semantic_status": "ok",
                 "semantic_relations_count": 7,
@@ -631,6 +633,8 @@ def test_list_repo_snapshots_returns_operational_history(monkeypatch) -> None:
     assert payload["repo_id"] == "mall"
     assert payload["snapshots"][0]["snapshot_id"] == 9
     assert payload["snapshots"][0]["vector_documents_written"] == 120
+    assert payload["snapshots"][0]["repo_size_mb"] == 1.23
+    assert payload["snapshots"][0]["embedding_tokens_read_estimated"] == 321
 
 
 def test_list_repo_snapshots_returns_404_for_unknown_repo(monkeypatch) -> None:
