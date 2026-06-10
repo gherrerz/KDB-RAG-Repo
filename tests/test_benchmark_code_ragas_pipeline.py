@@ -29,6 +29,84 @@ sys.modules[SCORE_SPEC.name] = SCORE_MODULE
 SCORE_SPEC.loader.exec_module(SCORE_MODULE)
 
 
+class FakeSettings:
+    def __init__(
+        self,
+        *,
+        llm_provider: str = "vertex",
+        openai_api_key: str = "",
+        vertex_credentials_b64: str = "",
+        vertex_project_id: str = "",
+        vertex_location: str = "us-central1",
+        vertex_api_base_url: str = "https://us-central1-aiplatform.googleapis.com",
+        vertex_api_version: str = "v1",
+        vertex_token_url: str = "https://oauth2.googleapis.com/token",
+        vertex_missing_reason: str = "missing_vertex_ai_api_key_or_project",
+        vertex_answer_model: str = "gemini-2.5-flash",
+        openai_answer_model: str = "gpt-4.1-mini",
+        vertex_embedding_model: str = "text-embedding-005",
+        openai_embedding_model: str = "text-embedding-3-small",
+    ) -> None:
+        self.llm_provider = llm_provider
+        self.openai_api_key = openai_api_key
+        self.vertex_credentials_b64 = vertex_credentials_b64
+        self.vertex_project_id = vertex_project_id
+        self.vertex_location = vertex_location
+        self.vertex_api_base_url = vertex_api_base_url
+        self.vertex_api_version = vertex_api_version
+        self.vertex_auth_token_url = vertex_token_url
+        self.vertex_missing_reason = vertex_missing_reason
+        self.vertex_answer_model = vertex_answer_model
+        self.openai_answer_model = openai_answer_model
+        self.vertex_embedding_model = vertex_embedding_model
+        self.openai_embedding_model = openai_embedding_model
+
+    def resolve_llm_provider(self, override: str | None = None) -> str:
+        return (override or self.llm_provider).strip()
+
+    def resolve_api_key(self, provider: str) -> str:
+        if provider == "openai":
+            return self.openai_api_key
+        return ""
+
+    def resolve_answer_model(self, provider: str, override: str | None = None) -> str:
+        if override:
+            return override
+        if provider == "openai":
+            return self.openai_answer_model
+        return self.vertex_answer_model
+
+    def resolve_embedding_model(self, provider: str, override: str | None = None) -> str:
+        if override:
+            return override
+        if provider == "openai":
+            return self.openai_embedding_model
+        return self.vertex_embedding_model
+
+    def resolve_vertex_credentials_reference(self) -> str:
+        return self.vertex_credentials_b64
+
+    def resolve_vertex_project_id(self) -> str:
+        return self.vertex_project_id
+
+    def resolve_vertex_location(self) -> str:
+        return self.vertex_location
+
+    def resolve_vertex_api_base_url(self) -> str:
+        return self.vertex_api_base_url
+
+    def vertex_ai_missing_reason(self) -> str:
+        return "ok" if self.is_vertex_ai_configured() else self.vertex_missing_reason
+
+    def is_vertex_ai_configured(self) -> bool:
+        return bool(
+            self.vertex_credentials_b64
+            and self.vertex_project_id
+            and self.vertex_location
+            and self.vertex_api_base_url
+        )
+
+
 class FakeResponse:
     def __init__(self, status_code: int, body: dict) -> None:
         self.status_code = status_code
@@ -264,17 +342,64 @@ def test_build_gate_fails_when_scored_rate_is_too_low() -> None:
     assert "scored_rate" in gate["failed_hard_metrics"]
 
 
+def test_resolve_ragas_runtime_settings_uses_vertex_runtime_contract(
+    monkeypatch,
+) -> None:
+    fake_settings = FakeSettings(
+        vertex_credentials_b64="encoded-service-account",
+        vertex_project_id="eastern-shell-219919",
+    )
+    monkeypatch.setattr(SCORE_MODULE, "get_settings", lambda: fake_settings, raising=False)
+
+    runtime = SCORE_MODULE._resolve_ragas_runtime_settings("vertexai", None, None)
+
+    assert runtime.provider == "vertex"
+    assert runtime.vertex_project_id == "eastern-shell-219919"
+    assert runtime.vertex_location == "us-central1"
+    assert runtime.llm_model == "gemini-2.5-flash"
+    assert runtime.embedding_model == "text-embedding-005"
+
+
+def test_resolve_ragas_runtime_settings_respects_model_overrides(monkeypatch) -> None:
+    fake_settings = FakeSettings(
+        vertex_credentials_b64="encoded-service-account",
+        vertex_project_id="eastern-shell-219919",
+    )
+    monkeypatch.setattr(SCORE_MODULE, "get_settings", lambda: fake_settings, raising=False)
+
+    runtime = SCORE_MODULE._resolve_ragas_runtime_settings(
+        "vertexai",
+        "gemini-1.5-pro",
+        "text-embedding-custom",
+    )
+
+    assert runtime.llm_model == "gemini-1.5-pro"
+    assert runtime.embedding_model == "text-embedding-custom"
+
+
+def test_resolve_ragas_runtime_settings_raises_actionable_error_when_vertex_missing(
+    monkeypatch,
+) -> None:
+    fake_settings = FakeSettings(vertex_missing_reason="missing_vertex_ai_api_key_or_project")
+    monkeypatch.setattr(SCORE_MODULE, "get_settings", lambda: fake_settings, raising=False)
+
+    try:
+        SCORE_MODULE._resolve_ragas_runtime_settings("vertexai", None, None)
+    except RuntimeError as exc:
+        assert "ragas_vertex_not_configured:missing_vertex_ai_api_key_or_project" in str(exc)
+    else:
+        raise AssertionError("Expected RuntimeError for missing Vertex configuration")
+
+
 def test_score_collected_report_with_engine_auto_falls_back_to_proxy_when_unconfigured(
     monkeypatch,
 ) -> None:
-    for env_name in (
-        "OPENAI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_CLOUD_PROJECT",
-        "VERTEXAI_PROJECT",
-    ):
-        monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.setattr(
+        SCORE_MODULE,
+        "get_settings",
+        lambda: FakeSettings(llm_provider="vertex"),
+        raising=False,
+    )
 
     collected_report = {
         "rows": [

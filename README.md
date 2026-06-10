@@ -569,10 +569,14 @@ el collector congela la respuesta de `POST /query` junto con citas y contextos
 reconstruidos desde workspace. El scorer soporta `--scoring-engine auto`, que
 intenta usar `ragas` real cuando existen dependencias opcionales y proveedor
 configurado; si no, cae al proxy lexical/heurístico local sin romper el
-pipeline. En el estado actual, la ruta real validada por código queda preparada
-para OpenAI; con Vertex el scorer deja fallback explícito porque el smoke local
-falló por compatibilidad de cliente y por `Cloud Resource Manager API`
-deshabilitada en el proyecto de prueba.
+pipeline. En el estado actual, la ruta real del scorer reutiliza el mismo
+contrato Vertex del runtime (`VERTEX_SERVICE_ACCOUNT_JSON_B64`,
+`VERTEX_API_BASE_URL`, `VERTEX_AI_PROJECT_ID`, `VERTEX_AI_LOCATION` y modelos
+resueltos desde `Settings`) y el smoke mínimo ya alcanza la ejecución real de
+`ragas` con provider `vertex`. La finalización end-to-end sigue dependiendo del
+entorno GCP usado para el smoke: en la venv local se tuvo que agregar
+`jsonref` al overlay opcional y el proyecto de prueba todavía reportó
+`Cloud Resource Manager API` deshabilitada durante intentos de integración.
 
 Para instalar solo la capa opcional de evaluación RAGAS sin mezclarla con el
 runtime base, usa un overlay dedicado:

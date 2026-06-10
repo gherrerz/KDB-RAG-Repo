@@ -118,6 +118,24 @@ def build_vertex_api_url(
     return f"{sanitized_base_url}/{sanitized_api_version}{path}"
 
 
+def build_vertex_service_account_credentials(
+    credentials_source: str,
+    *,
+    token_url: str | None = None,
+) -> service_account.Credentials:
+    """Construye credenciales reutilizables de Service Account para Vertex."""
+    sanitized_source = credentials_source.strip()
+    if not sanitized_source:
+        raise ValueError("Faltan credenciales Vertex en VERTEX_SERVICE_ACCOUNT_JSON_B64.")
+
+    service_account_info = _decode_service_account_info_b64(sanitized_source)
+    sanitized_token_url = (token_url or "").strip()
+    if sanitized_token_url:
+        service_account_info["token_uri"] = sanitized_token_url
+    serialized_info = json.dumps(service_account_info, sort_keys=True)
+    return _load_service_account_credentials_from_info(serialized_info)
+
+
 def resolve_vertex_auth_context(
     credentials_source: str,
     *,
@@ -130,11 +148,10 @@ def resolve_vertex_auth_context(
 
     service_account_info = _decode_service_account_info_b64(sanitized_source)
     project_id = str(service_account_info.get("project_id") or "").strip()
-    sanitized_token_url = (token_url or "").strip()
-    if sanitized_token_url:
-        service_account_info["token_uri"] = sanitized_token_url
-    serialized_info = json.dumps(service_account_info, sort_keys=True)
-    credentials = _load_service_account_credentials_from_info(serialized_info)
+    credentials = build_vertex_service_account_credentials(
+        sanitized_source,
+        token_url=token_url,
+    )
 
     with _REFRESH_LOCK:
         if not credentials.valid or credentials.expired or not credentials.token:

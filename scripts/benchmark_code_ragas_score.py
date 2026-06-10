@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -81,6 +82,23 @@ class RowScore:
     context_precision: float | None
     context_recall: float | None
     context_entity_recall: float | None
+
+
+@dataclass(frozen=True)
+class ResolvedRagasRuntime:
+    """Configuración resuelta del runtime para ejecutar scoring real."""
+
+    provider: str
+    llm_model: str
+    embedding_model: str
+    openai_api_key: str
+    vertex_project_id: str
+    vertex_location: str
+    vertex_api_base_url: str
+    vertex_api_version: str
+    vertex_token_url: str
+    vertex_credentials_b64: str
+    engine_notes: list[str]
 
 
 def parse_args() -> argparse.Namespace:
@@ -450,42 +468,167 @@ def _register_vertexai_chat_shim() -> None:
     sys.modules["langchain_community.chat_models.vertexai"] = shim
 
 
-def _resolve_ragas_provider(requested_provider: str | None) -> str:
-    if requested_provider:
-        return requested_provider
-    if os.getenv("OPENAI_API_KEY"):
-        return "openai"
-    if any(
-        os.getenv(name)
-        for name in (
-            "GOOGLE_API_KEY",
-            "GOOGLE_APPLICATION_CREDENTIALS",
-            "GOOGLE_CLOUD_PROJECT",
-            "VERTEXAI_PROJECT",
-        )
-    ):
-        return "vertexai"
-    raise RuntimeError("ragas_provider_not_configured")
+def _ensure_repo_src_on_path() -> None:
+    repo_src = Path(__file__).resolve().parents[1] / "src"
+    repo_src_str = str(repo_src)
+    if repo_src_str not in sys.path:
+        sys.path.insert(0, repo_src_str)
 
 
-def _resolve_ragas_models(
-    provider: str,
+def get_settings() -> Any:
+    """Carga Settings del runtime con una frontera parcheable para tests."""
+    _ensure_repo_src_on_path()
+
+    from coderag.core.settings import get_settings as runtime_get_settings
+
+    return runtime_get_settings()
+
+
+def _normalize_ragas_provider(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"vertexai", "vertex_ai"}:
+        return "vertex"
+    return normalized
+
+
+def _resolve_ragas_runtime_settings(
+    requested_provider: str | None,
     llm_model: str | None,
     embedding_model: str | None,
-) -> tuple[str, str]:
-    if provider == "vertexai":
-        return (
-            llm_model or os.getenv("RAGAS_VERTEX_LLM_MODEL") or "gemini-2.5-flash",
-            embedding_model
-            or os.getenv("RAGAS_VERTEX_EMBEDDING_MODEL")
-            or "text-embedding-005",
+) -> ResolvedRagasRuntime:
+    settings = get_settings()
+    preferred_provider = _normalize_ragas_provider(requested_provider)
+    if not preferred_provider:
+        resolved_provider = _normalize_ragas_provider(settings.resolve_llm_provider())
+        if resolved_provider == "vertex" and not settings.is_vertex_ai_configured():
+            resolved_provider = ""
+        if resolved_provider == "openai" and not settings.resolve_api_key("openai"):
+            resolved_provider = ""
+        if not resolved_provider:
+            if settings.is_vertex_ai_configured():
+                preferred_provider = "vertex"
+            elif settings.resolve_api_key("openai"):
+                preferred_provider = "openai"
+            else:
+                raise RuntimeError("ragas_provider_not_configured")
+        else:
+            preferred_provider = resolved_provider
+
+    if preferred_provider == "openai":
+        openai_api_key = settings.resolve_api_key("openai")
+        if not openai_api_key:
+            raise RuntimeError("ragas_provider_not_configured")
+        return ResolvedRagasRuntime(
+            provider="openai",
+            llm_model=settings.resolve_answer_model("openai", override=llm_model),
+            embedding_model=settings.resolve_embedding_model(
+                "openai",
+                override=embedding_model,
+            ),
+            openai_api_key=openai_api_key,
+            vertex_project_id="",
+            vertex_location="",
+            vertex_api_base_url="",
+            vertex_api_version="",
+            vertex_token_url="",
+            vertex_credentials_b64="",
+            engine_notes=[],
         )
-    return (
-        llm_model or os.getenv("RAGAS_OPENAI_LLM_MODEL") or "gpt-4.1-mini",
-        embedding_model
-        or os.getenv("RAGAS_OPENAI_EMBEDDING_MODEL")
-        or "text-embedding-3-small",
+
+    if preferred_provider != "vertex":
+        raise RuntimeError(f"ragas_provider_unsupported:{preferred_provider}")
+
+    if not settings.is_vertex_ai_configured():
+        raise RuntimeError(
+            "ragas_vertex_not_configured:"
+            f"{settings.vertex_ai_missing_reason()}"
+        )
+
+    return ResolvedRagasRuntime(
+        provider="vertex",
+        llm_model=settings.resolve_answer_model("vertex", override=llm_model),
+        embedding_model=settings.resolve_embedding_model(
+            "vertex",
+            override=embedding_model,
+        ),
+        openai_api_key="",
+        vertex_project_id=settings.resolve_vertex_project_id(),
+        vertex_location=settings.resolve_vertex_location(),
+        vertex_api_base_url=settings.resolve_vertex_api_base_url(),
+        vertex_api_version=str(getattr(settings, "vertex_api_version", "v1")).strip()
+        or "v1",
+        vertex_token_url=str(getattr(settings, "vertex_auth_token_url", "")).strip(),
+        vertex_credentials_b64=settings.resolve_vertex_credentials_reference(),
+        engine_notes=["ragas_vertex_runtime_config"],
     )
+
+
+def _build_ragas_vertex_backends(
+    runtime: ResolvedRagasRuntime,
+) -> tuple[Any, Any, list[str]]:
+    _ensure_repo_src_on_path()
+
+    from coderag.core.vertex_ai import build_vertex_service_account_credentials
+    from google.genai import Client
+    from langchain_google_vertexai import VertexAIEmbeddings
+    from ragas.embeddings.base import LangchainEmbeddingsWrapper
+    from ragas.llms import llm_factory
+
+    credentials = build_vertex_service_account_credentials(
+        runtime.vertex_credentials_b64,
+        token_url=runtime.vertex_token_url or None,
+    )
+    os.environ["GOOGLE_CLOUD_PROJECT"] = runtime.vertex_project_id
+    os.environ["GOOGLE_CLOUD_LOCATION"] = runtime.vertex_location
+    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+    google_client = Client(
+        vertexai=True,
+        credentials=credentials,
+        project=runtime.vertex_project_id,
+        location=runtime.vertex_location,
+    )
+    llm = llm_factory(
+        model=runtime.llm_model,
+        provider="google",
+        client=google_client,
+    )
+    embeddings = LangchainEmbeddingsWrapper(
+        VertexAIEmbeddings(
+            model=runtime.embedding_model,
+            project=runtime.vertex_project_id,
+            location=runtime.vertex_location,
+            credentials=credentials,
+        )
+    )
+    return (
+        llm,
+        embeddings,
+        [
+            "ragas_vertex_runtime_adapter",
+            "ragas_vertex_google_genai_client",
+            "ragas_vertex_langchain_embeddings_wrapper",
+        ],
+    )
+
+
+def _build_ragas_backends(
+    runtime: ResolvedRagasRuntime,
+) -> tuple[Any, Any, list[str]]:
+    if runtime.provider == "vertex":
+        return _build_ragas_vertex_backends(runtime)
+
+    from openai import OpenAI
+    from ragas.embeddings.base import embedding_factory
+    from ragas.llms import llm_factory
+
+    client = OpenAI(api_key=runtime.openai_api_key)
+    llm = llm_factory(model=runtime.llm_model, provider=runtime.provider, client=client)
+    embeddings = embedding_factory(
+        provider=runtime.provider,
+        model=runtime.embedding_model,
+        client=client,
+    )
+    return llm, embeddings, []
 
 
 def _coerce_metric_value(value: Any) -> float | None:
@@ -516,42 +659,37 @@ def _score_with_ragas(
 
     from ragas import evaluate
     from ragas.dataset_schema import EvaluationDataset, SingleTurnSample
-    from ragas.embeddings.base import embedding_factory
-    from ragas.llms import llm_factory
-    from ragas.metrics.collections import (
-        AnswerCorrectness,
-        AnswerRelevancy,
-        ContextEntityRecall,
-        ContextPrecision,
-        ContextRecall,
-        Faithfulness,
+    from ragas.metrics import (
+        answer_correctness,
+        answer_relevancy,
+        context_entity_recall,
+        context_precision,
+        context_recall,
+        faithfulness,
     )
 
-    if provider != "openai":
-        raise RuntimeError(
-            "ragas_provider_unsupported: provider real validado solo para openai; "
-            "vertex requiere client moderno adicional y el smoke actual falla por "
-            "Cloud Resource Manager API deshabilitada"
-        )
-
-    from openai import OpenAI
-
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    llm = llm_factory(model=llm_model, provider=provider, client=client)
-    embeddings = embedding_factory(
-        provider=provider,
-        model=embedding_model,
-        client=client,
+    runtime = _resolve_ragas_runtime_settings(
+        provider,
+        llm_model,
+        embedding_model,
     )
+    llm, embeddings, backend_notes = _build_ragas_backends(runtime)
 
-    metrics = [
-        AnswerRelevancy(llm=llm, embeddings=embeddings),
-        AnswerCorrectness(llm=llm, embeddings=embeddings),
-        Faithfulness(llm=llm),
-        ContextPrecision(llm=llm),
-        ContextRecall(llm=llm),
-        ContextEntityRecall(llm=llm),
-    ]
+    metrics = []
+    for metric_template in (
+        answer_relevancy,
+        answer_correctness,
+        faithfulness,
+        context_precision,
+        context_recall,
+        context_entity_recall,
+    ):
+        metric = copy.deepcopy(metric_template)
+        if hasattr(metric, "llm"):
+            metric.llm = llm
+        if hasattr(metric, "embeddings"):
+            metric.embeddings = embeddings
+        metrics.append(metric)
 
     eligible_raw_rows: list[dict[str, Any]] = []
     skipped_rows: list[RowScore] = []
@@ -586,10 +724,10 @@ def _score_with_ragas(
         }
         return overall, rows, by_cohort, [], metric_coverage, {
             "scoring_engine": RAGAS_SCORING_ENGINE,
-            "engine_notes": ["no_score_eligible_rows"],
-            "ragas_provider": provider,
-            "ragas_llm_model": llm_model,
-            "ragas_embedding_model": embedding_model,
+            "engine_notes": runtime.engine_notes + backend_notes + ["no_score_eligible_rows"],
+            "ragas_provider": runtime.provider,
+            "ragas_llm_model": runtime.llm_model,
+            "ragas_embedding_model": runtime.embedding_model,
         }
 
     result = evaluate(
@@ -658,10 +796,10 @@ def _score_with_ragas(
     }
     scoring_meta = {
         "scoring_engine": RAGAS_SCORING_ENGINE,
-        "engine_notes": [],
-        "ragas_provider": provider,
-        "ragas_llm_model": llm_model,
-        "ragas_embedding_model": embedding_model,
+        "engine_notes": runtime.engine_notes + backend_notes,
+        "ragas_provider": runtime.provider,
+        "ragas_llm_model": runtime.llm_model,
+        "ragas_embedding_model": runtime.embedding_model,
     }
     return overall, rows, by_cohort, skipped_summary, metric_coverage, scoring_meta
 
@@ -672,7 +810,6 @@ def build_gate(
     hard_thresholds: dict[str, float],
     soft_thresholds: dict[str, float],
 ) -> dict[str, Any]:
-    """Evaluate hard and soft thresholds over the gate_candidate slice."""
     scope_metrics_raw = overall.get("gate_candidate")
     scope_name = "gate_candidate"
     if not isinstance(scope_metrics_raw, dict):
@@ -797,17 +934,11 @@ def score_collected_report_with_engine(
 
     if scoring_engine in {AUTO_SCORING_ENGINE, RAGAS_SCORING_ENGINE}:
         try:
-            provider = _resolve_ragas_provider(ragas_provider)
-            llm_model, embedding_model = _resolve_ragas_models(
-                provider,
-                ragas_llm_model,
-                ragas_embedding_model,
-            )
             return _score_with_ragas(
                 [row for row in raw_rows if isinstance(row, dict)],
-                provider=provider,
-                llm_model=llm_model,
-                embedding_model=embedding_model,
+                provider=ragas_provider or "",
+                llm_model=ragas_llm_model or "",
+                embedding_model=ragas_embedding_model or "",
                 batch_size=ragas_batch_size,
             )
         except Exception as exc:

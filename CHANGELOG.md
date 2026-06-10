@@ -13,7 +13,10 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
     de contextos citados y scorer con selección `auto/proxy/ragas`, fallback
     seguro al proxy local y overlay opcional de dependencias en
     `requirements-ragas-eval.txt`, además de calibración del proxy para reducir
-    el castigo a respuestas largas pero correctamente fundamentadas.
+    el castigo a respuestas largas pero correctamente fundamentadas. El scorer
+    real ahora reutiliza la configuración Vertex del runtime para el path
+    `ragas` y el overlay opcional incorpora `jsonref` para soportar el smoke
+    real sobre Vertex.
 - Archivos de dependencias separados para runtime, desktop, desarrollo y
     entorno completo local:
     `requirements-runtime.txt`, `requirements-desktop.txt`,

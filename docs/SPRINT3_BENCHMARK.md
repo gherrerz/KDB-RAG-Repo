@@ -858,10 +858,15 @@ Estado del engine `ragas` real tras el smoke de integración:
 
 - la librería y el schema ya quedan cableados en el scorer
 - `auto` intenta `ragas` real y deja `engine_notes` cuando cae a proxy
-- la ruta real validada por implementación quedó preparada para OpenAI
-- el smoke con Vertex no quedó habilitado en esta iteración por dos bloqueos
-	externos/reales: `Cloud Resource Manager API` deshabilitada en el proyecto de
-	prueba y compatibilidad incompleta del client moderno requerido por `ragas`
+- la ruta Vertex del scorer ya reutiliza `Settings` y la auth compartida del
+	runtime en vez de resolver credenciales por un camino paralelo
+- el smoke mínimo con Vertex ya superó los bloqueos iniciales de imports,
+	provider y wiring del scorer, y alcanzó la ejecución real de `ragas`
+- en la venv local hubo que agregar `jsonref` al overlay opcional de
+	evaluación para evitar `NaN` por dependencias faltantes
+- la finalización end-to-end del smoke sigue condicionada por bloqueos
+	externos/reales del entorno de prueba, en particular `Cloud Resource Manager
+	API` deshabilitada en el proyecto GCP usado durante la integración
 
 ## 5. Simulacion de rollback (tiempos reales)
 
