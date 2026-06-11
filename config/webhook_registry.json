@@ -6,5 +6,13 @@
     "auth_method": "http_basic",
     "embedding_provider": "vertex",
     "embedding_model": "text-embedding-005"
+  },
+  "COIPO/repositories-kdb": {
+    "enabled": true,
+    "target_branches": ["master"]
+  },
+  "COIPO/documents-kdb": {
+    "enabled": true
   }
 }
+
