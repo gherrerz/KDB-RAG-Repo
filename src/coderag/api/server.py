@@ -48,6 +48,7 @@ from coderag.storage.postgres_startup import ensure_postgres_schema_ready
 from coderag.core.vector_index import build_managed_vector_index
 from coderag.jobs.worker import IngestionConflictError, JobManager
 from coderag.llm.model_discovery import discover_models
+from coderag.api.webhook_bitbucket import router as webhook_bitbucket_router
 
 
 @asynccontextmanager
@@ -84,6 +85,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 jobs = JobManager()
+app.include_router(webhook_bitbucket_router)
 
 
 def _mark_admin_reset_header_required(schema: dict[str, object]) -> None:

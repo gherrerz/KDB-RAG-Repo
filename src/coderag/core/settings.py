@@ -364,6 +364,30 @@ class Settings(BaseSettings):
         default=True,
         alias="MODEL_DISCOVERY_GEMINI_SDK_ENABLED",
     )
+    webhook_bitbucket_secret: str = Field(
+        default="",
+        alias="WEBHOOK_BITBUCKET_SECRET",
+    )
+    webhook_bitbucket_internal_base_url: str = Field(
+        default="",
+        alias="WEBHOOK_BITBUCKET_INTERNAL_BASE_URL",
+    )
+    webhook_bitbucket_repo_registry: str = Field(
+        default="{}",
+        alias="WEBHOOK_BITBUCKET_REPO_REGISTRY",
+    )
+    webhook_bitbucket_target_branches: str = Field(
+        default="main,master",
+        alias="WEBHOOK_BITBUCKET_TARGET_BRANCHES",
+    )
+    webhook_bitbucket_auth_username: str = Field(
+        default="",
+        alias="WEBHOOK_BITBUCKET_AUTH_USERNAME",
+    )
+    webhook_bitbucket_auth_secret: str = Field(
+        default="",
+        alias="WEBHOOK_BITBUCKET_AUTH_SECRET",
+    )
 
     @field_validator("chroma_hnsw_space", mode="before")
     @classmethod
