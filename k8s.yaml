@@ -165,3 +165,4 @@ extraEnv:
   WEBHOOK_BITBUCKET_INTERNAL_BASE_URL: "https://bitbucket-cl.external.svc"
   WEBHOOK_BITBUCKET_TARGET_BRANCHES: "main,master"
   WEBHOOK_BITBUCKET_REPO_REGISTRY: "{}"
+  WEBHOOK_BITBUCKET_REPO_REGISTRY_FILE: "/app/config/webhook_registry.json"

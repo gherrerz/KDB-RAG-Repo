@@ -51,6 +51,7 @@ ENV PATH="/opt/venv/bin:${PATH}"
 
 COPY src ./src
 COPY .env.example ./.env.example
+COPY config ./config
 
 RUN mkdir -p /app/storage/workspace \
     && chown -R app:app /app

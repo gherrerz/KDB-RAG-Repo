@@ -388,6 +388,10 @@ class Settings(BaseSettings):
         default="",
         alias="WEBHOOK_BITBUCKET_AUTH_SECRET",
     )
+    webhook_bitbucket_repo_registry_file: str = Field(
+        default="",
+        alias="WEBHOOK_BITBUCKET_REPO_REGISTRY_FILE",
+    )
 
     @field_validator("chroma_hnsw_space", mode="before")
     @classmethod
@@ -485,6 +489,44 @@ class Settings(BaseSettings):
                     env_var,
                     default_val,
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _resolve_webhook_registry_from_file(self) -> "Settings":
+        """Carga el registro de repos BB desde archivo cuando el env var es trivial.
+
+        Prioridad: WEBHOOK_BITBUCKET_REPO_REGISTRY (env var con valor real)
+        > WEBHOOK_BITBUCKET_REPO_REGISTRY_FILE (ruta a JSON en el filesystem)
+        > {} (vacío, el webhook rechazará todos los repos con 422).
+        """
+        registry = self.webhook_bitbucket_repo_registry.strip()
+        if registry not in ("", "{}"):
+            return self
+
+        file_path = (self.webhook_bitbucket_repo_registry_file or "").strip()
+        if not file_path:
+            return self
+
+        path = Path(file_path)
+        if not path.is_file():
+            _settings_log.warning(
+                "WEBHOOK_BITBUCKET_REPO_REGISTRY_FILE no encontrado: %s",
+                file_path,
+            )
+            return self
+
+        try:
+            content = path.read_text(encoding="utf-8").strip()
+            json.loads(content)
+            self.webhook_bitbucket_repo_registry = content
+            _settings_log.info(
+                "Registro de repos BB cargado desde: %s", file_path
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            _settings_log.error(
+                "Error leyendo WEBHOOK_BITBUCKET_REPO_REGISTRY_FILE "
+                "%s: %s", file_path, exc,
+            )
         return self
 
     @model_validator(mode="after")

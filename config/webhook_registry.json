@@ -1,0 +1,10 @@
+{
+  "_defaults": {
+    "target_branches": ["main", "master"],
+    "auth_deployment": "server",
+    "auth_transport": "https",
+    "auth_method": "http_basic",
+    "embedding_provider": "vertex",
+    "embedding_model": "text-embedding-005"
+  }
+}
