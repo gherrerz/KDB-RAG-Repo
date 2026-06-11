@@ -164,4 +164,4 @@ extraEnv:
   MODEL_DISCOVERY_GEMINI_SDK_ENABLED: "true"
   WEBHOOK_BITBUCKET_INTERNAL_BASE_URL: "https://bitbucket-cl.external.svc"
   WEBHOOK_BITBUCKET_TARGET_BRANCHES: "main,master"
-  WEBHOOK_BITBUCKET_REPO_REGISTRY: "{\"_defaults\":{\"target_branches\":[\"main\",\"master\"],\"auth_deployment\":\"server\",\"auth_transport\":\"https\",\"auth_method\":\"http_basic\",\"embedding_provider\":\"vertex\",\"embedding_model\":\"text-embedding-005\"}}"
+  WEBHOOK_BITBUCKET_REPO_REGISTRY: "{}"
