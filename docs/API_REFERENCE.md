@@ -146,6 +146,12 @@ Notas de comportamiento:
   tokens de entrada enviados a embeddings a partir de los textos realmente
   procesados por la etapa vectorial. Cuando no hay textos para embeddings, el
   valor es `0`.
+- Cada snapshot incluye los campos de observabilidad de la ingesta incremental:
+  `ingest_mode` (`"full"` | `"incremental"` | `null`), `ingest_mode_reason`
+  (ej. `git_diff`, `no_existing_data`, `explicit_changed_files`), `base_commit`
+  (commit base del diff, `null` en full), `head_commit` (commit HEAD indexado),
+  `changed_files_count` y `deleted_files_count`. En jobs que fallan antes de
+  resolver el modo, los campos de texto son `null` y los contadores `0`.
 
 - Path params:
   - `repo_id: str`

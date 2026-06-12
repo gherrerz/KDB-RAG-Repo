@@ -273,6 +273,12 @@ def test_record_ingest_snapshot_executes_insert_and_retention_delete() -> None:
                 "status": "ok",
                 "relation_counts": 5,
             },
+            "ingest_mode": "incremental",
+            "ingest_mode_reason": "git_diff",
+            "base_commit": "aaaa1111",
+            "head_commit": "bbbb2222",
+            "changed_files_count": 1,
+            "deleted_files_count": 0,
         },
         snapshot_at=datetime.datetime.now(datetime.UTC),
     )
@@ -286,11 +292,44 @@ def test_record_ingest_snapshot_executes_insert_and_retention_delete() -> None:
     assert compiled_insert.params["vector_collections_written"] == 3
     assert compiled_insert.params["repo_size_mb"] == 1.23
     assert compiled_insert.params["embedding_tokens_read_estimated"] == 321
+    assert compiled_insert.params["ingest_mode"] == "incremental"
+    assert compiled_insert.params["ingest_mode_reason"] == "git_diff"
+    assert compiled_insert.params["base_commit"] == "aaaa1111"
+    assert compiled_insert.params["head_commit"] == "bbbb2222"
+    assert compiled_insert.params["changed_files_count"] == 1
+    assert compiled_insert.params["deleted_files_count"] == 0
 
     delete_stmt = session.execute.call_args_list[1].args[0]
     compiled_delete = delete_stmt.compile(dialect=postgresql.dialect())
     assert IngestionSnapshotRecord.__tablename__ in str(compiled_delete)
     session.commit.assert_called_once_with()
+
+
+def test_record_ingest_snapshot_tolerates_missing_incremental_fields() -> None:
+    """Un job que falla antes de resolver el modo persiste None/0 sin excepción."""
+    session = MagicMock()
+    store = PostgresMetadataStore(
+        "postgresql://fake/db",
+        session_factory=_session_factory_mock(session),
+    )
+
+    store.record_ingest_snapshot(
+        repo_id="r1",
+        job_id="job-fail",
+        job_status="failed",
+        error_message="clone error",
+        diagnostics={},
+        snapshot_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    insert_stmt = session.execute.call_args_list[0].args[0]
+    compiled_insert = insert_stmt.compile(dialect=postgresql.dialect())
+    assert compiled_insert.params["ingest_mode"] is None
+    assert compiled_insert.params["ingest_mode_reason"] is None
+    assert compiled_insert.params["base_commit"] is None
+    assert compiled_insert.params["head_commit"] is None
+    assert compiled_insert.params["changed_files_count"] == 0
+    assert compiled_insert.params["deleted_files_count"] == 0
 
 
 def test_list_repo_ingest_snapshots_returns_public_operational_shape() -> None:
@@ -344,6 +383,12 @@ def test_list_repo_ingest_snapshots_returns_public_operational_shape() -> None:
             semantic_status="ok",
             semantic_relations_count=5,
             semantic_unresolved_count=1,
+            ingest_mode="incremental",
+            ingest_mode_reason="git_diff",
+            base_commit="aaaa1111",
+            head_commit="bbbb2222",
+            changed_files_count=1,
+            deleted_files_count=0,
         )
     ]
     store = PostgresMetadataStore(
@@ -412,6 +457,12 @@ def test_list_repo_ingest_snapshots_returns_public_operational_shape() -> None:
             "semantic_status": "ok",
             "semantic_relations_count": 5,
             "semantic_unresolved_count": 1,
+            "ingest_mode": "incremental",
+            "ingest_mode_reason": "git_diff",
+            "base_commit": "aaaa1111",
+            "head_commit": "bbbb2222",
+            "changed_files_count": 1,
+            "deleted_files_count": 0,
         }
     ]
 

@@ -156,6 +156,12 @@ def _snapshot_record_to_payload(
         "semantic_status": record.semantic_status,
         "semantic_relations_count": int(record.semantic_relations_count),
         "semantic_unresolved_count": int(record.semantic_unresolved_count),
+        "ingest_mode": record.ingest_mode,
+        "ingest_mode_reason": record.ingest_mode_reason,
+        "base_commit": record.base_commit,
+        "head_commit": record.head_commit,
+        "changed_files_count": int(record.changed_files_count),
+        "deleted_files_count": int(record.deleted_files_count),
     }
 
 
@@ -563,6 +569,28 @@ class PostgresMetadataStore(BaseMetadataStore):
             semantic_status=(str(semantic_graph.get("status")) if semantic_graph.get("status") is not None else None),
             semantic_relations_count=_safe_int(semantic_graph.get("relation_counts")),
             semantic_unresolved_count=_safe_int(semantic_graph.get("unresolved_count")),
+            ingest_mode=(
+                str(diagnostics.get("ingest_mode"))
+                if diagnostics.get("ingest_mode") is not None
+                else None
+            ),
+            ingest_mode_reason=(
+                str(diagnostics.get("ingest_mode_reason"))
+                if diagnostics.get("ingest_mode_reason") is not None
+                else None
+            ),
+            base_commit=(
+                str(diagnostics.get("base_commit"))
+                if diagnostics.get("base_commit") is not None
+                else None
+            ),
+            head_commit=(
+                str(diagnostics.get("head_commit"))
+                if diagnostics.get("head_commit") is not None
+                else None
+            ),
+            changed_files_count=_safe_int(diagnostics.get("changed_files_count")),
+            deleted_files_count=_safe_int(diagnostics.get("deleted_files_count")),
         )
 
         retention_limit = 50

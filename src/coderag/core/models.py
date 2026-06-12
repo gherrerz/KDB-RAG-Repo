@@ -602,6 +602,30 @@ class RepoIngestionSnapshotEntry(BaseModel):
     semantic_status: str | None = Field(default=None)
     semantic_relations_count: int = Field(default=0)
     semantic_unresolved_count: int = Field(default=0)
+    ingest_mode: str | None = Field(
+        default=None,
+        description="Modo de la ingesta: 'full' o 'incremental'.",
+    )
+    ingest_mode_reason: str | None = Field(
+        default=None,
+        description="Razón de la decisión de modo (ej. git_diff, no_existing_data).",
+    )
+    base_commit: str | None = Field(
+        default=None,
+        description="Commit base usado para el diff incremental (null en full).",
+    )
+    head_commit: str | None = Field(
+        default=None,
+        description="Commit HEAD efectivamente indexado en esta ingesta.",
+    )
+    changed_files_count: int = Field(
+        default=0,
+        description="Cantidad de archivos cambiados reindexados (modo incremental).",
+    )
+    deleted_files_count: int = Field(
+        default=0,
+        description="Cantidad de archivos eliminados purgados (modo incremental).",
+    )
 
 
 class RepoIngestionSnapshotsResponse(BaseModel):
