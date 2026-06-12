@@ -52,6 +52,8 @@ ENV PATH="/opt/venv/bin:${PATH}"
 COPY src ./src
 COPY .env.example ./.env.example
 COPY config ./config
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 
 RUN mkdir -p /app/storage/workspace \
     && chown -R app:app /app
