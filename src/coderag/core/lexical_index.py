@@ -18,6 +18,13 @@ class RepositoryLexicalIndex(Protocol):
     def delete_repo(self, repo_id: str) -> dict[str, int]:
         """Elimina datos indexados del repositorio y retorna conteos."""
 
+    def delete_by_repo_and_paths(
+        self,
+        repo_id: str,
+        paths: list[str],
+    ) -> dict[str, int]:
+        """Elimina datos del repositorio acotados a un set de paths."""
+
 
 def build_repository_lexical_index(settings: object) -> RepositoryLexicalIndex:
     """Selecciona el backend léxico operativo soportado."""
@@ -85,6 +92,16 @@ def delete_active_repository_lexical_data(
     """Borra datos del repositorio usando el backend léxico activo."""
     index = build_repository_lexical_index(settings)
     return index.delete_repo(repo_id)
+
+
+def delete_active_repository_lexical_data_by_paths(
+    settings: object,
+    repo_id: str,
+    paths: list[str],
+) -> dict[str, int]:
+    """Borra datos del repositorio acotados a un set de paths."""
+    index = build_repository_lexical_index(settings)
+    return index.delete_by_repo_and_paths(repo_id, paths)
 
 
 def ensure_repository_lexical_index_loaded(

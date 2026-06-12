@@ -77,6 +77,13 @@ class ManagedVectorIndex(Protocol):
     def delete_by_repo_id(self, repo_id: str) -> dict[str, int]:
         """Elimina documentos de un repositorio en todas las colecciones."""
 
+    def delete_by_repo_and_paths(
+        self,
+        repo_id: str,
+        paths: list[str],
+    ) -> dict[str, int]:
+        """Elimina documentos de un repositorio acotados a un set de paths."""
+
 
 def build_managed_vector_index() -> ManagedVectorIndex:
     """Construye el backend vectorial operativo activo."""
@@ -127,6 +134,15 @@ def delete_repository_vector_documents(
 ) -> dict[str, int]:
     """Elimina datos vectoriales del repositorio en el backend activo."""
     return index.delete_by_repo_id(repo_id)
+
+
+def delete_repository_vector_documents_by_paths(
+    index: ManagedVectorIndex,
+    repo_id: str,
+    paths: list[str],
+) -> dict[str, int]:
+    """Elimina datos vectoriales del repositorio acotados a un set de paths."""
+    return index.delete_by_repo_and_paths(repo_id, paths)
 
 
 def reset_managed_vector_storage(

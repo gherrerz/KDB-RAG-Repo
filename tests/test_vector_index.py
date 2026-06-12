@@ -65,6 +65,12 @@ def test_build_managed_vector_index_returns_chroma_index(monkeypatch) -> None:
             del repo_id
             return {"total": 0}
 
+        def delete_by_repo_and_paths(
+            self, repo_id: str, paths: list[str]
+        ) -> dict[str, int]:
+            del repo_id, paths
+            return {"total": 0}
+
     monkeypatch.setattr(
         "coderag.core.vector_index.ChromaIndex",
         FakeChromaIndex,

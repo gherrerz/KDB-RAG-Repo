@@ -65,6 +65,7 @@ class RepoRecord(PostgresDeclarativeBase):
     )
     embedding_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
     embedding_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_indexed_commit: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class IngestionSnapshotRecord(PostgresDeclarativeBase):

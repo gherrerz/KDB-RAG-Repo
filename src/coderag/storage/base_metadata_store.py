@@ -46,6 +46,7 @@ class BaseMetadataStore(ABC):
         local_path: str,
         embedding_provider: str | None,
         embedding_model: str | None,
+        last_indexed_commit: str | None = None,
     ) -> None:
         """Inserta o actualiza metadata runtime por repositorio."""
 

@@ -22,7 +22,11 @@ Módulos clave bajo `src/coderag/`:
 
 - **No SQLite fallback** — el único backend de metadata soportado es Postgres.
 - **Chroma remoto por defecto** — `CHROMA_MODE=remote`.
-- **Reingesta = purge + reindex completo** — no existe indexación incremental por diff de commits.
+- **Reingesta incremental por diff de commits (Chroma + Postgres)** — si el repo tiene un
+  `last_indexed_commit` persistido y la ingesta resuelve un HEAD distinto (o se pasa `changed_files`
+  explícito), solo se reembedden/reindexan los archivos cambiados en Chroma y el léxico. **El grafo Neo4j
+  siempre se reconstruye completo** para preservar la consistencia de aristas cross-file. Sin commit base,
+  sin diff resoluble, o sin data previa → fallback a **purge + reindex completo**.
 - **Anthropic no es provider activo** — LLM runtime usa OpenAI, Gemini o Vertex.
 - **`metadata.db`** solo existe en artefactos de pruebas aisladas.
 

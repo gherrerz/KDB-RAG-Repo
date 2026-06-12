@@ -2,13 +2,16 @@
 
 from collections import Counter
 from collections import defaultdict
+from dataclasses import dataclass, field
 from inspect import signature
 from math import ceil
+from pathlib import Path
 from time import perf_counter
 from typing import Callable
 
 from coderag.core.lexical_index import (
     delete_active_repository_lexical_data,
+    delete_active_repository_lexical_data_by_paths,
     repository_has_active_lexical_data,
     repository_lexical_backend_label,
 )
@@ -16,6 +19,7 @@ from coderag.core.vector_index import (
     build_managed_vector_index,
     count_repository_vector_documents,
     delete_repository_vector_documents,
+    delete_repository_vector_documents_by_paths,
 )
 from coderag.core.models import (
     FileImportRelation,
@@ -27,7 +31,11 @@ from coderag.core.models import (
 from coderag.core.settings import get_settings, resolve_postgres_dsn
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.ingestion.embedding import EmbeddingClient
-from coderag.ingestion.git_client import clone_repository
+from coderag.ingestion.git_client import (
+    clone_repository,
+    diff_changed_files,
+    resolve_head_commit,
+)
 from coderag.ingestion.graph_builder import GraphBuilder
 from coderag.ingestion.index_chroma import ChromaIndex
 from coderag.ingestion.repo_scanner import scan_repository_with_stats
@@ -333,6 +341,113 @@ def _purge_repo_indices(repo_id: str, logger: LoggerFn) -> None:
     )
 
 
+@dataclass
+class _IngestPlan:
+    """Decisión de modo de ingesta y conjuntos de paths afectados."""
+
+    mode: str  # "full" | "incremental"
+    changed_paths: set[str] = field(default_factory=set)
+    deleted_paths: set[str] = field(default_factory=set)
+    base_commit: str | None = None
+    reason: str = ""
+
+
+def _resolve_ingest_mode(
+    *,
+    repo_id: str,
+    repo_path: Path,
+    has_existing_data: bool,
+    last_indexed_commit: str | None,
+    head_commit: str | None,
+    changed_files: list[str] | None,
+    logger: LoggerFn,
+) -> _IngestPlan:
+    """Decide entre ingesta incremental y reindex completo.
+
+    Incremental requiere data previa y un conjunto de archivos cambiados resoluble:
+    lista explícita del caller, o ``git diff`` entre el commit base persistido y HEAD.
+    Cualquier ambigüedad cae a ``full`` para no dejar índices inconsistentes.
+    """
+    if not has_existing_data:
+        return _IngestPlan(mode="full", reason="no_existing_data")
+
+    if changed_files is not None:
+        normalized = {p.strip() for p in changed_files if p and p.strip()}
+        if not normalized:
+            return _IngestPlan(mode="full", reason="empty_explicit_changed_files")
+        # La lista explícita no distingue borrados; se purgan y solo se reindexan
+        # los paths que sigan presentes en el árbol de trabajo.
+        return _IngestPlan(
+            mode="incremental",
+            changed_paths=normalized,
+            base_commit=last_indexed_commit,
+            reason="explicit_changed_files",
+        )
+
+    base = (last_indexed_commit or "").strip()
+    if not base or not head_commit:
+        return _IngestPlan(mode="full", reason="missing_base_or_head_commit")
+
+    if base == head_commit:
+        return _IngestPlan(
+            mode="incremental",
+            base_commit=base,
+            reason="head_equals_base_no_changes",
+        )
+
+    diff = diff_changed_files(repo_path, base, head_commit)
+    if diff is None:
+        logger(
+            "No se pudo calcular el diff incremental "
+            f"({base[:8]}..{head_commit[:8]}); se hará reindex completo."
+        )
+        return _IngestPlan(mode="full", reason="diff_unavailable")
+
+    changed, deleted = diff
+    return _IngestPlan(
+        mode="incremental",
+        changed_paths={p for p in changed if p},
+        deleted_paths={p for p in deleted if p},
+        base_commit=base,
+        reason="git_diff",
+    )
+
+
+def _purge_changed_paths(
+    repo_id: str,
+    paths: set[str],
+    logger: LoggerFn,
+) -> None:
+    """Purga selectivamente Chroma + léxico para un set de paths (incremental)."""
+    path_list = sorted(paths)
+    chroma_deleted = delete_repository_vector_documents_by_paths(
+        build_managed_vector_index(),
+        repo_id,
+        path_list,
+    )
+    settings = get_settings()
+    lexical_deleted = delete_active_repository_lexical_data_by_paths(
+        settings, repo_id, path_list
+    )
+    logger(
+        "Purge incremental por paths completado: "
+        f"paths={len(path_list)}, chroma_total={chroma_deleted['total']}, "
+        f"lexical_docs={lexical_deleted['docs_removed']}"
+    )
+
+
+def _purge_graph_subgraph(repo_id: str, logger: LoggerFn) -> None:
+    """Borra el subgrafo del repo en Neo4j para permitir un rebuild full."""
+    graph: GraphBuilder | None = None
+    try:
+        graph = GraphBuilder()
+        deleted = graph.delete_repo_subgraph(repo_id)
+        logger(f"Purge de subgrafo Neo4j completado: neo4j_nodes={deleted}")
+    finally:
+        if graph is not None:
+            graph.close()
+
+
 def ingest_repository(
     provider: str,
     repo_url: str,
@@ -344,11 +459,16 @@ def ingest_repository(
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
     diagnostics_sink: dict[str, object] | None = None,
+    last_indexed_commit: str | None = None,
+    changed_files: list[str] | None = None,
 ) -> str:
     """Ejecute la ingesta completa del repositorio y devuelva el identificador del repositorio."""
     settings = get_settings()
     ingestion_started_at = perf_counter()
     effective_auth = auth if auth is not None else RepoAuthConfig()
+    # Necesitamos historial para diffear cuando habrá un diff por git contra el
+    # commit base; con lista explícita o sin base, el clone shallow es suficiente.
+    needs_history = bool(last_indexed_commit) and not changed_files
     logger("Clonando repositorio...")
     clone_started_at = perf_counter()
     repo_id, repo_path = clone_repository(
@@ -372,6 +492,7 @@ def ingest_repository(
         ssh_strict_host_key_checking=str(
             getattr(settings, "git_ssh_strict_host_key_checking", "yes")
         ),
+        full_history=needs_history,
     )
     if diagnostics_sink is not None:
         diagnostics_sink["clone_ms"] = round(
@@ -379,7 +500,49 @@ def ingest_repository(
             2,
         )
 
-    if _repo_has_existing_index_data(repo_id=repo_id, logger=logger):
+    head_commit = resolve_head_commit(repo_path)
+    has_existing_data = _repo_has_existing_index_data(
+        repo_id=repo_id, logger=logger
+    )
+    plan = _resolve_ingest_mode(
+        repo_id=repo_id,
+        repo_path=repo_path,
+        has_existing_data=has_existing_data,
+        last_indexed_commit=last_indexed_commit,
+        head_commit=head_commit,
+        changed_files=changed_files,
+        logger=logger,
+    )
+    allowed_paths: set[str] | None = None
+    if diagnostics_sink is not None:
+        diagnostics_sink["head_commit"] = head_commit
+        diagnostics_sink["ingest_mode"] = plan.mode
+        diagnostics_sink["ingest_mode_reason"] = plan.reason
+        diagnostics_sink["base_commit"] = plan.base_commit
+        diagnostics_sink["changed_files_count"] = len(plan.changed_paths)
+        diagnostics_sink["deleted_files_count"] = len(plan.deleted_paths)
+
+    if plan.mode == "incremental":
+        allowed_paths = set(plan.changed_paths)
+        purge_paths = plan.changed_paths | plan.deleted_paths
+        logger(
+            "Ingesta incremental: "
+            f"cambiados={len(plan.changed_paths)}, "
+            f"eliminados={len(plan.deleted_paths)} "
+            f"(base={plan.base_commit[:8] if plan.base_commit else 'n/a'})"
+        )
+        try:
+            if purge_paths:
+                _purge_changed_paths(repo_id, purge_paths, logger)
+            # El grafo siempre se reconstruye full: purgamos el subgrafo completo.
+            _purge_graph_subgraph(repo_id, logger)
+        except Exception as exc:
+            raise RuntimeError(
+                "No se pudo purgar selectivamente los índices del repositorio "
+                f"'{repo_id}' en modo incremental. Se aborta para evitar "
+                "inconsistencias."
+            ) from exc
+    elif has_existing_data:
         logger(
             "Repositorio existente detectado; iniciando purge por repo_id "
             "antes de reindexar..."
@@ -457,6 +620,7 @@ def ingest_repository(
         embedding_model=embedding_model,
         logger=logger,
         diagnostics_sink=diagnostics_sink,
+        allowed_paths=allowed_paths,
     )
     if diagnostics_sink is not None:
         diagnostics_sink["vector_total_ms"] = round(
@@ -466,7 +630,9 @@ def ingest_repository(
 
     logger("Construyendo indice lexico...")
     lexical_started_at = perf_counter()
-    _index_lexical_backend(repo_id, scanned_files, symbol_chunks)
+    _index_lexical_backend(
+        repo_id, scanned_files, symbol_chunks, allowed_paths=allowed_paths
+    )
     if diagnostics_sink is not None:
         diagnostics_sink["lexical_ms"] = round(
             (perf_counter() - lexical_started_at) * 1000.0,
@@ -509,8 +675,21 @@ def _index_vectors(
     embedding_model: str | None = None,
     logger: LoggerFn | None = None,
     diagnostics_sink: dict[str, object] | None = None,
+    allowed_paths: set[str] | None = None,
 ) -> None:
-    """Generar y conservar vectores para símbolos/archivos/módulos."""
+    """Generar y conservar vectores para símbolos/archivos/módulos.
+
+    En modo incremental (``allowed_paths`` no es None) solo se reembebden símbolos
+    y archivos de esos paths; los módulos se recomputan completos porque su resumen
+    agrega varios archivos y el ahorro frente a los símbolos es marginal.
+    """
+    if allowed_paths is not None:
+        symbols = [chunk for chunk in symbols if chunk.path in allowed_paths]
+        target_files = [
+            item for item in scanned_files if item.path in allowed_paths
+        ]
+    else:
+        target_files = scanned_files
     chroma = ChromaIndex()
     embedder = EmbeddingClient(
         provider=embedding_provider,
@@ -540,82 +719,85 @@ def _index_vectors(
         return _log
 
     symbol_texts = [chunk.snippet for chunk in symbols]
-    symbol_embeddings = embedder.embed_texts(
-        symbol_texts,
-        progress_callback=_progress_logger("símbolos", len(symbol_texts)),
-    )
-    symbol_meta = [
-        {
-            "id": chunk.id,
-            "repo_id": repo_id,
-            "path": chunk.path,
-            "language": chunk.language,
-            "symbol_name": chunk.symbol_name,
-            "symbol_type": chunk.symbol_type,
-            "start_line": chunk.start_line,
-            "end_line": chunk.end_line,
-        }
-        for chunk in symbols
-    ]
-    vector_metrics.append(chroma.upsert(
-        collection_name="code_symbols",
-        ids=[chunk.id for chunk in symbols],
-        documents=symbol_texts,
-        embeddings=symbol_embeddings,
-        metadatas=symbol_meta,
-    ))
+    if symbol_texts:
+        symbol_embeddings = embedder.embed_texts(
+            symbol_texts,
+            progress_callback=_progress_logger("símbolos", len(symbol_texts)),
+        )
+        symbol_meta = [
+            {
+                "id": chunk.id,
+                "repo_id": repo_id,
+                "path": chunk.path,
+                "language": chunk.language,
+                "symbol_name": chunk.symbol_name,
+                "symbol_type": chunk.symbol_type,
+                "start_line": chunk.start_line,
+                "end_line": chunk.end_line,
+            }
+            for chunk in symbols
+        ]
+        vector_metrics.append(chroma.upsert(
+            collection_name="code_symbols",
+            ids=[chunk.id for chunk in symbols],
+            documents=symbol_texts,
+            embeddings=symbol_embeddings,
+            metadatas=symbol_meta,
+        ))
 
-    file_ids = [f"{repo_id}:{item.path}" for item in scanned_files]
-    file_docs = [summarize_file(item) for item in scanned_files]
-    file_embeddings = embedder.embed_texts(
-        file_docs,
-        progress_callback=_progress_logger("archivos", len(file_docs)),
-    )
-    file_meta = [
-        {
-            "id": file_ids[index],
-            "repo_id": repo_id,
-            "path": item.path,
-            "language": item.language,
-            "start_line": 1,
-            "end_line": len(item.content.splitlines()),
-        }
-        for index, item in enumerate(scanned_files)
-    ]
-    vector_metrics.append(chroma.upsert(
-        collection_name="code_files",
-        ids=file_ids,
-        documents=file_docs,
-        embeddings=file_embeddings,
-        metadatas=file_meta,
-    ))
+    file_ids = [f"{repo_id}:{item.path}" for item in target_files]
+    file_docs = [summarize_file(item) for item in target_files]
+    if file_docs:
+        file_embeddings = embedder.embed_texts(
+            file_docs,
+            progress_callback=_progress_logger("archivos", len(file_docs)),
+        )
+        file_meta = [
+            {
+                "id": file_ids[index],
+                "repo_id": repo_id,
+                "path": item.path,
+                "language": item.language,
+                "start_line": 1,
+                "end_line": len(item.content.splitlines()),
+            }
+            for index, item in enumerate(target_files)
+        ]
+        vector_metrics.append(chroma.upsert(
+            collection_name="code_files",
+            ids=file_ids,
+            documents=file_docs,
+            embeddings=file_embeddings,
+            metadatas=file_meta,
+        ))
 
     module_summaries = summarize_modules(scanned_files)
     module_names = list(module_summaries.keys())
     module_docs = list(module_summaries.values())
-    module_embeddings = embedder.embed_texts(
-        module_docs,
-        progress_callback=_progress_logger("módulos", len(module_docs)),
-    )
     module_ids = [f"{repo_id}:module:{name}" for name in module_names]
-    module_meta = [
-        {
-            "id": module_ids[index],
-            "repo_id": repo_id,
-            "path": module_names[index],
-            "language": "module",
-            "start_line": 1,
-            "end_line": 1,
-        }
-        for index in range(len(module_ids))
-    ]
-    vector_metrics.append(chroma.upsert(
-        collection_name="code_modules",
-        ids=module_ids,
-        documents=module_docs,
-        embeddings=module_embeddings,
-        metadatas=module_meta,
-    ))
+    if module_docs:
+        module_embeddings = embedder.embed_texts(
+            module_docs,
+            progress_callback=_progress_logger("módulos", len(module_docs)),
+        )
+        module_meta = [
+            {
+                "id": module_ids[index],
+                "repo_id": repo_id,
+                "path": module_names[index],
+                "language": "module",
+                "start_line": 1,
+                "end_line": 1,
+            }
+            for index in range(len(module_ids))
+        ]
+        vector_metrics.append(chroma.upsert(
+            collection_name="code_modules",
+            ids=module_ids,
+            documents=module_docs,
+            embeddings=module_embeddings,
+            metadatas=module_meta,
+        ))
 
     if diagnostics_sink is not None:
         embedding_tokens_read_estimated = _estimate_embedding_tokens_read(
@@ -667,9 +849,26 @@ def _index_lexical_backend(
     repo_id: str,
     scanned_files: list[ScannedFile],
     symbols: list[SymbolChunk],
+    allowed_paths: set[str] | None = None,
 ) -> None:
-    """Indexa el backend léxico activo sobre Postgres."""
-    docs: list[str] = [chunk.snippet for chunk in symbols]
+    """Indexa el backend léxico activo sobre Postgres.
+
+    En modo incremental (``allowed_paths`` no es None) solo se reindexan símbolos y
+    archivos de esos paths; los módulos se recomputan completos (mismo criterio que
+    el índice vectorial).
+    """
+    if allowed_paths is not None:
+        target_symbols = [
+            chunk for chunk in symbols if chunk.path in allowed_paths
+        ]
+        target_files = [
+            item for item in scanned_files if item.path in allowed_paths
+        ]
+    else:
+        target_symbols = symbols
+        target_files = scanned_files
+
+    docs: list[str] = [chunk.snippet for chunk in target_symbols]
     metadatas: list[dict] = [
         {
             "id": chunk.id,
@@ -680,10 +879,10 @@ def _index_lexical_backend(
             "symbol_name": chunk.symbol_name,
             "entity_type": "symbol",
         }
-        for chunk in symbols
+        for chunk in target_symbols
     ]
 
-    file_docs = [summarize_file(item) for item in scanned_files]
+    file_docs = [summarize_file(item) for item in target_files]
     file_meta = [
         {
             "id": f"{repo_id}:{item.path}",
@@ -694,7 +893,7 @@ def _index_lexical_backend(
             "symbol_name": "",
             "entity_type": "file",
         }
-        for item in scanned_files
+        for item in target_files
     ]
     docs.extend(file_docs)
     metadatas.extend(file_meta)

@@ -111,6 +111,17 @@ def _execute_ingest_job(
 
         ingest_diagnostics: dict[str, object] = {}
 
+        # repo_id es determinista por url+branch; lo resolvemos antes del clone
+        # para leer el commit base persistido y decidir ingesta incremental.
+        repo_id_hint = build_repo_id(request.repo_url, request.branch)
+        previous_runtime = store.get_repo_runtime(repo_id_hint)
+        last_indexed_commit = (
+            str(previous_runtime.get("last_indexed_commit"))
+            if previous_runtime
+            and previous_runtime.get("last_indexed_commit") is not None
+            else None
+        )
+
         repo_id = ingest_repository(
             provider=request.provider,
             repo_url=request.repo_url,
@@ -122,10 +133,13 @@ def _execute_ingest_job(
             embedding_model=request.embedding_model,
             logger=logger,
             diagnostics_sink=ingest_diagnostics,
+            last_indexed_commit=last_indexed_commit,
+            changed_files=request.changed_files,
         )
         job.repo_id = repo_id
         job.diagnostics = ingest_diagnostics
         organization = extract_repo_organization(request.repo_url)
+        head_commit = ingest_diagnostics.get("head_commit")
         store.upsert_repo_runtime(
             repo_id=repo_id,
             organization=organization,
@@ -134,6 +148,9 @@ def _execute_ingest_job(
             local_path=str(workspace_path / repo_id),
             embedding_provider=request.embedding_provider,
             embedding_model=request.embedding_model,
+            last_indexed_commit=(
+                str(head_commit) if head_commit else None
+            ),
         )
         workspace_clone_path = workspace_path / repo_id
         job.diagnostics["workspace_retained"] = retain_workspace_after_ingest

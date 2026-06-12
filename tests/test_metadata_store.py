@@ -105,6 +105,7 @@ def test_repo_runtime_round_trip_and_catalog_listing(tmp_path: Path) -> None:
         "last_embedding_provider": "vertex",
         "last_embedding_model": "text-embedding-005",
         "last_queried_at": None,
+        "last_indexed_commit": None,
     }
 
 

@@ -24,6 +24,13 @@ CHROMA_HNSW_SPACES = {"l2", "cosine"}
 _REMOTE_CHROMA_ERROR_PREFIX = "No se pudo completar la operación de Chroma remoto"
 
 
+def _chunked_sequence(items: list[str], size: int) -> list[list[str]]:
+    """Parte una lista en sublistas de longitud máxima ``size``."""
+    if size <= 0:
+        return [list(items)]
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
 def _build_remote_auth_header(settings: Any) -> str | None:
     """Resuelve el header Authorization para Chroma remoto."""
     token = str(getattr(settings, "chroma_token", "") or "").strip()
@@ -952,6 +959,86 @@ class ChromaIndex:
                         ) from exc
                     raise
                 deleted_total += len(ids)
+
+            deleted_by_collection[collection_name] = deleted_total
+
+        deleted_by_collection["total"] = sum(deleted_by_collection.values())
+        return deleted_by_collection
+
+    def delete_by_repo_and_paths(
+        self,
+        repo_id: str,
+        paths: list[str],
+    ) -> dict[str, int]:
+        """Elimina documentos del repo acotados a un set de paths y retorna conteos.
+
+        Solo afecta documentos cuya metadata ``path`` coincide con los paths dados
+        (símbolos y archivos). Los chunks de módulo se gestionan por separado en el
+        pipeline porque su ``path`` referencia el nombre de módulo, no un archivo.
+        """
+        unique_paths = list(dict.fromkeys(p for p in paths if p))
+        deleted_by_collection: dict[str, int] = {
+            name: 0 for name in COLLECTIONS
+        }
+        if not unique_paths:
+            deleted_by_collection["total"] = 0
+            return deleted_by_collection
+
+        settings = get_settings()
+        batch_size = self._max_batch_size()
+
+        for collection_name in COLLECTIONS:
+            collection = self.collections[collection_name]
+            deleted_total = 0
+            # Acotar el tamaño de la cláusula $in para no inflar el request remoto.
+            for path_batch in _chunked_sequence(unique_paths, 100):
+                where_filter = {
+                    "$and": [
+                        {"repo_id": repo_id},
+                        {"path": {"$in": list(path_batch)}},
+                    ]
+                }
+                while True:
+                    try:
+                        page = collection.get(
+                            where=where_filter,
+                            limit=batch_size,
+                            offset=0,
+                            include=[],
+                        )
+                    except Exception as exc:
+                        if settings.chroma_mode == "remote":
+                            raise RuntimeError(
+                                build_remote_chroma_error_message(
+                                    settings,
+                                    operation=(
+                                        "listar documentos para "
+                                        "delete_by_repo_and_paths"
+                                    ),
+                                    exc=exc,
+                                    collection_name=collection_name,
+                                    batch_size=batch_size,
+                                )
+                            ) from exc
+                        raise
+                    ids = page.get("ids") or []
+                    if not ids:
+                        break
+                    try:
+                        collection.delete(ids=ids)
+                    except Exception as exc:
+                        if settings.chroma_mode == "remote":
+                            raise RuntimeError(
+                                build_remote_chroma_error_message(
+                                    settings,
+                                    operation="delete_by_repo_and_paths",
+                                    exc=exc,
+                                    collection_name=collection_name,
+                                    batch_size=batch_size,
+                                )
+                            ) from exc
+                        raise
+                    deleted_total += len(ids)
 
             deleted_by_collection[collection_name] = deleted_total
 

@@ -266,7 +266,7 @@ def test_ingest_repository_publishes_repo_size_mb_into_diagnostics(
     monkeypatch.setattr(
         pipeline,
         "_index_lexical_backend",
-        lambda repo_id, scanned_files, chunks: None,
+        lambda repo_id, scanned_files, chunks, **kwargs: None,
     )
     monkeypatch.setattr(
         pipeline,
@@ -400,7 +400,7 @@ def test_ingest_repository_continues_on_graph_failure(
     monkeypatch.setattr(
         pipeline,
         "_index_lexical_backend",
-        lambda repo_id, scanned_files, chunks: None,
+        lambda repo_id, scanned_files, chunks, **kwargs: None,
     )
     monkeypatch.setattr(
         pipeline,
@@ -527,7 +527,9 @@ def test_ingest_repository_purges_existing_repo_before_reindex(
     monkeypatch.setattr(
         pipeline,
         "_index_lexical_backend",
-        lambda repo_id, scanned_files, chunks: call_order.append("index_lexical"),
+        lambda repo_id, scanned_files, chunks, **kwargs: call_order.append(
+            "index_lexical"
+        ),
     )
     monkeypatch.setattr(
         pipeline,
@@ -723,6 +725,7 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
         ssh_known_hosts_content: str | None = None,
         ssh_known_hosts_content_b64: str | None = None,
         ssh_strict_host_key_checking: str = "yes",
+        full_history: bool = False,
     ) -> tuple[str, Path]:
         captured["repo_url"] = repo_url
         captured["destination_root"] = destination_root
@@ -779,7 +782,7 @@ def test_ingest_repository_forwards_ssh_runtime_config_to_clone(
     monkeypatch.setattr(
         pipeline,
         "_index_lexical_backend",
-        lambda repo_id, scanned_files, chunks: None,
+        lambda repo_id, scanned_files, chunks, **kwargs: None,
     )
     monkeypatch.setattr(
         pipeline,
@@ -846,6 +849,7 @@ def test_ingest_repository_forwards_explicit_auth_payload_to_clone(
         ssh_known_hosts_content: str | None = None,
         ssh_known_hosts_content_b64: str | None = None,
         ssh_strict_host_key_checking: str = "yes",
+        full_history: bool = False,
     ) -> tuple[str, Path]:
         captured["provider"] = provider
         captured["token"] = token
@@ -888,7 +892,7 @@ def test_ingest_repository_forwards_explicit_auth_payload_to_clone(
     monkeypatch.setattr(
         pipeline,
         "_index_lexical_backend",
-        lambda repo_id, scanned_files, chunks: None,
+        lambda repo_id, scanned_files, chunks, **kwargs: None,
     )
     monkeypatch.setattr(
         pipeline,

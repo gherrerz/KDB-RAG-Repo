@@ -88,8 +88,8 @@ def _job_record_to_job_info(record: JobRecord) -> JobInfo:
         repo_id=record.repo_id,
         error=record.error,
         diagnostics=diagnostics,
-        created_at=record.created_at,
-        updated_at=record.updated_at,
+        created_at=_coerce_datetime_value(record.created_at),
+        updated_at=_coerce_datetime_value(record.updated_at),
     )
 
 
@@ -310,6 +310,7 @@ class PostgresMetadataStore(BaseMetadataStore):
         local_path: str,
         embedding_provider: str | None,
         embedding_model: str | None,
+        last_indexed_commit: str | None = None,
     ) -> None:
         """Inserta o actualiza metadata runtime por repositorio."""
         now = datetime.datetime.now(datetime.UTC)
@@ -324,18 +325,26 @@ class PostgresMetadataStore(BaseMetadataStore):
             last_queried_at=None,
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
+            last_indexed_commit=last_indexed_commit,
         )
+        set_columns = {
+            "organization": insert_stmt.excluded.organization,
+            "url": insert_stmt.excluded.url,
+            "branch": insert_stmt.excluded.branch,
+            "local_path": insert_stmt.excluded.local_path,
+            "updated_at": insert_stmt.excluded.updated_at,
+            "embedding_provider": insert_stmt.excluded.embedding_provider,
+            "embedding_model": insert_stmt.excluded.embedding_model,
+        }
+        # Solo avanzar el commit indexado cuando se provee uno nuevo; así una
+        # reingesta que no resuelve HEAD no borra la base previa.
+        if last_indexed_commit is not None:
+            set_columns["last_indexed_commit"] = (
+                insert_stmt.excluded.last_indexed_commit
+            )
         statement = insert_stmt.on_conflict_do_update(
             index_elements=[RepoRecord.id],
-            set_={
-                "organization": insert_stmt.excluded.organization,
-                "url": insert_stmt.excluded.url,
-                "branch": insert_stmt.excluded.branch,
-                "local_path": insert_stmt.excluded.local_path,
-                "updated_at": insert_stmt.excluded.updated_at,
-                "embedding_provider": insert_stmt.excluded.embedding_provider,
-                "embedding_model": insert_stmt.excluded.embedding_model,
-            },
+            set_=set_columns,
         )
         with self._session_factory.get_session() as session:
             session.execute(statement)
@@ -347,6 +356,7 @@ class PostgresMetadataStore(BaseMetadataStore):
             RepoRecord.embedding_provider,
             RepoRecord.embedding_model,
             RepoRecord.last_queried_at,
+            RepoRecord.last_indexed_commit,
         ).where(RepoRecord.id == repo_id)
         with self._session_factory.get_session() as session:
             row = session.execute(statement).mappings().one_or_none()
@@ -361,6 +371,7 @@ class PostgresMetadataStore(BaseMetadataStore):
                 if last_queried_at is not None
                 else None
             ),
+            "last_indexed_commit": row["last_indexed_commit"],
         }
 
     def touch_repo_last_queried_at(self, repo_id: str) -> int:

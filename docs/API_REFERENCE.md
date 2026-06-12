@@ -321,6 +321,7 @@ Notas operativas de storage:
 | `auth` | `object \| null` | no | `null` |
 | `embedding_provider` | `str \| null` | no | `"vertex"` |
 | `embedding_model` | `str \| null` | no | `"text-embedding-005"` |
+| `changed_files` | `list[str] \| null` | no | `null` |
 
 Notas para repos privados:
 
@@ -343,6 +344,13 @@ Reglas iniciales:
 - Bitbucket HTTPS en esta primera implementación requiere `auth.method=http_basic`, `auth.transport=https`, `auth.username` y `auth.secret`.
 - Bitbucket SSH mantiene las variables `GIT_SSH_*` existentes.
 - Si no necesitas fijar una revisión exacta, omite `commit` o envíalo como `null`; no uses placeholders como `"string"` desde Swagger/OpenAPI.
+
+Ingesta incremental:
+
+- La ingesta es **incremental** cuando el repo ya tiene un `last_indexed_commit` persistido (de una ingesta previa) y esta ingesta resuelve un HEAD distinto, **o** cuando se envía `changed_files` con la lista de rutas modificadas (relativas a la raíz del repo). En ese caso solo se reembedden/reindexan los archivos cambiados en Chroma y el índice léxico; los archivos sin cambios se conservan.
+- El **grafo Neo4j siempre se reconstruye completo**, independientemente del modo, para preservar la consistencia de aristas entre archivos.
+- Si no hay commit base, el diff no puede calcularse (p.ej. el commit base no está en el historial clonado), o el repo no tenía data previa, la ingesta hace **fallback a purge + reindex completo**.
+- El modo efectivo y los conteos (`ingest_mode`, `changed_files_count`, `deleted_files_count`, `base_commit`, `head_commit`) se exponen en `JobInfo.diagnostics`.
 
 ### JobInfo
 

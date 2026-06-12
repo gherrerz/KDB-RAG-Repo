@@ -146,6 +146,15 @@ class RepoIngestRequest(BaseModel):
         default="text-embedding-005",
         description="Modelo de embeddings opcional para esta ingesta.",
     )
+    changed_files: list[str] | None = Field(
+        default=None,
+        description=(
+            "Lista explícita opcional de archivos cambiados (rutas relativas a la "
+            "raíz del repo) para forzar ingesta incremental sin calcular git diff. "
+            "Si se omite, el pipeline deduce los cambios contra el último commit "
+            "indexado o hace reindex completo."
+        ),
+    )
 
     @field_validator(
         "commit",

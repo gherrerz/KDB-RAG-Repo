@@ -449,6 +449,7 @@ def test_get_repo_runtime_returns_expected_keys() -> None:
             0,
             tzinfo=datetime.UTC,
         ),
+        "last_indexed_commit": "commit-aaa",
     }
     store = PostgresMetadataStore(
         "postgresql://fake/db",
@@ -461,6 +462,7 @@ def test_get_repo_runtime_returns_expected_keys() -> None:
         "last_embedding_provider": "vertex",
         "last_embedding_model": "te-005",
         "last_queried_at": "2026-05-23T12:00:00+00:00",
+        "last_indexed_commit": "commit-aaa",
     }
 
 
@@ -471,6 +473,7 @@ def test_get_repo_runtime_normalizes_legacy_timestamp_strings() -> None:
         "embedding_provider": "vertex",
         "embedding_model": "te-005",
         "last_queried_at": "2026-05-23 12:00:00.12345+00",
+        "last_indexed_commit": None,
     }
     store = PostgresMetadataStore(
         "postgresql://fake/db",
@@ -483,6 +486,7 @@ def test_get_repo_runtime_normalizes_legacy_timestamp_strings() -> None:
         "last_embedding_provider": "vertex",
         "last_embedding_model": "te-005",
         "last_queried_at": "2026-05-23T12:00:00.123450+00:00",
+        "last_indexed_commit": None,
     }
 
 

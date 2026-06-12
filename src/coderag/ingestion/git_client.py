@@ -542,8 +542,13 @@ def clone_repository(
     ssh_known_hosts_content: str | None = None,
     ssh_known_hosts_content_b64: str | None = None,
     ssh_strict_host_key_checking: str = "yes",
+    full_history: bool = False,
 ) -> tuple[str, Path]:
-    """Clona el repositorio en el espacio de trabajo y devuelve repo_id y la ruta local."""
+    """Clona el repositorio en el espacio de trabajo y devuelve repo_id y la ruta local.
+
+    Con ``full_history=True`` se omite ``--depth 1`` para conservar el historial
+    necesario al calcular un diff incremental contra un commit base previo.
+    """
     repo_id = build_repo_id(repo_url, branch)
     destination = destination_root / repo_id
     if destination.exists():
@@ -551,11 +556,11 @@ def clone_repository(
         if not removed:
             destination = destination_root / f"{repo_id}_{uuid4().hex[:8]}"
 
+    depth_args = [] if full_history else ["--depth", "1"]
     command = [
         "git",
         "clone",
-        "--depth",
-        "1",
+        *depth_args,
         "--branch",
         branch,
         repo_url,
@@ -582,8 +587,7 @@ def clone_repository(
             fallback = [
                 "git",
                 "clone",
-                "--depth",
-                "1",
+                *depth_args,
                 repo_url,
                 str(destination),
             ]
@@ -626,3 +630,88 @@ def clone_repository(
             askpass_temp_dir.cleanup()
 
     return repo_id, destination
+
+
+def resolve_head_commit(repo_path: Path) -> str | None:
+    """Devuelve el SHA del commit HEAD efectivamente checkouteado, o None si falla."""
+    try:
+        result = _run_git_command(
+            ["git", "rev-parse", "HEAD"],
+            check=False,
+            cwd=repo_path,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    commit = (result.stdout or "").strip()
+    return commit or None
+
+
+def diff_changed_files(
+    repo_path: Path,
+    base_commit: str,
+    head_commit: str,
+) -> tuple[list[str], list[str]] | None:
+    """Resuelve archivos modificados y eliminados entre dos commits.
+
+    Devuelve ``(changed_paths, deleted_paths)`` donde ``changed_paths`` incluye
+    archivos añadidos/modificados y el destino de los renames, y ``deleted_paths``
+    incluye archivos borrados y el origen de los renames. Devuelve ``None`` cuando
+    el diff no puede calcularse (p.ej. el commit base no está presente en un clone
+    shallow), señalando al pipeline que debe hacer fallback a reindex completo.
+    """
+    base = (base_commit or "").strip()
+    head = (head_commit or "").strip()
+    if not base or not head:
+        return None
+
+    try:
+        result = _run_git_command(
+            ["git", "diff", "--name-status", "-z", base, head],
+            check=False,
+            cwd=repo_path,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+
+    return _parse_name_status_z(result.stdout or "")
+
+
+def _parse_name_status_z(raw_output: str) -> tuple[list[str], list[str]]:
+    """Parsea la salida NUL-delimited de ``git diff --name-status -z``."""
+    tokens = [token for token in raw_output.split("\0") if token != ""]
+    changed: list[str] = []
+    deleted: list[str] = []
+
+    index = 0
+    while index < len(tokens):
+        status = tokens[index]
+        code = status[:1]
+        index += 1
+        if code in ("R", "C"):
+            # Rename/Copy: status, origen, destino. En rename el origen se
+            # elimina; en copy solo el destino es nuevo. En ambos el destino cambia.
+            if index + 1 >= len(tokens):
+                break
+            source = tokens[index]
+            target = tokens[index + 1]
+            index += 2
+            if code == "R":
+                deleted.append(source)
+            changed.append(target)
+        elif code == "D":
+            if index >= len(tokens):
+                break
+            deleted.append(tokens[index])
+            index += 1
+        else:
+            # A, M, C, T y demás: el archivo referenciado debe reindexarse.
+            if index >= len(tokens):
+                break
+            changed.append(tokens[index])
+            index += 1
+
+    return changed, deleted
