@@ -228,6 +228,29 @@ class LexicalStore:
             deleted = int(result.rowcount or 0)
         return {"docs_removed": deleted}
 
+    def delete_by_repo_and_paths(
+        self,
+        repo_id: str,
+        paths: list[str],
+    ) -> dict[str, int]:
+        """Elimina documentos del repo acotados a un set de paths y retorna conteo.
+
+        Solo afecta filas cuya columna ``path`` coincide con los paths dados
+        (símbolos y archivos). Los docs de módulo tienen ``path`` con el nombre de
+        módulo y se gestionan por separado en el pipeline (recompute).
+        """
+        unique_paths = list(dict.fromkeys(p for p in paths if p))
+        if not unique_paths:
+            return {"docs_removed": 0}
+        statement = delete(lexical_corpus_table).where(
+            lexical_corpus_table.c.repo_id == repo_id,
+            lexical_corpus_table.c.path.in_(unique_paths),
+        )
+        with self._session_factory.get_connection() as connection:
+            result = connection.execute(statement)
+            deleted = int(result.rowcount or 0)
+        return {"docs_removed": deleted}
+
     def delete_all(self) -> None:
         """Elimina todo el corpus léxico. Usar solo en reset global."""
         with self._session_factory.get_connection() as connection:

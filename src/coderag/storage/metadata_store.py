@@ -53,7 +53,8 @@ class MetadataStore(BaseMetadataStore):
                     updated_at TEXT,
                     last_queried_at TEXT,
                     embedding_provider TEXT,
-                    embedding_model TEXT
+                    embedding_model TEXT,
+                    last_indexed_commit TEXT
                 )
                 """
             )
@@ -263,17 +264,20 @@ class MetadataStore(BaseMetadataStore):
         local_path: str,
         embedding_provider: str | None,
         embedding_model: str | None,
+        last_indexed_commit: str | None = None,
     ) -> None:
         """Inserta o actualiza metadata runtime por repositorio."""
         now = datetime.datetime.now(datetime.UTC).isoformat()
+        # Solo avanzar el commit indexado cuando se provee uno nuevo; COALESCE
+        # preserva la base previa si la reingesta no resolvió HEAD.
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO repos (
                     id, organization, url, branch, local_path, created_at,
                     updated_at, last_queried_at, embedding_provider,
-                    embedding_model
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    embedding_model, last_indexed_commit
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     organization=excluded.organization,
                     url=excluded.url,
@@ -281,7 +285,10 @@ class MetadataStore(BaseMetadataStore):
                     local_path=excluded.local_path,
                     updated_at=excluded.updated_at,
                     embedding_provider=excluded.embedding_provider,
-                    embedding_model=excluded.embedding_model
+                    embedding_model=excluded.embedding_model,
+                    last_indexed_commit=COALESCE(
+                        excluded.last_indexed_commit, repos.last_indexed_commit
+                    )
                 """,
                 (
                     repo_id,
@@ -294,6 +301,7 @@ class MetadataStore(BaseMetadataStore):
                     None,
                     embedding_provider,
                     embedding_model,
+                    last_indexed_commit,
                 ),
             )
 
@@ -302,7 +310,8 @@ class MetadataStore(BaseMetadataStore):
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT embedding_provider, embedding_model, last_queried_at
+                SELECT embedding_provider, embedding_model, last_queried_at,
+                    last_indexed_commit
                 FROM repos
                 WHERE id = ?
                 """,
@@ -314,6 +323,7 @@ class MetadataStore(BaseMetadataStore):
             "last_embedding_provider": row["embedding_provider"],
             "last_embedding_model": row["embedding_model"],
             "last_queried_at": row["last_queried_at"],
+            "last_indexed_commit": row["last_indexed_commit"],
         }
 
     def touch_repo_last_queried_at(self, repo_id: str) -> int:

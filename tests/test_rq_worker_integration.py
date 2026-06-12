@@ -8,8 +8,12 @@ from redis.exceptions import RedisError
 from rq import Queue, SimpleWorker
 from rq.timeouts import TimerDeathPenalty
 
+from conftest import build_test_postgres_settings
+
 from coderag.core.models import JobInfo, JobStatus
 from coderag.jobs.worker import run_ingest_job_task
+from coderag.storage.postgres_session import PostgresSessionFactory
+from coderag.storage.postgres_startup import ensure_postgres_schema_ready
 
 
 class _TestSimpleWorker(SimpleWorker):
@@ -32,21 +36,39 @@ def _require_redis() -> Redis:
     return redis_conn
 
 
+def _require_postgres(settings) -> None:
+    """Marca el test como skipped si el Postgres de prueba no es alcanzable."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        factory = PostgresSessionFactory.from_settings(settings)
+        with factory.get_connection() as connection:
+            connection.exec_driver_sql("SELECT 1")
+    except (SQLAlchemyError, RuntimeError, OSError) as exc:
+        pytest.skip(f"Postgres local no disponible para prueba RQ: {exc}")
+
+
 def test_rq_worker_processes_ingest_job_end_to_end(monkeypatch, tmp_path) -> None:
     """Valida ejecución de tarea RQ en worker burst usando Redis real."""
 
     redis_conn = _require_redis()
 
-    class _Settings:
-        workspace_path = tmp_path / "workspace"
-        ingestion_retry_transient_only = True
-        runtime_environment = "test"
+    workspace_path = tmp_path / "workspace"
+    workspace_path.mkdir(parents=True, exist_ok=True)
 
-    _Settings.workspace_path.mkdir(parents=True, exist_ok=True)
+    # Settings reales con Postgres de prueba: el metadata store operativo exige
+    # Postgres (no hay fallback SQLite), por lo que el worker necesita una DSN
+    # válida para persistir el job y poder releerlo al final.
+    settings = build_test_postgres_settings(
+        WORKSPACE_PATH=str(workspace_path),
+        RUNTIME_ENVIRONMENT="test",
+    )
+    _require_postgres(settings)
+    ensure_postgres_schema_ready(settings)
 
     import coderag.jobs.worker as module
 
-    monkeypatch.setattr(module, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
 
     def _fake_execute(*, job, request, store, workspace_path):
         del request, store, workspace_path
