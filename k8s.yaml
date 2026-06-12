@@ -1,5 +1,5 @@
 replicaCount: 1
-epm: BDQ4
+epm: BKKG
 service:
   port: 8000
 
