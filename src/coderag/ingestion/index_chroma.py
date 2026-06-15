@@ -8,10 +8,35 @@ from typing import Any
 import gc
 
 import chromadb
-from chromadb.config import Settings as ChromaSettings
-from chromadb.errors import InvalidDimensionException
+
+# La imagen de servidor usa `chromadb-client` (thin) por CVE-2026-45829: garantiza HttpClient pero
+# puede no exponer config.Settings / errors / PersistentClient. Importes defensivos para no romper
+# la carga del módulo en modo remoto. El modo local requiere `chromadb` completo (ver _require_persistent_client).
+try:
+    from chromadb.config import Settings as ChromaSettings
+except ImportError:  # pragma: no cover - solo con thin client
+    ChromaSettings = None
+
+try:
+    from chromadb.errors import InvalidDimensionException
+except ImportError:  # pragma: no cover - solo con thin client
+    class InvalidDimensionException(Exception):
+        """Placeholder cuando el thin client no expone la excepción nativa."""
 
 from coderag.core.settings import get_settings
+
+_LOCAL_CHROMA_UNAVAILABLE_MESSAGE = (
+    "Modo local de Chroma no disponible: la imagen usa chromadb-client (solo remoto). "
+    "Usa CHROMA_MODE=remote o instala el paquete `chromadb` completo."
+)
+
+
+def _require_persistent_client() -> Any:
+    """Devuelve PersistentClient o falla con un mensaje claro si solo hay thin client."""
+    persistent_client = getattr(chromadb, "PersistentClient", None)
+    if persistent_client is None:
+        raise RuntimeError(_LOCAL_CHROMA_UNAVAILABLE_MESSAGE)
+    return persistent_client
 
 COLLECTIONS = [
     "code_symbols",
@@ -379,7 +404,8 @@ class ChromaIndex:
                 if chroma_mode == "remote":
                     client = build_remote_chroma_client(settings)
                 else:
-                    client = chromadb.PersistentClient(
+                    persistent_client = _require_persistent_client()
+                    client = persistent_client(
                         path=str(settings.chroma_path),
                         settings=ChromaSettings(anonymized_telemetry=False),
                     )

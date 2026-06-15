@@ -48,6 +48,11 @@ Compatibilidad temporal de naming:
 ### Retrieval y limites de consulta
 
 - `CHROMA_MODE`: modo de acceso a Chroma (`remote`, `embedded`). Default del codigo: `remote`.
+  La imagen de servidor desplegada (Docker/k8s) instala `chromadb-client` (thin client) en lugar de
+  `chromadb` completo, como mitigacion de CVE-2026-45829 (RCE pre-auth en el servidor Python de Chroma).
+  Por eso la imagen **solo soporta `CHROMA_MODE=remote`**; el modo `embedded` (PersistentClient) requiere
+  el paquete `chromadb` completo y solo esta disponible en entornos de desarrollo/desktop. Se recomienda
+  ademas que el servidor Chroma remoto exija autenticacion (`CHROMA_TOKEN`) y no este expuesto publicamente.
 - `CHROMA_HOST`: host del servicio Chroma remoto. Default: `localhost`.
 - `CHROMA_PORT`: puerto del servicio Chroma remoto. Default: `8000`.
 - `CHROMA_TOKEN`: bearer token opcional para Chroma remoto. Default: vacio.

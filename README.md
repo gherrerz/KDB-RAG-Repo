@@ -175,6 +175,12 @@ del host configurado en `VERTEX_API_BASE_URL`. `VERTEX_AI_PROJECT_ID` y
 Para Chroma remoto, el runtime soporta `CHROMA_TOKEN` o `CHROMA_USERNAME` +
 `CHROMA_PASSWORD`, pero no ambos mecanismos a la vez.
 
+> **Seguridad (CVE-2026-45829 "ChromaToast"):** el servidor Python de Chroma tiene una RCE pre-auth.
+> La imagen desplegada usa `chromadb-client` (thin client, sin codigo de servidor) y solo opera en
+> `CHROMA_MODE=remote`. Asegura que el servidor Chroma remoto **exija autenticacion** (`CHROMA_TOKEN`),
+> **no este expuesto publicamente** (red interna / NetworkPolicy) y, de ser posible, use el frontend
+> Rust (`chroma run`), que no es vulnerable.
+
 1. Levanta stack local simplificado con Docker Compose.
 
 ```powershell

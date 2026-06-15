@@ -146,12 +146,22 @@ services:
     restart: unless-stopped
 
   chroma:
-    image: chromadb/chroma:latest
+    # Tag inmutable (no :latest) para builds deterministas y trazabilidad de la versión escaneada.
+    # CVE-2026-45829 (ChromaToast): el servidor Python FastAPI de Chroma permite RCE pre-auth. Mitigaciones:
+    #  - No exponer el servidor fuera de la red interna (el puerto se publica solo en 127.0.0.1 para debug).
+    #  - Habilitar autenticación por token (descomenta el bloque de abajo y poblar CHROMA_TOKEN en la app).
+    #  - En producción/k8s, preferir el frontend Rust (`chroma run`), que no es vulnerable.
+    image: chromadb/chroma:1.5.5
     profiles: ["remote"]
     ports:
-      - "8001:8000"
+      # Solo accesible desde la máquina local (no en todas las interfaces). Quitar si no se necesita debug.
+      - "127.0.0.1:8001:8000"
     environment:
       IS_PERSISTENT: "TRUE"
+      # Autenticación del servidor Chroma (recomendado). Para activarla, descomenta y define
+      # CHROMA_TOKEN con el mismo valor tanto aquí como en los servicios api/worker.
+      # CHROMA_SERVER_AUTHN_PROVIDER: "chromadb.auth.token_authn.TokenAuthenticationServerProvider"
+      # CHROMA_SERVER_AUTHN_CREDENTIALS: ${CHROMA_TOKEN:-}
     volumes:
       - chroma_data:/chroma/chroma
     healthcheck:

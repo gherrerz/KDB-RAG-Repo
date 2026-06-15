@@ -6,6 +6,18 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ## [Unreleased]
 
+### Security
+
+- Remediada **CVE-2025-62727** (DoS en Starlette por parseo cuadrático del header `Range`):
+    `fastapi` se actualiza a `0.120.1` y se fija explícitamente `starlette==0.49.1` en
+    `requirements.txt` y `requirements-runtime.txt`.
+- Remediada **CVE-2026-45829** ("ChromaToast", RCE pre-auth en el servidor Python de ChromaDB):
+    la imagen de servidor (`requirements.txt`) reemplaza `chromadb` por el thin client
+    `chromadb-client`, que no incluye el código del servidor vulnerable. La imagen pasa a soportar
+    solo `CHROMA_MODE=remote`; el modo `embedded` (PersistentClient) sigue disponible en
+    desarrollo/desktop con `chromadb` completo. Hardening adicional en `docker-compose.yml`
+    (tag de imagen fijo, puerto publicado solo en loopback, guía de autenticación del servidor).
+
 ### Added
 
 - Nuevos indicadores operativos en `GET /repos/{repo_id}/snapshots`:

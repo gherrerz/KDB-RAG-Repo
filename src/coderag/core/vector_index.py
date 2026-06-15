@@ -7,11 +7,18 @@ from pathlib import Path
 from typing import Any, Callable, Protocol, runtime_checkable
 
 import chromadb
-from chromadb.config import Settings as ChromaSettings
+
+# Import defensivo: la imagen de servidor usa chromadb-client (thin) por CVE-2026-45829, que puede
+# no exponer config.Settings. Solo se usa en el modo local, donde `chromadb` completo sí lo provee.
+try:
+    from chromadb.config import Settings as ChromaSettings
+except ImportError:  # pragma: no cover - solo con thin client
+    ChromaSettings = None
 
 from coderag.ingestion.index_chroma import (
     COLLECTIONS,
     ChromaIndex,
+    _require_persistent_client,
     build_remote_chroma_error_message,
     build_remote_chroma_client,
 )
@@ -162,7 +169,8 @@ def reset_managed_vector_storage(
         if chroma_mode == "remote":
             client = build_remote_chroma_client(settings)
         else:
-            client = chromadb.PersistentClient(
+            persistent_client = _require_persistent_client()
+            client = persistent_client(
                 path=str(settings.chroma_path),
                 settings=ChromaSettings(anonymized_telemetry=False),
             )

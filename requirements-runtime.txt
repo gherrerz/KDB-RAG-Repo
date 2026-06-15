@@ -1,8 +1,15 @@
-fastapi==0.115.2
+fastapi==0.120.1
+# starlette pin explícito por CVE-2025-62727 (DoS por parseo cuadrático del header Range).
+# FastAPI 0.120.x permite starlette<0.50.0; >=0.49.1 incluye el fix.
+starlette==0.49.1
 uvicorn==0.30.6
 pydantic==2.9.2
 pydantic-settings==2.5.2
 requests==2.32.3
+# chromadb completo: la cadena dev/desktop hereda este archivo y necesita el modo local
+# PersistentClient (tests + UI embebida). La imagen de servidor desplegada usa requirements.txt,
+# que sustituye este paquete por chromadb-client (thin) por CVE-2026-45829. El modo local no
+# corre el servidor vulnerable, por lo que no es explotable.
 chromadb==1.5.5
 neo4j==5.25.0
 openai==1.51.0
