@@ -38,8 +38,9 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
     El endpoint se controla con `MCP_ENABLED` y se protege con `MCP_API_TOKEN` (header
     `X-MCP-Token`); configurable también con `MCP_MOUNT_PATH` y `MCP_SERVER_NAME`. Nuevo módulo
     `src/coderag/api/mcp_server.py` (`setup_mcp`) y script de smoke test `scripts/mcp_smoke.sh`.
-    Se fija `fastapi-mcp==0.4.0` y `mcp==1.12.0` (última versión de `mcp` compatible con los pins
-    de `pydantic==2.9.2` / `uvicorn==0.30.6`; `mcp>=1.13` exigiría `pydantic>=2.11`).
+    Se fija `fastapi-mcp==0.4.0` y `mcp==1.23.0`; al exigir `mcp>=1.13` `pydantic>=2.11` y
+    `uvicorn>=0.31.1`, se elevan `pydantic` a `2.13.4`, `pydantic-settings` a `2.14.1` y `uvicorn`
+    a `0.49.0` (se mantienen `starlette==1.3.1` y `httpx==0.27.2`).
 - Nuevos indicadores operativos en `GET /repos/{repo_id}/snapshots`:
     `repo_size_mb` para el tamaño efectivamente leído del repositorio y
     `embedding_tokens_read_estimated` para el estimado de tokens enviados a la
