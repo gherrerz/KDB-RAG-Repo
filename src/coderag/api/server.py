@@ -333,6 +333,7 @@ def _build_chroma_effective_params(
 @app.post(
     "/repos/ingest",
     response_model=JobInfo,
+    operation_id="ingest_repo",
     tags=["Ingesta"],
     summary="Crear job de ingesta",
     description=(
@@ -394,6 +395,7 @@ def ingest_repo(request: RepoIngestRequest) -> JobInfo:
 @app.get(
     "/jobs/{job_id}",
     response_model=JobInfo,
+    operation_id="get_job",
     tags=["Ingesta"],
     summary="Consultar estado de job",
     description=(
@@ -446,6 +448,7 @@ def get_job(
 @app.post(
     "/query",
     response_model=QueryResponse,
+    operation_id="query_repo",
     tags=["Consulta"],
     summary="Consulta híbrida general",
     description=(
@@ -530,6 +533,7 @@ def query_repo(request: QueryRequest) -> QueryResponse:
 @app.post(
     "/inventory/query",
     response_model=InventoryQueryResponse,
+    operation_id="query_inventory",
     tags=["Consulta"],
     summary="Consulta de inventario paginada",
     description=(
@@ -571,6 +575,7 @@ def query_inventory(request: InventoryQueryRequest) -> InventoryQueryResponse:
 @app.post(
     "/query/retrieval",
     response_model=RetrievalQueryResponse,
+    operation_id="query_retrieval",
     tags=["Consulta"],
     summary="Consulta retrieval-only sin LLM",
     description=(
@@ -625,6 +630,7 @@ def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
 @app.get(
     "/repos",
     response_model=RepoCatalogResponse,
+    operation_id="list_repos",
     tags=["Catalogo"],
     summary="Listar repositorios disponibles",
     description="Lista los repo_id disponibles para ser usados en consultas.",
@@ -650,6 +656,7 @@ def list_repos() -> RepoCatalogResponse:
 @app.get(
     "/repos/{repo_id}/snapshots",
     response_model=RepoIngestionSnapshotsResponse,
+    operation_id="list_repo_snapshots",
     tags=["Catalogo"],
     summary="Listar snapshots operativos por repositorio",
     description=(
@@ -687,6 +694,7 @@ def list_repo_ingest_snapshots(
 @app.get(
     "/repos/last-query/stale",
     response_model=RepoLastQueryStaleResponse,
+    operation_id="list_stale_repos",
     tags=["Catalogo"],
     summary="Listar repositorios sin consultas recientes",
     description=(
@@ -739,6 +747,7 @@ def list_stale_repos(
 @app.get(
     "/providers/models",
     response_model=ProviderModelCatalogResponse,
+    operation_id="list_provider_models",
     tags=["Catalogo"],
     summary="Catálogo de modelos por provider",
     description=(
@@ -769,6 +778,7 @@ def list_provider_models(
 @app.get(
     "/repos/{repo_id}/status",
     response_model=RepoQueryStatusResponse,
+    operation_id="repo_status",
     tags=["Catalogo"],
     summary="Estado de readiness por repositorio",
     description=(
@@ -795,6 +805,7 @@ def repo_status(
 @app.get(
     "/health",
     response_model=StorageHealthResponse,
+    operation_id="storage_health",
     tags=["Admin"],
     summary="Salud de storage",
     description=(
@@ -1094,3 +1105,12 @@ def delete_repo(repo_id: str) -> RepoDeleteResponse:
         deleted_counts=deleted_counts,
         warnings=warnings,
     )
+
+
+# Montaje del servidor MCP al final del módulo: fastapi-mcp introspecta el
+# OpenAPI en este punto, por lo que todas las rutas @app ya deben estar
+# registradas. Coexiste con la API REST en el mismo proceso/puerto.
+if get_settings().mcp_enabled:
+    from coderag.api.mcp_server import setup_mcp
+
+    setup_mcp(app)

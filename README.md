@@ -417,6 +417,11 @@ Rutas principales:
 - GET /admin/chroma/diagnostics
 - POST /admin/chroma/query
 - POST /admin/reset
+- POST/GET /mcp (servidor MCP para agentes de IA; envoltura `fastapi-mcp` sobre la misma app)
+
+El endpoint `/mcp` coexiste con la API REST en el mismo proceso/puerto y deja que cualquier agente
+de IA descubra (`tools/list`) y ejecute (`tools/call`) las operaciones de consulta/lectura/ingesta.
+Se controla con `MCP_ENABLED` y `MCP_API_TOKEN` (header `X-MCP-Token`).
 
 Referencia completa por journeys y contratos:
 

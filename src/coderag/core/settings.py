@@ -137,6 +137,22 @@ class Settings(BaseSettings):
         default="",
         alias="ADMIN_RESET_TOKEN",
     )
+    mcp_enabled: bool = Field(
+        default=True,
+        alias="MCP_ENABLED",
+    )
+    mcp_api_token: str = Field(
+        default="",
+        alias="MCP_API_TOKEN",
+    )
+    mcp_mount_path: str = Field(
+        default="/mcp",
+        alias="MCP_MOUNT_PATH",
+    )
+    mcp_server_name: str = Field(
+        default="coderag-mcp",
+        alias="MCP_SERVER_NAME",
+    )
     chroma_remote_batch_size_override: int = Field(
         default=0,
         alias="CHROMA_REMOTE_BATCH_SIZE_OVERRIDE",
@@ -470,6 +486,17 @@ class Settings(BaseSettings):
                 "SECURITY: CHROMA_ADMIN_API_ENABLED=true sin "
                 "CHROMA_ADMIN_API_TOKEN. El endpoint admin de Chroma quedará "
                 "protegido solo por feature flag."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _warn_unprotected_mcp_endpoint(self) -> "Settings":
+        """Advierte cuando el servidor MCP queda expuesto sin token."""
+        if self.mcp_enabled and not self.mcp_api_token:
+            _settings_log.warning(
+                "SECURITY: MCP_ENABLED=true sin MCP_API_TOKEN. El endpoint "
+                "/mcp quedará accesible sin autenticación; defina "
+                "MCP_API_TOKEN antes de exponerlo fuera de una red confiable."
             )
         return self
 

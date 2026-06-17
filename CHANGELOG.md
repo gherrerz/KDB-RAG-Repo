@@ -26,6 +26,20 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Added
 
+- Soporte **MCP (Model Context Protocol)** coexistiendo con la API REST en el mismo
+    proceso/puerto: se monta un endpoint `/mcp` (transporte HTTP streamable) mediante
+    `fastapi-mcp`, cuyas tools se derivan automáticamente del OpenAPI de FastAPI (el nombre
+    de cada tool es el `operation_id` de la ruta). Cualquier agente de IA compatible con MCP
+    puede descubrir (`tools/list`) y ejecutar (`tools/call`) las operaciones. Solo se exponen
+    operaciones de consulta, lectura e ingesta (`ingest_repo`, `get_job`, `query_repo`,
+    `query_retrieval`, `query_inventory`, `list_repos`, `list_repo_snapshots`,
+    `list_stale_repos`, `list_provider_models`, `repo_status`, `storage_health`) mediante un
+    filtro `include_operations` (default-deny); los endpoints admin/destructivos quedan fuera.
+    El endpoint se controla con `MCP_ENABLED` y se protege con `MCP_API_TOKEN` (header
+    `X-MCP-Token`); configurable también con `MCP_MOUNT_PATH` y `MCP_SERVER_NAME`. Nuevo módulo
+    `src/coderag/api/mcp_server.py` (`setup_mcp`) y script de smoke test `scripts/mcp_smoke.sh`.
+    Se fija `fastapi-mcp==0.4.0` y `mcp==1.12.0` (última versión de `mcp` compatible con los pins
+    de `pydantic==2.9.2` / `uvicorn==0.30.6`; `mcp>=1.13` exigiría `pydantic>=2.11`).
 - Nuevos indicadores operativos en `GET /repos/{repo_id}/snapshots`:
     `repo_size_mb` para el tamaño efectivamente leído del repositorio y
     `embedding_tokens_read_estimated` para el estimado de tokens enviados a la

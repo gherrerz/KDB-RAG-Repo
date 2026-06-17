@@ -278,6 +278,48 @@ Notas de comportamiento:
 - El body debe incluir `confirm=true` y
   `confirmation_phrase="RESET ALL DATA"`.
 
+### MCP
+
+#### POST/GET /mcp
+
+Servidor MCP (Model Context Protocol) montado sobre la misma app FastAPI
+(`fastapi-mcp`), coexistiendo con la API REST en el mismo proceso y puerto.
+Cualquier agente de IA compatible con MCP puede conectarse a `/mcp` (transporte
+HTTP streamable) para **descubrir** (`tools/list`) y **ejecutar** (`tools/call`)
+las operaciones expuestas. Las tools se derivan automáticamente del OpenAPI y su
+nombre es el `operation_id` de cada ruta.
+
+- Implementación: `src/coderag/api/mcp_server.py` (`setup_mcp`)
+- Header de auth: `X-MCP-Token: str` (requerido solo si `MCP_API_TOKEN` está configurado)
+- Error responses:
+  - `403`: token MCP inválido cuando `MCP_API_TOKEN` está configurado (`detail` es objeto)
+  - `404`: servidor MCP deshabilitado (`MCP_ENABLED=false`) (`detail` es objeto)
+
+Tools publicadas (default-deny; los endpoints admin/destructivos quedan fuera):
+
+| Tool (`operation_id`) | Endpoint subyacente |
+| --- | --- |
+| `ingest_repo` | `POST /repos/ingest` |
+| `get_job` | `GET /jobs/{job_id}` |
+| `query_repo` | `POST /query` |
+| `query_retrieval` | `POST /query/retrieval` |
+| `query_inventory` | `POST /inventory/query` |
+| `list_repos` | `GET /repos` |
+| `list_repo_snapshots` | `GET /repos/{repo_id}/snapshots` |
+| `list_stale_repos` | `GET /repos/last-query/stale` |
+| `list_provider_models` | `GET /providers/models` |
+| `repo_status` | `GET /repos/{repo_id}/status` |
+| `storage_health` | `GET /health` |
+
+Notas de comportamiento:
+
+- **Excluidos** del servidor MCP: `/admin/reset`, `/admin/chroma/diagnostics`,
+  `/admin/chroma/query` y `DELETE /repos/{repo_id}`.
+- El montaje se realiza al final de `server.py`, una vez registradas todas las
+  rutas, porque `fastapi-mcp` introspecta el OpenAPI en ese momento.
+- Se controla con `MCP_ENABLED` (gate) y `MCP_API_TOKEN` (auth). Sin token, el
+  endpoint queda accesible solo tras el feature flag (se emite warning al arranque).
+
 ## Mapping interno
 
 | Method | Path | Internal service | Request model | Response model |
@@ -297,6 +339,7 @@ Notas de comportamiento:
 | POST | `/admin/chroma/query` | `build_managed_vector_index` + Chroma direct read | `ChromaQueryRequest` | `ChromaQueryResponse` |
 | DELETE | `/repos/{repo_id}` | `JobManager.delete_repo` | Path params | `RepoDeleteResponse` |
 | POST | `/admin/reset` | `JobManager.reset_all_data` | `AdminResetRequest` | `ResetResponse` |
+| POST/GET | `/mcp` | `setup_mcp` (envoltura MCP del OpenAPI) | MCP JSON-RPC | MCP JSON-RPC |
 
 ## Schemas
 

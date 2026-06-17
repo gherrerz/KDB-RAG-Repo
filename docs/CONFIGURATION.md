@@ -86,6 +86,27 @@ Notas operativas:
 - Si la UI desktop consume una API remota protegida, debe arrancar con el
   mismo `ADMIN_RESET_TOKEN` configurado en esa API.
 
+### Servidor MCP
+
+Expone las operaciones de la API como tools MCP en `/mcp` (envoltura automática
+con `fastapi-mcp`, montada sobre la misma app). Ver `docs/API_REFERENCE.md`.
+
+- `MCP_ENABLED`: habilita el montaje de `/mcp`. Default: `true`.
+- `MCP_API_TOKEN`: token requerido en el header `X-MCP-Token` para acceder a
+  `/mcp`. Default: vacío.
+- `MCP_MOUNT_PATH`: path de montaje del servidor MCP. Default: `/mcp`.
+- `MCP_SERVER_NAME`: nombre anunciado del servidor MCP. Default: `coderag-mcp`.
+
+Notas operativas:
+
+- Si `MCP_ENABLED=true` y `MCP_API_TOKEN` está vacío, `/mcp` queda accesible sin
+  autenticación (solo protegido por el feature flag) y se emite una advertencia
+  de seguridad al arranque. Defina `MCP_API_TOKEN` antes de exponerlo fuera de
+  una red confiable.
+- Solo se publican operaciones de consulta, lectura e ingesta; los endpoints
+  admin/destructivos (`/admin/*`, `DELETE /repos/{id}`) quedan fuera del servidor
+  MCP por diseño (filtro `include_operations`).
+
 ### Storage, metadata, lexical y workspace
 
 - `POSTGRES_HOST`: host del backend operativo de Postgres para metadata y store lexico. El runtime soportado usa Postgres versionado como backend obligatorio. Default: vacio.

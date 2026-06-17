@@ -44,8 +44,14 @@ Módulos clave bajo `src/coderag/`:
 | GET | `/repos/{id}/status` | Readiness: `query_ready`, `embedding_compatible` |
 | GET | `/health` | Estado de todos los componentes de storage |
 | POST | `/webhook/bitbucket` | Webhook directo BB Server/DC → dispara ingesta |
+| POST/GET | `/mcp` | Servidor MCP (envoltura `fastapi-mcp`) para agentes de IA: `tools/list` + `tools/call` |
 
 `/query` y `/query/retrieval` exigen `query_ready=true` y compatibilidad de embeddings o devuelven 422.
+
+El servidor MCP (`/mcp`) coexiste con la API REST en el mismo proceso/puerto; deriva sus tools del
+OpenAPI (nombre = `operation_id`). Solo expone consulta/lectura/ingesta (admin/destructivo excluido por
+`include_operations`). Config: `MCP_ENABLED`, `MCP_API_TOKEN` (header `X-MCP-Token`), `MCP_MOUNT_PATH`,
+`MCP_SERVER_NAME`. Impl: `src/coderag/api/mcp_server.py`.
 
 ---
 
@@ -94,6 +100,8 @@ Resumen: multi-stage builds, imagen base slim/alpine con tag fijo, usuario no-ro
 ## Actualización de documentación
 
 Al cambiar endpoints, env vars, configuración o flujos de ingesta, actualizar:
+- `CHANGELOG.md` — **siempre**: registrar el cambio bajo `[Unreleased]` en la categoría
+  Keep a Changelog correspondiente (`Added`, `Changed`, `Fixed`, `Security`, etc.)
 - `docs/API_REFERENCE.md` — contratos de endpoints
 - `docs/CONFIGURATION.md` — nuevas variables de entorno
 - `README.md` — si cambia el quick-start o la arquitectura general
