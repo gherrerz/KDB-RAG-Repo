@@ -8,9 +8,15 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Security
 
+- Remediadas **CVE-2026-48818** (SSRF/robo NTLM vía rutas UNC en `StaticFiles`, solo Windows) y
+    **CVE-2026-54283** (DoS por bypass de límites en `request.form()` para
+    `application/x-www-form-urlencoded`) en Starlette: se sube `fastapi` a `0.137.1` y `starlette`
+    a `1.3.1` (que también mantiene corregida CVE-2025-62727). La app no usa `StaticFiles` ni parseo
+    de formularios y corre en Linux, por lo que ninguna era explotable, pero se actualiza para limpiar
+    el escaneo Trivy. Solo cambio de dependencias (la app no importa Starlette directamente).
 - Remediada **CVE-2025-62727** (DoS en Starlette por parseo cuadrático del header `Range`):
-    `fastapi` se actualiza a `0.120.1` y se fija explícitamente `starlette==0.49.1` en
-    `requirements.txt` y `requirements-runtime.txt`.
+    `fastapi` se actualizó a `0.120.1` y se fijó explícitamente `starlette==0.49.1` en
+    `requirements.txt` y `requirements-runtime.txt` (posteriormente elevado a `starlette==1.3.1`).
 - Remediada **CVE-2026-45829** ("ChromaToast", RCE pre-auth en el servidor Python de ChromaDB):
     la imagen de servidor (`requirements.txt`) reemplaza `chromadb` por el thin client
     `chromadb-client`, que no incluye el código del servidor vulnerable. La imagen pasa a soportar
