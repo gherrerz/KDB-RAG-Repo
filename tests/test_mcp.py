@@ -30,8 +30,12 @@ def test_setup_mcp_exposes_only_included_operations() -> None:
     names = {tool.name for tool in mcp.tools}
 
     assert names == set(MCP_INCLUDED_OPERATIONS)
-    assert {"ingest_repo", "query_repo", "storage_health"} <= names
-    forbidden = {"reset_all_data", "delete_repo", "chroma_query", "chroma_diagnostics"}
+    assert {"query_repo", "query_retrieval", "storage_health"} <= names
+    forbidden = {
+        "reset_all_data", "delete_repo", "chroma_query", "chroma_diagnostics",
+        "ingest_repo", "get_job", "query_inventory",
+        "list_repo_snapshots", "list_stale_repos", "list_provider_models",
+    }
     assert names.isdisjoint(forbidden)
 
 

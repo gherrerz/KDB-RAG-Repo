@@ -41,6 +41,17 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
     Se fija `fastapi-mcp==0.4.0` y `mcp==1.23.0`; al exigir `mcp>=1.13` `pydantic>=2.11` y
     `uvicorn>=0.31.1`, se elevan `pydantic` a `2.13.4`, `pydantic-settings` a `2.14.1` y `uvicorn`
     a `0.49.0` (se mantienen `starlette==1.3.1` y `httpx==0.27.2`).
+
+### Changed
+
+- **Scope de tools MCP reducido de 11 a 5**: el servidor MCP en `/mcp` ahora solo
+    expone operaciones de consulta y lectura directa (`query_repo`, `query_retrieval`,
+    `list_repos`, `repo_status`, `storage_health`). Se retiran `ingest_repo`,
+    `get_job`, `query_inventory`, `list_repo_snapshots`, `list_stale_repos` y
+    `list_provider_models` del filtro `include_operations` en
+    `src/coderag/api/mcp_server.py`. Los endpoints REST correspondientes no se
+    modifican y siguen disponibles via HTTP.
+
 - Nuevos indicadores operativos en `GET /repos/{repo_id}/snapshots`:
     `repo_size_mb` para el tamaño efectivamente leído del repositorio y
     `embedding_tokens_read_estimated` para el estimado de tokens enviados a la

@@ -295,26 +295,21 @@ nombre es el `operation_id` de cada ruta.
   - `403`: token MCP inválido cuando `MCP_API_TOKEN` está configurado (`detail` es objeto)
   - `404`: servidor MCP deshabilitado (`MCP_ENABLED=false`) (`detail` es objeto)
 
-Tools publicadas (default-deny; los endpoints admin/destructivos quedan fuera):
+Tools publicadas (default-deny; solo consulta y lectura directa):
 
 | Tool (`operation_id`) | Endpoint subyacente |
 | --- | --- |
-| `ingest_repo` | `POST /repos/ingest` |
-| `get_job` | `GET /jobs/{job_id}` |
 | `query_repo` | `POST /query` |
 | `query_retrieval` | `POST /query/retrieval` |
-| `query_inventory` | `POST /inventory/query` |
 | `list_repos` | `GET /repos` |
-| `list_repo_snapshots` | `GET /repos/{repo_id}/snapshots` |
-| `list_stale_repos` | `GET /repos/last-query/stale` |
-| `list_provider_models` | `GET /providers/models` |
 | `repo_status` | `GET /repos/{repo_id}/status` |
 | `storage_health` | `GET /health` |
 
 Notas de comportamiento:
 
-- **Excluidos** del servidor MCP: `/admin/reset`, `/admin/chroma/diagnostics`,
-  `/admin/chroma/query` y `DELETE /repos/{repo_id}`.
+- **Excluidos** del servidor MCP: ingesta (`/repos/ingest`), seguimiento de
+  jobs (`/jobs/{id}`), inventario (`/inventory/query`), snapshots, repos
+  inactivos, modelos, y todos los endpoints admin/destructivos.
 - El montaje se realiza al final de `server.py`, una vez registradas todas las
   rutas, porque `fastapi-mcp` introspecta el OpenAPI en ese momento.
 - Se controla con `MCP_ENABLED` (gate) y `MCP_API_TOKEN` (auth). Sin token, el

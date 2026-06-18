@@ -16,17 +16,11 @@ from coderag.core.settings import Settings, get_settings
 _log = logging.getLogger(__name__)
 
 # Operaciones publicadas como tools MCP. Default-deny: cualquier operation_id
-# no listado aquí (admin, reset, delete, chroma) queda fuera del servidor MCP.
+# no listado aquí (ingesta, jobs, inventario, catálogo, admin) queda fuera.
 MCP_INCLUDED_OPERATIONS: list[str] = [
-    "ingest_repo",
-    "get_job",
     "query_repo",
     "query_retrieval",
-    "query_inventory",
     "list_repos",
-    "list_repo_snapshots",
-    "list_stale_repos",
-    "list_provider_models",
     "repo_status",
     "storage_health",
 ]
