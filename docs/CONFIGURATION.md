@@ -106,6 +106,9 @@ Notas operativas:
 - Solo se publican operaciones de consulta, lectura e ingesta; los endpoints
   admin/destructivos (`/admin/*`, `DELETE /repos/{id}`) quedan fuera del servidor
   MCP por diseño (filtro `include_operations`).
+- Headers de identidad opcionales (`x-role-id`, `x-user-id`, `x-country-id`): se
+  fijan en la conexión `/mcp` y el servidor los reenvía (pass-through) a cada tool.
+  No se exige su presencia. Definidos en `src/coderag/api/identity_headers.py`.
 
 ### Storage, metadata, lexical y workspace
 

@@ -11,6 +11,7 @@ import logging
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi_mcp import AuthConfig, FastApiMCP
 
+from coderag.api.identity_headers import IDENTITY_HEADER_NAMES
 from coderag.core.settings import Settings, get_settings
 
 _log = logging.getLogger(__name__)
@@ -70,6 +71,8 @@ def setup_mcp(app: FastAPI, settings: Settings | None = None) -> FastApiMCP:
         name=settings.mcp_server_name,
         include_operations=MCP_INCLUDED_OPERATIONS,
         auth_config=auth_config,
+        # Reenvía la identidad del llamante desde la conexión /mcp a cada tool.
+        headers=["authorization", *IDENTITY_HEADER_NAMES],
     )
     mcp.mount_http(mount_path=settings.mcp_mount_path)
     _log.info(

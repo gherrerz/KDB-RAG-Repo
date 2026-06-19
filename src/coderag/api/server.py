@@ -6,9 +6,10 @@ from datetime import datetime
 from time import perf_counter
 from typing import cast
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.openapi.utils import get_openapi
 
+from coderag.api.identity_headers import identity_headers
 from coderag.core.logging import configure_logging
 from coderag.core.models import (
     AdminResetRequest,
@@ -449,6 +450,7 @@ def get_job(
     "/query",
     response_model=QueryResponse,
     operation_id="query_repo",
+    dependencies=[Depends(identity_headers)],
     tags=["Consulta"],
     summary="Consulta híbrida general",
     description=(
@@ -576,6 +578,7 @@ def query_inventory(request: InventoryQueryRequest) -> InventoryQueryResponse:
     "/query/retrieval",
     response_model=RetrievalQueryResponse,
     operation_id="query_retrieval",
+    dependencies=[Depends(identity_headers)],
     tags=["Consulta"],
     summary="Consulta retrieval-only sin LLM",
     description=(
@@ -631,6 +634,7 @@ def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
     "/repos",
     response_model=RepoCatalogResponse,
     operation_id="list_repos",
+    dependencies=[Depends(identity_headers)],
     tags=["Catalogo"],
     summary="Listar repositorios disponibles",
     description="Lista los repo_id disponibles para ser usados en consultas.",
@@ -779,6 +783,7 @@ def list_provider_models(
     "/repos/{repo_id}/status",
     response_model=RepoQueryStatusResponse,
     operation_id="repo_status",
+    dependencies=[Depends(identity_headers)],
     tags=["Catalogo"],
     summary="Estado de readiness por repositorio",
     description=(
@@ -806,6 +811,7 @@ def repo_status(
     "/health",
     response_model=StorageHealthResponse,
     operation_id="storage_health",
+    dependencies=[Depends(identity_headers)],
     tags=["Admin"],
     summary="Salud de storage",
     description=(

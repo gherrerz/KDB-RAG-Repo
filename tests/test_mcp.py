@@ -47,6 +47,34 @@ def test_setup_mcp_registers_mount_path() -> None:
     assert any(getattr(route, "path", "") == "/mcp" for route in app.routes)
 
 
+def test_setup_mcp_forwards_identity_headers() -> None:
+    """El servidor MCP reenvía los 3 headers de identidad (más authorization)."""
+    from coderag.api.server import app
+
+    mcp = setup_mcp(app, settings=_settings(token="secret"))
+    assert {"x-role-id", "x-user-id", "x-country-id"} <= mcp._forward_headers
+    assert "authorization" in mcp._forward_headers
+
+
+def test_exposed_operations_declare_identity_headers() -> None:
+    """Cada operación expuesta vía MCP declara los 3 headers opcionales."""
+    from coderag.api.server import app
+
+    schema = app.openapi()
+    declared: dict[str, set[str]] = {}
+    for item in schema["paths"].values():
+        for op in item.values():
+            if isinstance(op, dict) and op.get("operationId"):
+                declared[op["operationId"]] = {
+                    p["name"]
+                    for p in op.get("parameters", [])
+                    if p.get("in") == "header"
+                }
+    need = {"x-role-id", "x-user-id", "x-country-id"}
+    for operation_id in MCP_INCLUDED_OPERATIONS:
+        assert need <= declared.get(operation_id, set()), operation_id
+
+
 def test_ensure_mcp_access_allows_matching_token(monkeypatch) -> None:
     monkeypatch.setattr(mcp_server, "get_settings", lambda: _settings(token="secret"))
     # No debe lanzar.

@@ -41,6 +41,11 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
     Se fija `fastapi-mcp==0.4.0` y `mcp==1.23.0`; al exigir `mcp>=1.13` `pydantic>=2.11` y
     `uvicorn>=0.31.1`, se elevan `pydantic` a `2.13.4`, `pydantic-settings` a `2.14.1` y `uvicorn`
     a `0.49.0` (se mantienen `starlette==1.3.1` y `httpx==0.27.2`).
+- Headers de identidad opcionales en los servicios MCP: `x-role-id`, `x-user-id` y
+    `x-country-id` se reenvían (pass-through) desde la conexión `/mcp` hacia cada tool vía el
+    allowlist de `fastapi-mcp` y se declaran en el OpenAPI de las operaciones expuestas. Nuevo
+    módulo `src/coderag/api/identity_headers.py` (dependencia `identity_headers` +
+    `IDENTITY_HEADER_NAMES`).
 
 ### Changed
 

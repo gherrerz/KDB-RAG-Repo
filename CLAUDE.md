@@ -50,8 +50,10 @@ Módulos clave bajo `src/coderag/`:
 
 El servidor MCP (`/mcp`) coexiste con la API REST en el mismo proceso/puerto; deriva sus tools del
 OpenAPI (nombre = `operation_id`). Solo expone consulta/lectura/ingesta (admin/destructivo excluido por
-`include_operations`). Config: `MCP_ENABLED`, `MCP_API_TOKEN` (header `X-MCP-Token`), `MCP_MOUNT_PATH`,
-`MCP_SERVER_NAME`. Impl: `src/coderag/api/mcp_server.py`.
+`include_operations`). Reenvía headers de identidad opcionales
+`x-role-id`/`x-user-id`/`x-country-id` (pass-through, allowlist de `fastapi-mcp`; ver
+`src/coderag/api/identity_headers.py`). Config: `MCP_ENABLED`, `MCP_API_TOKEN` (header `X-MCP-Token`),
+`MCP_MOUNT_PATH`, `MCP_SERVER_NAME`. Impl: `src/coderag/api/mcp_server.py`.
 
 ---
 

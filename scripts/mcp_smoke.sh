@@ -8,6 +8,8 @@ BASE="${1:-http://127.0.0.1:8000}"
 TOKEN="${2:-}"
 ACCEPT="Accept: application/json, text/event-stream"
 AUTH=(); [ -n "$TOKEN" ] && AUTH=(-H "X-MCP-Token: $TOKEN")
+# Headers de identidad opcionales: el servidor MCP los reenvía a cada tool.
+AUTH+=(-H "x-role-id: smoke-role" -H "x-user-id: smoke-user" -H "x-country-id: cl")
 
 # 1) initialize -> obtener mcp-session-id de las cabeceras
 HDRS=$(curl -s -D - -o /tmp/mcp_init.txt "${AUTH[@]}" -X POST "$BASE/mcp" \
