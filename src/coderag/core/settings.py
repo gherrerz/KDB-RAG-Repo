@@ -5,17 +5,24 @@ import binascii
 from functools import lru_cache
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
 _settings_log = logging.getLogger(__name__)
 
+from dotenv import load_dotenv
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from coderag.core.provider_model_catalog import normalize_provider_name
 from coderag.core.vertex_ai import derive_vertex_location_from_base_url
+
+
+# Carga el .env en os.environ para que la resolución por entorno (variantes
+# con sufijo) sea uniforme entre variables de proceso y archivo .env.
+load_dotenv(override=False)
 
 
 ProviderName = Literal["openai", "gemini", "vertex"]
@@ -25,6 +32,42 @@ VertexAuthMode = Literal["service_account"]
 GitSshStrictHostKeyChecking = Literal["yes", "accept-new", "no"]
 ChromaMode = Literal["embedded", "remote"]
 RuntimeEnvironment = Literal["development", "test", "production"]
+
+
+# Sufijo de variable de entorno por ambiente activo. Permite apuntar a
+# servidores y credenciales distintos por entorno (servidores separados).
+_ENV_SUFFIX_BY_ENVIRONMENT = {
+    "development": "DEV",
+    "test": "TEST",
+    "production": "PROD",
+}
+
+# Aliases de infraestructura cuyas variantes con sufijo se resuelven por
+# entorno (endpoints y credenciales). RUNTIME_ENVIRONMENT queda excluido a
+# propósito: es quien decide el sufijo, no puede llevarlo.
+_ENV_SCOPED_INFRA_ALIASES = (
+    "CHROMA_MODE",
+    "CHROMA_HOST",
+    "CHROMA_PORT",
+    "CHROMA_TOKEN",
+    "CHROMA_USERNAME",
+    "CHROMA_PASSWORD",
+    "POSTGRES_HOST",
+    "POSTGRES_PORT",
+    "POSTGRES_DB",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "NEO4J_URI",
+    "NEO4J_USER",
+    "NEO4J_PASSWORD",
+    "REDIS_URL",
+)
+
+
+def _active_env_suffix() -> str:
+    """Devuelve el sufijo de variable para el entorno activo."""
+    raw = (os.getenv("RUNTIME_ENVIRONMENT") or "development").strip().lower()
+    return _ENV_SUFFIX_BY_ENVIRONMENT.get(raw, "DEV")
 
 
 class Settings(BaseSettings):
@@ -150,7 +193,7 @@ class Settings(BaseSettings):
         alias="MCP_MOUNT_PATH",
     )
     mcp_server_name: str = Field(
-        default="coderag-mcp",
+        default="repositories-kdb-mcp",
         alias="MCP_SERVER_NAME",
     )
     chroma_remote_batch_size_override: int = Field(
@@ -274,7 +317,7 @@ class Settings(BaseSettings):
         alias="SCAN_MAX_FILE_SIZE_BYTES",
     )
     scan_excluded_dirs: str = Field(
-        default=".git,node_modules,dist,build,venv,.venv,__pycache__,.idea,.vscode,target,out,bin,obj,.gradle,.m2,.pytest_cache,.mypy_cache",
+        default=".git,.github,.claude,node_modules,dist,build,venv,.venv,__pycache__,.idea,.vscode,target,out,bin,obj,.gradle,.m2,.pytest_cache,.mypy_cache",
         alias="SCAN_EXCLUDED_DIRS",
     )
     scan_excluded_extensions: str = Field(
@@ -353,7 +396,7 @@ class Settings(BaseSettings):
         default=True,
         alias="SEMANTIC_GRAPH_QUERY_FALLBACK_TO_STRUCTURAL",
     )
-    health_check_strict: bool = Field(default=True, alias="HEALTH_CHECK_STRICT")
+    health_check_strict: bool = Field(default=False, alias="HEALTH_CHECK_STRICT")
     health_check_timeout_seconds: float = Field(
         default=5.0,
         alias="HEALTH_CHECK_TIMEOUT_SECONDS",
@@ -408,6 +451,25 @@ class Settings(BaseSettings):
         default="",
         alias="WEBHOOK_BITBUCKET_REPO_REGISTRY_FILE",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_env_scoped_infra(cls, data: object) -> object:
+        """Resuelve variantes por entorno de URLs y credenciales de infra.
+
+        Precedencia por variable: ``{ALIAS}_{SUFIJO}`` -> ``{ALIAS}`` ->
+        default. Cuando existe la variante con sufijo del entorno activo
+        (``RUNTIME_ENVIRONMENT``), se inyecta sobre el alias base antes de
+        validar, de modo que el resto del modelo la consume de forma normal.
+        """
+        if not isinstance(data, dict):
+            return data
+        suffix = _active_env_suffix()
+        for alias in _ENV_SCOPED_INFRA_ALIASES:
+            scoped = os.getenv(f"{alias}_{suffix}")
+            if scoped is not None and scoped.strip() != "":
+                data[alias] = scoped
+        return data
 
     @field_validator("chroma_hnsw_space", mode="before")
     @classmethod

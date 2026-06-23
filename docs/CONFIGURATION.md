@@ -173,6 +173,36 @@ Notas operativas de storage:
 - Si mantienes `CHROMA_REMOTE_BATCH_SIZE_OVERRIDE=0`, el runtime puede usar `CHROMA_MAX_REQUEST_BYTES`, `CHROMA_REMOTE_MIN_BATCH_SIZE` y `CHROMA_REMOTE_MAX_SPLIT_DEPTH` para preparar el terreno de batching adaptativo y retries recuperables.
 - Este ajuste apunta principalmente al write-path remoto de ingesta y limpieza por repo; no cambia la semantica de query y no deberia alterar la latencia de busqueda principal.
 
+### Infraestructura por entorno (URLs y credenciales)
+
+Las conexiones de infraestructura (Chroma, Postgres, Neo4j y Redis) se
+diferencian por entorno mediante **variables con sufijo**, gobernadas por
+`RUNTIME_ENVIRONMENT`. Permite apuntar cada entorno a servidores y credenciales
+distintos (servidores separados) sin tocar codigo.
+
+Precedencia de resolucion, por variable:
+
+1. `{VAR}_{SUFIJO}` (variante del entorno activo, p.ej. `POSTGRES_HOST_TEST`)
+2. `{VAR}` (variable base, *fallback* — comportamiento previo)
+3. default codificado en `settings.py`
+
+Mapeo de sufijos: `development` → `_DEV`, `test` (QA) → `_TEST`,
+`production` → `_PROD`.
+
+Variables suffixables (endpoints **y** credenciales): `CHROMA_MODE`,
+`CHROMA_HOST`, `CHROMA_PORT`, `CHROMA_TOKEN`, `CHROMA_USERNAME`,
+`CHROMA_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`,
+`POSTGRES_USER`, `POSTGRES_PASSWORD`, `NEO4J_URI`, `NEO4J_USER`,
+`NEO4J_PASSWORD`, `REDIS_URL`.
+
+`RUNTIME_ENVIRONMENT` no lleva sufijo (decide el sufijo). El resto de parametros
+(pools, batch, FTS, LLM, MCP, etc.) permanecen globales. La resolucion se aplica
+en el `model_validator(mode="before")` de `settings.py`
+(`_resolve_env_scoped_infra`), antes de validar. Como las settings se construyen
+una vez (`get_settings()` cacheado), cambiar de entorno requiere reiniciar el
+proceso. Mantener credenciales reales fuera de git (solo placeholders en
+`.env.example`).
+
 ### Ingesta asincrona distribuida
 
 - `INGESTION_EXECUTION_MODE`: modo de ejecucion de ingesta (`thread` o `rq`). Default: `thread`.
