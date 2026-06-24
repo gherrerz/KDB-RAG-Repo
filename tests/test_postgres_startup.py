@@ -8,8 +8,14 @@ from unittest.mock import ANY, MagicMock
 import pytest
 from conftest import build_test_postgres_dsn
 
+from sqlalchemy.exc import OperationalError as SqlAlchemyOperationalError
+
 from coderag.storage import postgres_startup
-from coderag.storage.postgres_session import build_postgres_connect_args
+from coderag.storage.postgres_session import (
+    build_postgres_connect_args,
+    classify_postgres_failure,
+    extract_sqlstate,
+)
 
 
 def _settings(
@@ -73,6 +79,44 @@ def test_upgrade_reraises_after_exhausting_retries(
 
     assert attempts["count"] == 2
     assert "bloqueo persistente" in str(exc_info.value)
+
+
+def test_classify_postgres_failure_detects_duplicate_object() -> None:
+    """Un objeto duplicado se clasifica como colisión de nombres (DDL)."""
+    exc = Exception('relation "tbl_repository_ingestionsnapshots" already exists')
+
+    hint = classify_postgres_failure(exc)
+
+    assert hint is not None
+    assert "colisión de nombres" in hint
+
+
+def test_classify_postgres_failure_detects_duplicate_by_sqlstate() -> None:
+    """El SQLSTATE 42P07 se clasifica como DDL aunque el mensaje no lo diga."""
+    exc = Exception("boom")
+    exc.orig = SimpleNamespace(sqlstate="42P07")
+
+    assert extract_sqlstate(exc) == "42P07"
+    hint = classify_postgres_failure(exc)
+    assert hint is not None
+    assert "DDL" in hint
+
+
+def test_classify_postgres_failure_detects_connection_cut() -> None:
+    """Un cierre de conexión se clasifica como corte de red/mesh."""
+    exc = SqlAlchemyOperationalError(
+        "stmt", {}, Exception("server closed the connection unexpectedly")
+    )
+
+    hint = classify_postgres_failure(exc)
+
+    assert hint is not None
+    assert "red/service mesh" in hint
+
+
+def test_classify_postgres_failure_returns_none_for_unknown() -> None:
+    """Un error genérico sin señales conocidas no fuerza una clasificación."""
+    assert classify_postgres_failure(ValueError("algo raro")) is None
 
 
 def test_connect_args_include_keepalives_and_migration_gucs() -> None:

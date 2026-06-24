@@ -43,9 +43,13 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
   fijan vía libpq `options`, incluido `idle_in_transaction_session_timeout` que **auto-mata
   backends huérfanos** y libera locks para el siguiente arranque (`migrations/env.py`,
   `src/coderag/storage/postgres_session.py`); (3) el `upgrade` se ejecuta con **reintentos
-  acotados con backoff** y, al fallar, se **loguean las sesiones bloqueadoras** para
-  diagnóstico (`src/coderag/storage/postgres_startup.py`); (4) el advisory lock pasa a tener
-  **alcance de transacción** (`pg_advisory_xact_lock`), auto-liberándose si el pod muere.
+  acotados con backoff** y, al fallar, se **loguea la excepción real** (clase, mensaje y
+  SQLSTATE) con una **clasificación accionable** (error DDL determinista/colisión de nombres
+  vs. corte de red/mesh) además de las sesiones concurrentes
+  (`src/coderag/storage/postgres_startup.py`, `migrations/env.py`,
+  `src/coderag/storage/postgres_session.py`); (4) las migraciones corren con
+  `transaction_per_migration`, de modo que las ya aplicadas **persisten** y un fallo queda
+  **aislado y atribuido** a su migración, sin re-ejecutar todo en cada arranque.
 
 ### Security
 

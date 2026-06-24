@@ -47,6 +47,50 @@ def to_sqlalchemy_postgres_url(postgres_dsn: str) -> str:
 _TCP_KEEPALIVES_INTERVAL_SECONDS = 10
 _TCP_KEEPALIVES_COUNT = 5
 
+# SQLSTATE de Postgres que indican objetos duplicados (colisión de nombres).
+_DUPLICATE_OBJECT_SQLSTATES = frozenset({"42P07", "42710", "42P06", "42P16"})
+_CONNECTION_ERROR_TOKENS = (
+    "server closed the connection",
+    "connection reset",
+    "ssl connection has been closed",
+    "could not receive data",
+    "connection timeout",
+    "terminating connection",
+)
+
+
+def extract_sqlstate(exc: BaseException) -> str | None:
+    """Extrae el SQLSTATE de una excepción DBAPI/psycopg si está disponible."""
+    orig = getattr(exc, "orig", None)
+    return getattr(orig, "sqlstate", None) or getattr(exc, "sqlstate", None)
+
+
+def classify_postgres_failure(exc: BaseException) -> str | None:
+    """Devuelve una pista accionable según el tipo de error, o None.
+
+    Distingue un error DDL determinista (objeto ya existe → colisión de nombres
+    en base compartida) de un corte de red/service mesh, para que el log de
+    fallo de migración sea accionable en vez de genérico.
+    """
+    sqlstate = extract_sqlstate(exc)
+    orig = getattr(exc, "orig", None)
+    detail = (str(orig) if orig is not None else str(exc)).lower()
+
+    if sqlstate in _DUPLICATE_OBJECT_SQLSTATES or "already exists" in detail:
+        return (
+            "error DDL determinista (el objeto ya existe; posible colisión de "
+            "nombres en la base compartida). Revisar si la tabla o índices de la "
+            "migración ya están creados en la base."
+        )
+    if isinstance(exc, SqlAlchemyOperationalError) or any(
+        token in detail for token in _CONNECTION_ERROR_TOKENS
+    ):
+        return (
+            "error de conexión (posible corte de red/service mesh en el "
+            "statement de esta migración)."
+        )
+    return None
+
 
 def build_postgres_connect_args(
     settings: object,
