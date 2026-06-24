@@ -73,6 +73,22 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _resolve_migration_timeouts() -> tuple[int, int]:
+    """Resuelve lock_timeout y statement_timeout (ms) para la migración."""
+    settings = get_settings()
+    lock_timeout_ms = int(
+        getattr(settings, "postgres_migration_lock_timeout_ms", 15000)
+    )
+    statement_timeout_ms = int(
+        getattr(settings, "postgres_migration_statement_timeout_ms", 300000)
+    )
+    return lock_timeout_ms, statement_timeout_ms
+
+
+# Clave estable para serializar migradores concurrentes vía advisory lock.
+_ADVISORY_LOCK_KEY = "coderag_alembic_repo"
+
+
 def run_migrations_online() -> None:
     """Ejecuta migraciones en modo online sobre la base configurada."""
     configuration = config.get_section(config.config_ini_section, {})
@@ -84,16 +100,37 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
 
+    lock_timeout_ms, statement_timeout_ms = _resolve_migration_timeouts()
+
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,
-            version_table=_get_alembic_version_table(),
+        # Acota la espera de locks/sentencias para que un bloqueo (p.ej. un
+        # backend huérfano de un pod anterior) falle rápido en vez de colgar el
+        # arranque de forma indefinida. Se fija antes de pedir el advisory lock
+        # para que la propia espera del advisory lock también quede acotada.
+        connection.exec_driver_sql(f"SET lock_timeout = '{lock_timeout_ms}'")
+        connection.exec_driver_sql(
+            f"SET statement_timeout = '{statement_timeout_ms}'"
         )
 
-        with context.begin_transaction():
-            context.run_migrations()
+        # Serializa migradores concurrentes (p.ej. rollout con surge): uno espera
+        # de forma acotada en vez de provocar un bloqueo cruzado entre pods.
+        connection.exec_driver_sql(
+            f"SELECT pg_advisory_lock(hashtext('{_ADVISORY_LOCK_KEY}'))"
+        )
+        try:
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                compare_type=True,
+                version_table=_get_alembic_version_table(),
+            )
+
+            with context.begin_transaction():
+                context.run_migrations()
+        finally:
+            connection.exec_driver_sql(
+                f"SELECT pg_advisory_unlock(hashtext('{_ADVISORY_LOCK_KEY}'))"
+            )
 
 
 if context.is_offline_mode():

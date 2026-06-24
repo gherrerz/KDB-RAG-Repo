@@ -1,4 +1,10 @@
 replicaCount: 1
+# Las migraciones Alembic corren en el arranque de la API (lifespan). Para evitar que
+# durante un rollout coexistan el pod viejo (migrando) y el nuevo y se bloqueen entre sí,
+# el deployment debe usar estrategia Recreate (o maxSurge: 0). Verificar que el chart
+# interno exponga `strategy`; si lo hace, descomentar y ajustar:
+# strategy:
+#   type: Recreate
 epm: BKKG
 service:
   port: 8000

@@ -119,6 +119,8 @@ Notas operativas:
 - `POSTGRES_PASSWORD`: password de Postgres para despliegues locales o Compose. Default: `coderag`.
 - `POSTGRES_POOL_SIZE`: tamano de pool para conexiones Postgres. Default: `5`.
 - `POSTGRES_POOL_TIMEOUT`: timeout de pool Postgres. Default: `30`.
+- `POSTGRES_MIGRATION_LOCK_TIMEOUT_MS`: `lock_timeout` (ms) aplicado a la conexion que ejecuta las migraciones Alembic en el arranque. Acota cuanto espera un `CREATE TABLE`/DDL por un lock antes de fallar, evitando que un bloqueo (p.ej. un backend huerfano) cuelgue el arranque de forma indefinida. Default: `15000`.
+- `POSTGRES_MIGRATION_STATEMENT_TIMEOUT_MS`: `statement_timeout` (ms) aplicado a la conexion de migraciones; tambien acota la espera del advisory lock que serializa migradores concurrentes. Default: `300000`.
 - `RUNTIME_ENVIRONMENT`: politica de migraciones de startup para Postgres. `development` y `test` aplican `alembic upgrade head`; `production` solo valida que la base ya este migrada. Default: `development`.
 - `LEXICAL_FTS_LANGUAGE`: lenguaje de FTS para Postgres lexical. Default: `english`.
 - `WORKSPACE_PATH`: ruta de clones temporales y archivos operativos. Default: `/app/storage/workspace`.

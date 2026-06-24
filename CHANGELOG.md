@@ -15,6 +15,21 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
   el `model_validator(mode="before")` de `settings.py`; documentado en
   `docs/CONFIGURATION.md` y `.env.example`. Sin breaking change: si solo existe la
   variable base, el comportamiento es idéntico al previo.
+- Timeouts configurables para las migraciones Alembic mediante
+  `POSTGRES_MIGRATION_LOCK_TIMEOUT_MS` (default `15000`) y
+  `POSTGRES_MIGRATION_STATEMENT_TIMEOUT_MS` (default `300000`). Documentados en
+  `docs/CONFIGURATION.md`.
+
+### Fixed
+
+- El arranque de la API podía **colgarse indefinidamente** ejecutando una migración
+  Alembic (observado en `0004_add_ingestion_snapshots_table`) cuando el `CREATE TABLE`
+  quedaba esperando un lock —típicamente un backend huérfano de un pod anterior
+  terminado a mitad de migración en la base compartida—, dejando el pod en estado
+  degradado. La conexión de migración (`migrations/env.py`) ahora fija `lock_timeout` y
+  `statement_timeout`, por lo que un bloqueo **falla rápido con un error accionable** en
+  vez de colgar el `lifespan`. Además se toma un `pg_advisory_lock` para serializar
+  migradores concurrentes (p.ej. durante un rollout con surge) y evitar bloqueos cruzados.
 
 ### Security
 

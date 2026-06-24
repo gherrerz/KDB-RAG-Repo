@@ -223,6 +223,14 @@ class Settings(BaseSettings):
     postgres_password: str = Field(default="", alias="POSTGRES_PASSWORD")
     postgres_pool_size: int = Field(default=5, alias="POSTGRES_POOL_SIZE")
     postgres_pool_timeout: float = Field(default=30.0, alias="POSTGRES_POOL_TIMEOUT")
+    postgres_migration_lock_timeout_ms: int = Field(
+        default=15000,
+        alias="POSTGRES_MIGRATION_LOCK_TIMEOUT_MS",
+    )
+    postgres_migration_statement_timeout_ms: int = Field(
+        default=300000,
+        alias="POSTGRES_MIGRATION_STATEMENT_TIMEOUT_MS",
+    )
     runtime_environment: RuntimeEnvironment = Field(
         default="development",
         alias="RUNTIME_ENVIRONMENT",
