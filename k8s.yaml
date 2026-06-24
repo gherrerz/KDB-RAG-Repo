@@ -1,10 +1,9 @@
 replicaCount: 1
-# Las migraciones Alembic corren en el arranque de la API (lifespan). Para evitar que
-# durante un rollout coexistan el pod viejo (migrando) y el nuevo y se bloqueen entre sí,
-# el deployment debe usar estrategia Recreate (o maxSurge: 0). Verificar que el chart
-# interno exponga `strategy`; si lo hace, descomentar y ajustar:
-# strategy:
-#   type: Recreate
+# Las migraciones Alembic corren en el arranque de la API (lifespan). El arranque está
+# blindado por código (timeouts de conexión + keepalives TCP + deadline de aplicación +
+# reintentos + crash-fast en src/coderag/api/server.py y migrations/env.py), por lo que un
+# bloqueo de red/mesh o de lock falla rápido y K8s reinicia el pod en vez de quedar colgado.
+# (Nota: Anthos no soporta strategy: Recreate; no se usa aquí.)
 epm: BKKG
 service:
   port: 8000

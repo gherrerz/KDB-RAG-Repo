@@ -121,6 +121,12 @@ Notas operativas:
 - `POSTGRES_POOL_TIMEOUT`: timeout de pool Postgres. Default: `30`.
 - `POSTGRES_MIGRATION_LOCK_TIMEOUT_MS`: `lock_timeout` (ms) aplicado a la conexion que ejecuta las migraciones Alembic en el arranque. Acota cuanto espera un `CREATE TABLE`/DDL por un lock antes de fallar, evitando que un bloqueo (p.ej. un backend huerfano) cuelgue el arranque de forma indefinida. Default: `15000`.
 - `POSTGRES_MIGRATION_STATEMENT_TIMEOUT_MS`: `statement_timeout` (ms) aplicado a la conexion de migraciones; tambien acota la espera del advisory lock que serializa migradores concurrentes. Default: `300000`.
+- `POSTGRES_MIGRATION_IDLE_TX_TIMEOUT_MS`: `idle_in_transaction_session_timeout` (ms) de la conexion de migraciones. Garantiza que un backend huerfano (pod muerto a mitad de migracion) sea segado por Postgres, liberando locks para el siguiente arranque. Default: `60000`.
+- `POSTGRES_MIGRATION_DEADLINE_SECONDS`: deadline de reloj de pared (s) para la preparacion del esquema en el arranque de la API. Si se excede (p.ej. socket bloqueado por el service mesh, que los GUC server-side no pueden abortar), el arranque falla con crash-fast y Kubernetes reinicia el pod en vez de quedar colgado/degradado. Default: `300`.
+- `POSTGRES_MIGRATION_RETRIES`: numero de intentos del `alembic upgrade` con backoff antes de propagar el error. Default: `3`.
+- `POSTGRES_CONNECT_TIMEOUT_SECONDS`: `connect_timeout` (s) de libpq para acotar el establecimiento de conexiones Postgres (migracion y runtime). Default: `10`.
+- `POSTGRES_TCP_KEEPALIVES_IDLE_SECONDS`: tiempo idle (s) antes del primer keepalive TCP en conexiones Postgres; ayuda a detectar peers muertos a traves del service mesh. Default: `30`.
+- `POSTGRES_TCP_USER_TIMEOUT_MS`: `tcp_user_timeout` (ms) de libpq; cuanto espera datos sin ACK antes de fallar la conexion. Default: `30000`.
 - `RUNTIME_ENVIRONMENT`: politica de migraciones de startup para Postgres. `development` y `test` aplican `alembic upgrade head`; `production` solo valida que la base ya este migrada. Default: `development`.
 - `LEXICAL_FTS_LANGUAGE`: lenguaje de FTS para Postgres lexical. Default: `english`.
 - `WORKSPACE_PATH`: ruta de clones temporales y archivos operativos. Default: `/app/storage/workspace`.

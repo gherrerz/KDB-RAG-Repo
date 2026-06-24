@@ -1,5 +1,7 @@
 """Pruebas API para puntos finales primarios."""
 
+import asyncio
+import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -79,6 +81,33 @@ def bypass_storage_preflight(monkeypatch):
         "list_stale_repos",
         lambda **kwargs: [],
     )
+
+
+def test_lifespan_aborts_when_schema_prep_exceeds_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El backstop de deadline aborta el arranque si la migración cuelga."""
+
+    def slow_schema_prep(settings: object) -> dict:
+        # Simula psycopg bloqueado en el socket (corte de red/mesh).
+        time.sleep(1.0)
+        return {}
+
+    monkeypatch.setattr(server, "ensure_postgres_schema_ready", slow_schema_prep)
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: SimpleNamespace(postgres_migration_deadline_seconds=0.05),
+    )
+
+    async def drive_startup() -> None:
+        async with server.lifespan(server.app):
+            pass
+
+    with pytest.raises(RuntimeError) as exc_info:
+        asyncio.run(drive_startup())
+
+    assert "Timeout preparando el esquema Postgres" in str(exc_info.value)
 
 
 def test_lifespan_startup_succeeds_with_non_critical_neo4j(

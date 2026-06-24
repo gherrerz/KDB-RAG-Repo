@@ -43,6 +43,48 @@ def to_sqlalchemy_postgres_url(postgres_dsn: str) -> str:
     return normalized
 
 
+# Afinamiento de keepalives TCP (constantes razonables; el idle es configurable).
+_TCP_KEEPALIVES_INTERVAL_SECONDS = 10
+_TCP_KEEPALIVES_COUNT = 5
+
+
+def build_postgres_connect_args(
+    settings: object,
+    *,
+    server_settings: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Construye connect_args de libpq/psycopg resilientes al service mesh.
+
+    Incluye keepalives TCP y tcp_user_timeout para detectar peers muertos a
+    nivel de socket, connect_timeout para acotar el establecimiento, y GUCs de
+    servidor (lock/statement/idle_in_transaction timeouts) vía ``options`` para
+    que apliquen desde la conexión. ``server_settings`` permite inyectar GUCs
+    extra (p.ej. para la conexión de migración).
+    """
+    connect_timeout = _coerce_positive_int(
+        getattr(settings, "postgres_connect_timeout_seconds", 10), 10
+    )
+    keepalives_idle = _coerce_positive_int(
+        getattr(settings, "postgres_tcp_keepalives_idle_seconds", 30), 30
+    )
+    tcp_user_timeout_ms = _coerce_positive_int(
+        getattr(settings, "postgres_tcp_user_timeout_ms", 30000), 30000
+    )
+
+    options_parts = [f"-c tcp_user_timeout={tcp_user_timeout_ms}"]
+    for guc_name, guc_value in (server_settings or {}).items():
+        options_parts.append(f"-c {guc_name}={guc_value}")
+
+    return {
+        "connect_timeout": connect_timeout,
+        "keepalives": 1,
+        "keepalives_idle": keepalives_idle,
+        "keepalives_interval": _TCP_KEEPALIVES_INTERVAL_SECONDS,
+        "keepalives_count": _TCP_KEEPALIVES_COUNT,
+        "options": " ".join(options_parts),
+    }
+
+
 def _coerce_positive_int(value: Any, default: int) -> int:
     """Normaliza un entero positivo o retorna un default seguro."""
     try:
@@ -70,11 +112,13 @@ class PostgresSessionFactory:
         *,
         pool_size: int = 5,
         pool_timeout: float = 30.0,
+        connect_args: dict[str, Any] | None = None,
     ) -> None:
         """Construye un factory reutilizable para conexiones a Postgres."""
         self._url = postgres_dsn
         self._pool_size = _coerce_positive_int(pool_size, 5)
         self._pool_timeout = _coerce_positive_float(pool_timeout, 30.0)
+        self._connect_args = dict(connect_args or {})
         self._engine = self._build_engine()
         self._session_factory = sessionmaker(
             bind=self._engine,
@@ -97,6 +141,7 @@ class PostgresSessionFactory:
             postgres_dsn,
             pool_size=getattr(settings, "postgres_pool_size", 5),
             pool_timeout=getattr(settings, "postgres_pool_timeout", 30.0),
+            connect_args=build_postgres_connect_args(settings),
         )
 
     @property
@@ -111,6 +156,7 @@ class PostgresSessionFactory:
             pool_pre_ping=True,
             pool_size=self._pool_size,
             pool_timeout=self._pool_timeout,
+            connect_args=self._connect_args,
         )
 
     @contextmanager

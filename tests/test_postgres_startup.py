@@ -9,6 +9,7 @@ import pytest
 from conftest import build_test_postgres_dsn
 
 from coderag.storage import postgres_startup
+from coderag.storage.postgres_session import build_postgres_connect_args
 
 
 def _settings(
@@ -25,7 +26,80 @@ def _settings(
         ),
         postgres_pool_size=5,
         postgres_pool_timeout=30.0,
+        postgres_migration_retries=3,
     )
+
+
+def test_upgrade_retries_until_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El upgrade reintenta tras fallos transitorios y no propaga si acaba bien."""
+    attempts = {"count": 0}
+
+    def flaky_upgrade(config: object, revision: str) -> None:
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise RuntimeError("lock/red transitorio")
+
+    monkeypatch.setattr(postgres_startup.command, "upgrade", flaky_upgrade)
+    monkeypatch.setattr(postgres_startup.time, "sleep", lambda _seconds: None)
+
+    postgres_startup._upgrade_to_head_with_retries(
+        object(),
+        _settings(),
+    )
+
+    assert attempts["count"] == 3
+
+
+def test_upgrade_reraises_after_exhausting_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tras agotar reintentos, el error se propaga (crash-fast)."""
+    attempts = {"count": 0}
+
+    def always_fails(config: object, revision: str) -> None:
+        attempts["count"] += 1
+        raise RuntimeError("bloqueo persistente")
+
+    monkeypatch.setattr(postgres_startup.command, "upgrade", always_fails)
+    monkeypatch.setattr(postgres_startup.time, "sleep", lambda _seconds: None)
+
+    settings = _settings()
+    settings.postgres_migration_retries = 2
+
+    with pytest.raises(RuntimeError) as exc_info:
+        postgres_startup._upgrade_to_head_with_retries(object(), settings)
+
+    assert attempts["count"] == 2
+    assert "bloqueo persistente" in str(exc_info.value)
+
+
+def test_connect_args_include_keepalives_and_migration_gucs() -> None:
+    """connect_args debe traer keepalives, connect_timeout y GUCs en options."""
+    settings = SimpleNamespace(
+        postgres_connect_timeout_seconds=7,
+        postgres_tcp_keepalives_idle_seconds=20,
+        postgres_tcp_user_timeout_ms=25000,
+    )
+
+    connect_args = build_postgres_connect_args(
+        settings,
+        server_settings={
+            "lock_timeout": "15000",
+            "statement_timeout": "300000",
+            "idle_in_transaction_session_timeout": "60000",
+        },
+    )
+
+    assert connect_args["connect_timeout"] == 7
+    assert connect_args["keepalives"] == 1
+    assert connect_args["keepalives_idle"] == 20
+    options = connect_args["options"]
+    assert "-c tcp_user_timeout=25000" in options
+    assert "-c lock_timeout=15000" in options
+    assert "-c statement_timeout=300000" in options
+    assert "-c idle_in_transaction_session_timeout=60000" in options
 
 
 def test_skips_when_postgres_is_not_configured() -> None:

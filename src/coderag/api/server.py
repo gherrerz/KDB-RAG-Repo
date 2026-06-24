@@ -1,5 +1,7 @@
 """Servidor FastAPI para operaciones de ingesta y consulta."""
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -52,13 +54,37 @@ from coderag.llm.model_discovery import discover_models
 from coderag.api.webhook_bitbucket import router as webhook_bitbucket_router
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Ejecuta validación estricta de storage durante el arranque de la API."""
     settings = get_settings()
     if hasattr(settings, "decode_vertex_service_account_b64"):
         settings.decode_vertex_service_account_b64()
-    app.state.postgres_startup = ensure_postgres_schema_ready(settings)
+    # Backstop de reloj de pared: la preparación del esquema corre en un hilo con
+    # un deadline duro. Si un corte de red/mesh deja a psycopg bloqueado en el
+    # socket (los GUC server-side no pueden abortarlo), el arranque falla y el
+    # proceso termina ≠ 0 en vez de quedar colgado/degradado: K8s lo reinicia.
+    deadline_s = float(getattr(settings, "postgres_migration_deadline_seconds", 300))
+    try:
+        app.state.postgres_startup = await asyncio.wait_for(
+            asyncio.to_thread(ensure_postgres_schema_ready, settings),
+            timeout=deadline_s,
+        )
+    except asyncio.TimeoutError as exc:
+        logger.error(
+            "Timeout (%.0fs) preparando el esquema Postgres en el arranque; "
+            "abortando para que Kubernetes reinicie el pod.",
+            deadline_s,
+        )
+        raise RuntimeError(
+            "Timeout preparando el esquema Postgres en el arranque."
+        ) from exc
+    except Exception:
+        logger.exception("Fallo preparando el esquema Postgres en el arranque.")
+        raise
     app.state.job_manager = jobs
     report = ensure_storage_ready(context="startup", force=True)
     app.state.storage_health = _attach_postgres_startup_status(report)

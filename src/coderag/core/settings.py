@@ -231,6 +231,30 @@ class Settings(BaseSettings):
         default=300000,
         alias="POSTGRES_MIGRATION_STATEMENT_TIMEOUT_MS",
     )
+    postgres_migration_idle_tx_timeout_ms: int = Field(
+        default=60000,
+        alias="POSTGRES_MIGRATION_IDLE_TX_TIMEOUT_MS",
+    )
+    postgres_migration_deadline_seconds: float = Field(
+        default=300.0,
+        alias="POSTGRES_MIGRATION_DEADLINE_SECONDS",
+    )
+    postgres_migration_retries: int = Field(
+        default=3,
+        alias="POSTGRES_MIGRATION_RETRIES",
+    )
+    postgres_connect_timeout_seconds: int = Field(
+        default=10,
+        alias="POSTGRES_CONNECT_TIMEOUT_SECONDS",
+    )
+    postgres_tcp_keepalives_idle_seconds: int = Field(
+        default=30,
+        alias="POSTGRES_TCP_KEEPALIVES_IDLE_SECONDS",
+    )
+    postgres_tcp_user_timeout_ms: int = Field(
+        default=30000,
+        alias="POSTGRES_TCP_USER_TIMEOUT_MS",
+    )
     runtime_environment: RuntimeEnvironment = Field(
         default="development",
         alias="RUNTIME_ENVIRONMENT",

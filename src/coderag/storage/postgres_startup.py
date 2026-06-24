@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -70,6 +72,49 @@ _REQUIRED_COLUMNS_BY_TABLE: dict[str, set[str]] = {
         "created_at",
     },
 }
+
+
+logger = logging.getLogger(__name__)
+
+# Backoff (segundos) entre reintentos de upgrade. Da tiempo a que un backend
+# huérfano sea segado por idle_in_transaction_session_timeout y libere locks.
+_UPGRADE_RETRY_BACKOFF_SECONDS = (2.0, 5.0, 10.0)
+
+
+def _upgrade_to_head_with_retries(config: Config, settings: object) -> None:
+    """Ejecuta ``alembic upgrade head`` con reintentos acotados y crash-fast.
+
+    Un bloqueo (lock o corte de red/mesh) ahora falla rápido en vez de colgar;
+    reintentamos un número acotado de veces antes de propagar el error para que
+    el proceso termine ≠ 0 y Kubernetes reinicie el pod.
+    """
+    retries = int(getattr(settings, "postgres_migration_retries", 3))
+    attempts = max(1, retries)
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            logger.info(
+                "Aplicando migraciones Postgres (intento %s/%s)...",
+                attempt,
+                attempts,
+            )
+            command.upgrade(config, "head")
+            return
+        except Exception as exc:  # noqa: BLE001 - se re-lanza tras agotar intentos
+            last_error = exc
+            logger.error(
+                "Fallo aplicando migraciones (intento %s/%s): %s",
+                attempt,
+                attempts,
+                exc,
+            )
+            if attempt < attempts:
+                backoff = _UPGRADE_RETRY_BACKOFF_SECONDS[
+                    min(attempt - 1, len(_UPGRADE_RETRY_BACKOFF_SECONDS) - 1)
+                ]
+                time.sleep(backoff)
+    assert last_error is not None
+    raise last_error
 
 
 def _repo_root() -> Path:
@@ -277,12 +322,12 @@ def ensure_postgres_schema_ready(
             and legacy_state == "upgradeable_missing_last_queried_at"
         ):
             command.stamp(config, _REPO_LAST_QUERIED_AT_BASE_REVISION)
-            command.upgrade(config, "head")
+            _upgrade_to_head_with_retries(config, settings)
             action = "upgraded_unversioned_schema"
         elif not current_heads and legacy_state == "incompatible":
             raise _build_incompatible_legacy_schema_error()
         elif current_heads != expected_heads:
-            command.upgrade(config, "head")
+            _upgrade_to_head_with_retries(config, settings)
             action = "upgraded"
         else:
             action = "already_current"

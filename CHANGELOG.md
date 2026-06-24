@@ -19,17 +19,33 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
   `POSTGRES_MIGRATION_LOCK_TIMEOUT_MS` (default `15000`) y
   `POSTGRES_MIGRATION_STATEMENT_TIMEOUT_MS` (default `300000`). Documentados en
   `docs/CONFIGURATION.md`.
+- Robustez de conexión a Postgres resiliente al service mesh y nuevas variables de
+  entorno: `POSTGRES_MIGRATION_IDLE_TX_TIMEOUT_MS` (default `60000`),
+  `POSTGRES_MIGRATION_DEADLINE_SECONDS` (default `300`), `POSTGRES_MIGRATION_RETRIES`
+  (default `3`), `POSTGRES_CONNECT_TIMEOUT_SECONDS` (default `10`),
+  `POSTGRES_TCP_KEEPALIVES_IDLE_SECONDS` (default `30`) y
+  `POSTGRES_TCP_USER_TIMEOUT_MS` (default `30000`). Documentadas en
+  `docs/CONFIGURATION.md`.
 
 ### Fixed
 
 - El arranque de la API podía **colgarse indefinidamente** ejecutando una migración
-  Alembic (observado en `0004_add_ingestion_snapshots_table`) cuando el `CREATE TABLE`
-  quedaba esperando un lock —típicamente un backend huérfano de un pod anterior
-  terminado a mitad de migración en la base compartida—, dejando el pod en estado
-  degradado. La conexión de migración (`migrations/env.py`) ahora fija `lock_timeout` y
-  `statement_timeout`, por lo que un bloqueo **falla rápido con un error accionable** en
-  vez de colgar el `lifespan`. Además se toma un `pg_advisory_lock` para serializar
-  migradores concurrentes (p.ej. durante un rollout con surge) y evitar bloqueos cruzados.
+  Alembic (observado en `0004_add_ingestion_snapshots_table`), dejando el pod en estado
+  degradado. La causa real es un **bloqueo a nivel de socket/red a través del service mesh
+  de Anthos**: el cliente `psycopg` queda bloqueado en `recv()` sobre una conexión que
+  nunca responde, escenario que los GUC server-side (`lock_timeout`/`statement_timeout`,
+  añadidos en una primera iteración) **no pueden abortar**. Ahora el arranque está blindado
+  por código: (1) un **deadline de reloj de pared** en el `lifespan` ejecuta la preparación
+  del esquema en un hilo y aborta el arranque con crash-fast si se excede
+  (`src/coderag/api/server.py`), de modo que Kubernetes reinicia el pod en vez de quedar
+  degradado; (2) la conexión de migración usa **keepalives TCP + `tcp_user_timeout` +
+  `connect_timeout`** para detectar peers muertos a nivel de socket, y los timeouts/GUCs se
+  fijan vía libpq `options`, incluido `idle_in_transaction_session_timeout` que **auto-mata
+  backends huérfanos** y libera locks para el siguiente arranque (`migrations/env.py`,
+  `src/coderag/storage/postgres_session.py`); (3) el `upgrade` se ejecuta con **reintentos
+  acotados con backoff** y, al fallar, se **loguean las sesiones bloqueadoras** para
+  diagnóstico (`src/coderag/storage/postgres_startup.py`); (4) el advisory lock pasa a tener
+  **alcance de transacción** (`pg_advisory_xact_lock`), auto-liberándose si el pod muere.
 
 ### Security
 
