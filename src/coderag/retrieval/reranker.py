@@ -61,7 +61,9 @@ _TEST_TOKENS = {
 }
 _DEFINITION_LOOKUP_TOKENS = {
     "code",
+    "codigo",
     "definition",
+    "definicion",
     "defined",
     "function",
     "functions",
@@ -87,6 +89,16 @@ _DOCUMENTATION_TOKENS = {
     "guides",
     "readme",
     "reference",
+}
+_CONTEXT_OVERVIEW_TOKENS = {
+    "context",
+    "contexto",
+    "overview",
+    "resumen",
+    "summary",
+    "arquitectura",
+    "sabes",
+    "know",
 }
 _IMPLEMENTATION_HINT_TOKENS = {
     "execute",
@@ -195,6 +207,7 @@ class QueryProfile:
     definition_lookup_intent: bool
     documentation_lookup_intent: bool
     operational_config_lookup_intent: bool
+    context_overview_intent: bool
     prefers_symbol_definitions: bool
     prefers_docs: bool
     prefers_runtime_config: bool
@@ -263,7 +276,11 @@ def _build_query_profile(query: str) -> QueryProfile:
             if candidate
         )
     )
+    context_overview_intent = bool(token_set & _CONTEXT_OVERVIEW_TOKENS)
     documentation_lookup_intent = bool(token_set & _DOCUMENTATION_TOKENS)
+    documentation_lookup_intent = (
+        documentation_lookup_intent or context_overview_intent
+    )
     operational_config_lookup_intent = bool(token_set & _RUNTIME_CONFIG_TOKENS)
     definition_lookup_intent = bool(token_set & _DEFINITION_LOOKUP_TOKENS) or (
         bool(target_identifier_candidates)
@@ -272,9 +289,15 @@ def _build_query_profile(query: str) -> QueryProfile:
         and not operational_config_lookup_intent
     )
     runtime_config_intent = (
-        operational_config_lookup_intent and not documentation_lookup_intent
+        operational_config_lookup_intent
+        and not documentation_lookup_intent
+        and not context_overview_intent
     )
-    code_intent = bool(token_set & _CODE_TOKENS) or definition_lookup_intent
+    code_intent = (
+        bool(token_set & _CODE_TOKENS)
+        or definition_lookup_intent
+        or context_overview_intent
+    )
     test_intent = bool(token_set & _TEST_TOKENS)
     natural_language_query = not exact_identifier_query
     implementation_intent = (
@@ -303,6 +326,7 @@ def _build_query_profile(query: str) -> QueryProfile:
         definition_lookup_intent=definition_lookup_intent,
         documentation_lookup_intent=documentation_lookup_intent,
         operational_config_lookup_intent=operational_config_lookup_intent,
+        context_overview_intent=context_overview_intent,
         prefers_symbol_definitions=prefers_symbol_definitions,
         prefers_docs=prefers_docs,
         prefers_runtime_config=prefers_runtime_config,
@@ -667,7 +691,23 @@ def _score_chunk(profile: QueryProfile, chunk: RetrievalChunk) -> float:
         if test_path and not strong_overlap and not profile.test_intent:
             score -= 0.45
 
-    if profile.code_intent and not profile.prefers_docs:
+    if profile.context_overview_intent and not profile.test_intent:
+        if docs_path:
+            score += 0.55
+        if productive_path and symbol_type in _DEFINITION_SYMBOL_TYPES:
+            score += 0.55
+        if productive_path and not docs_path and not config_path:
+            score += 0.15
+        if config_path:
+            score -= 0.75
+        if test_path:
+            score -= 0.60
+        if example_path:
+            score -= 0.45
+
+    if profile.code_intent and (
+        not profile.prefers_docs or profile.context_overview_intent
+    ):
         if symbol_type in _DEFINITION_SYMBOL_TYPES:
             score += 0.30
         if productive_path and symbol_type in _DEFINITION_SYMBOL_TYPES:

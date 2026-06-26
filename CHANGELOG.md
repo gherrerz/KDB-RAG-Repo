@@ -94,6 +94,13 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- El reranker de retrieval ahora detecta intención de contexto general
+    (tokens ES/EN como `contexto`, `context`, `overview`, `resumen`) para
+    consultas tipo "dame contexto" y prioriza evidencia de documentación y
+    código productivo en la misma consulta. En ese modo reduce explícitamente
+    la prioridad de configuración runtime, tests y ejemplos para minimizar
+    ruido cuando no se está pidiendo configuración operativa.
+
 - **Scope de tools MCP reducido de 11 a 5**: el servidor MCP en `/mcp` ahora solo
     expone operaciones de consulta y lectura directa (`query_repo`, `query_retrieval`,
     `list_repos`, `repo_status`, `storage_health`). Se retiran `ingest_repo`,

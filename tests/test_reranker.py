@@ -747,3 +747,113 @@ def test_rerank_prefers_runtime_owner_for_private_symbol_lookup() -> None:
     assert ranked[0].metadata["path"] == "src/coderag/storage/postgres_startup.py"
 
 
+def test_rerank_detects_context_intent_and_prioritizes_docs() -> None:
+    """Sube documentación para consultas de contexto sin pedir config."""
+    chunks = [
+        RetrievalChunk(
+            id="config",
+            text="CHROMA_HOST=chromadb",
+            score=0.91,
+            metadata={
+                "path": "docker-compose.yml",
+                "symbol_name": "CHROMA_HOST",
+                "symbol_type": "config_key",
+                "start_line": 10,
+                "end_line": 10,
+            },
+        ),
+        RetrievalChunk(
+            id="docs",
+            text="CHROMA_HOST define el host remoto de Chroma para el runtime.",
+            score=0.69,
+            metadata={
+                "path": "docs/CONFIGURATION.md",
+                "symbol_name": "CHROMA_HOST",
+                "symbol_type": "section",
+                "start_line": 80,
+                "end_line": 82,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="dame contexto del repositorio sobre CHROMA_HOST",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["path"] == "docs/CONFIGURATION.md"
+
+
+def test_rerank_context_intent_prefers_productive_code_over_test_and_config() -> None:
+    """En contexto general, prioriza código productivo sobre test y config."""
+    chunks = [
+        RetrievalChunk(
+            id="config",
+            text="QUERY_MAX_SECONDS: \"55\"",
+            score=0.94,
+            metadata={
+                "path": "k8s/base/api-configmap.yaml",
+                "symbol_name": "QUERY_MAX_SECONDS",
+                "symbol_type": "config_key",
+                "start_line": 40,
+                "end_line": 40,
+            },
+        ),
+        RetrievalChunk(
+            id="test",
+            text="def test_run_storage_preflight_behavior():\n    assert True",
+            score=0.92,
+            metadata={
+                "path": "tests/test_storage_health.py",
+                "symbol_name": "test_run_storage_preflight_behavior",
+                "symbol_type": "function",
+                "start_line": 10,
+                "end_line": 11,
+            },
+        ),
+        RetrievalChunk(
+            id="docs",
+            text=(
+                "Guia de arquitectura del flujo de preflight y su contexto "
+                "operativo."
+            ),
+            score=0.70,
+            metadata={
+                "path": "docs/ARCHITECTURE.md",
+                "symbol_name": "Storage preflight architecture",
+                "symbol_type": "section",
+                "start_line": 20,
+                "end_line": 24,
+            },
+        ),
+        RetrievalChunk(
+            id="code",
+            text=(
+                "def run_storage_preflight(context: str, force: bool = False):\n"
+                "    return {}"
+            ),
+            score=0.67,
+            metadata={
+                "path": "src/coderag/core/storage_health.py",
+                "symbol_name": "run_storage_preflight",
+                "symbol_type": "function",
+                "start_line": 281,
+                "end_line": 282,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="dame contexto del repositorio sobre storage preflight",
+        chunks=chunks,
+        top_k=4,
+    )
+
+    top_paths = [str(item.metadata.get("path", "")) for item in ranked[:2]]
+    assert "src/coderag/core/storage_health.py" in top_paths
+    assert "docs/ARCHITECTURE.md" in top_paths
+    assert ranked[0].metadata["path"] != "k8s/base/api-configmap.yaml"
+    assert ranked[0].metadata["path"] != "tests/test_storage_health.py"
+
+
