@@ -349,7 +349,7 @@ class Settings(BaseSettings):
         alias="SCAN_MAX_FILE_SIZE_BYTES",
     )
     scan_excluded_dirs: str = Field(
-        default=".git,.github,.claude,node_modules,dist,build,venv,.venv,__pycache__,.idea,.vscode,target,out,bin,obj,.gradle,.m2,.pytest_cache,.mypy_cache",
+        default=".git,.github,.claude,.specify,node_modules,dist,build,venv,.venv,__pycache__,.idea,.vscode,target,out,bin,obj,.gradle,.m2,.pytest_cache,.mypy_cache",
         alias="SCAN_EXCLUDED_DIRS",
     )
     scan_excluded_extensions: str = Field(
@@ -357,7 +357,7 @@ class Settings(BaseSettings):
         alias="SCAN_EXCLUDED_EXTENSIONS",
     )
     scan_excluded_files: str = Field(
-        default=".gitignore,.env",
+        default=".gitignore,.env,.env.example,.dockerignore",
         alias="SCAN_EXCLUDED_FILES",
     )
     scan_excluded_patterns: str = Field(
