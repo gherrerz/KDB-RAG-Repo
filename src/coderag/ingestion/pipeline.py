@@ -898,6 +898,22 @@ def _index_lexical_backend(
     docs.extend(file_docs)
     metadatas.extend(file_meta)
 
+    full_file_docs = [item.content for item in target_files]
+    full_file_meta = [
+        {
+            "id": f"{repo_id}:file_full:{item.path}",
+            "repo_id": repo_id,
+            "path": item.path,
+            "start_line": 1,
+            "end_line": len(item.content.splitlines()),
+            "symbol_name": "",
+            "entity_type": "file_full",
+        }
+        for item in target_files
+    ]
+    docs.extend(full_file_docs)
+    metadatas.extend(full_file_meta)
+
     module_summaries = summarize_modules(scanned_files)
     module_docs = list(module_summaries.values())
     module_names = list(module_summaries.keys())

@@ -8,6 +8,28 @@ import pytest
 import coderag.api.query_signals as query_signals
 import coderag.api.query_service as query_service
 from coderag.core.models import Citation, InventoryItem, InventoryQueryResponse, RetrievalChunk
+from coderag.retrieval import code_snippet_store
+
+
+def _snippet(
+    text: str,
+    path: str,
+    start_line: int,
+    end_line: int,
+    symbol_name: str | None = None,
+    symbol_type: str | None = None,
+    source: str = "chroma_symbol",
+) -> code_snippet_store.SnippetRecord:
+    """Build a fake persisted-index snippet for component-mode tests."""
+    return code_snippet_store.SnippetRecord(
+        text=text,
+        path=path,
+        start_line=start_line,
+        end_line=end_line,
+        symbol_name=symbol_name,
+        symbol_type=symbol_type,
+        source=source,
+    )
 
 
 def test_is_module_query_detects_spanish_and_english_terms() -> None:
@@ -2952,30 +2974,47 @@ def test_is_literal_code_query_detection() -> None:
     assert not query_service._is_literal_code_query("que hace hybrid_search")
 
 
-def test_run_query_literal_code_returns_live_file_content(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """En modo literal devuelve contenido real del archivo con cita exacta."""
-    repo_id = "repo1"
-    target_path = tmp_path / repo_id / "src" / "coderag" / "retrieval"
-    target_path.mkdir(parents=True)
-    file_path = target_path / "hybrid_search.py"
-    file_path.write_text(
-        "def hybrid_search() -> str:\n"
-        "    return 'ok'\n",
-        encoding="utf-8",
+def test_is_component_code_query_detects_natural_language_requests() -> None:
+    """Detecta pedidos naturales de código de componente, más allá de frases fijas."""
+    assert query_service._is_component_code_query(
+        "muestrame la implementacion del servicio FooService"
+    )
+    assert query_service._is_component_code_query(
+        "el codigo del controlador BarController"
+    )
+    assert query_service._is_component_code_query(
+        "how is UserRepository implemented"
+    )
+    assert not query_service._is_component_code_query("que hace hybrid_search")
+    assert not query_service._is_component_code_query(
+        "todos los controllers del modulo mall-admin"
     )
 
-    class _Settings:
-        workspace_path = tmp_path
 
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+def test_run_query_component_code_returns_indexed_file_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """En modo componente devuelve el contenido persistido del archivo con cita exacta."""
+    repo_id = "repo1"
 
-    def _fail_hybrid(*args, **kwargs):
-        raise AssertionError("hybrid_search no debe correr en modo literal")
+    def _fail_hybrid(*args: object, **kwargs: object) -> None:
+        raise AssertionError("hybrid_search no debe correr en modo componente")
 
     monkeypatch.setattr(query_service, "hybrid_search", _fail_hybrid)
+
+    def _get_file_snippet(repo_id_arg: str, path: str):
+        assert repo_id_arg == repo_id
+        if path == "src/coderag/retrieval/hybrid_search.py":
+            return _snippet(
+                "def hybrid_search() -> str:\n    return 'ok'\n",
+                path,
+                1,
+                2,
+                source="lexical_file_full",
+            )
+        return None
+
+    monkeypatch.setattr(query_service, "_get_file_snippet", _get_file_snippet)
 
     result = query_service.run_query(
         repo_id=repo_id,
@@ -2984,70 +3023,55 @@ def test_run_query_literal_code_returns_live_file_content(
         top_k=5,
     )
 
-    assert result.diagnostics["literal_mode"] is True
-    assert result.diagnostics["literal_exact_match"] is True
+    assert result.diagnostics["component_mode"] is True
+    assert result.diagnostics["resolution_path"] == "exact_path"
     assert "def hybrid_search()" in result.answer
     assert len(result.citations) == 1
     assert result.citations[0].path == "src/coderag/retrieval/hybrid_search.py"
     assert result.citations[0].start_line == 1
 
 
-def test_run_query_literal_code_ambiguous_filename_returns_safe_rejection(
+def test_run_query_component_code_file_not_found_returns_safe_rejection(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """Rechaza en forma segura cuando el nombre de archivo no es único."""
-    repo_id = "repo1"
-    first = tmp_path / repo_id / "a"
-    second = tmp_path / repo_id / "b"
-    first.mkdir(parents=True)
-    second.mkdir(parents=True)
-    (first / "hybrid_search.py").write_text("x=1\n", encoding="utf-8")
-    (second / "hybrid_search.py").write_text("x=2\n", encoding="utf-8")
-
-    class _Settings:
-        workspace_path = tmp_path
-
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    """Rechaza en forma segura cuando el archivo solicitado no está en el índice."""
+    monkeypatch.setattr(
+        query_service, "_get_file_snippet", lambda repo_id, path: None
+    )
 
     result = query_service.run_query(
-        repo_id=repo_id,
-        query="dame el codigo completo de hybrid_search.py",
+        repo_id="repo1",
+        query="dame el codigo completo de src/coderag/unknownmodule.py",
         top_n=20,
         top_k=5,
     )
 
-    assert result.diagnostics["literal_mode"] is True
-    assert result.diagnostics["literal_exact_match"] is False
-    assert result.diagnostics["literal_failure_reason"] == "ambiguous_filename"
-    assert "ruta exacta" in result.answer.lower()
+    assert result.diagnostics["component_mode"] is True
+    assert result.diagnostics["literal_failure_reason"] == "file_not_found"
     assert result.citations == []
 
 
-def test_run_retrieval_query_literal_code_returns_live_file_content(
+def test_run_retrieval_query_component_code_returns_indexed_file_content(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """En retrieval-only devuelve contenido literal exacto cuando hay match único."""
+    """En retrieval-only devuelve contenido indexado exacto cuando hay match único."""
     repo_id = "repo1"
-    target_path = tmp_path / repo_id / "src" / "coderag" / "retrieval"
-    target_path.mkdir(parents=True)
-    (target_path / "hybrid_search.py").write_text(
-        "def hybrid_search() -> str:\n"
-        "    return 'ok'\n",
-        encoding="utf-8",
-    )
 
-    class _Settings:
-        workspace_path = tmp_path
-        query_max_seconds = 30.0
-
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
-
-    def _fail_hybrid(*args, **kwargs):
-        raise AssertionError("hybrid_search no debe correr en modo literal")
+    def _fail_hybrid(*args: object, **kwargs: object) -> None:
+        raise AssertionError("hybrid_search no debe correr en modo componente")
 
     monkeypatch.setattr(query_service, "hybrid_search", _fail_hybrid)
+    monkeypatch.setattr(
+        query_service,
+        "_get_file_snippet",
+        lambda repo_id_arg, path: _snippet(
+            "def hybrid_search() -> str:\n    return 'ok'\n",
+            path,
+            1,
+            2,
+            source="lexical_file_full",
+        ),
+    )
 
     result = query_service.run_retrieval_query(
         repo_id=repo_id,
@@ -3058,8 +3082,7 @@ def test_run_retrieval_query_literal_code_returns_live_file_content(
     )
 
     assert result.mode == "retrieval_only"
-    assert result.diagnostics["literal_mode"] is True
-    assert result.diagnostics["literal_exact_match"] is True
+    assert result.diagnostics["component_mode"] is True
     assert len(result.chunks) == 1
     assert result.chunks[0].path == "src/coderag/retrieval/hybrid_search.py"
     assert len(result.citations) == 1
@@ -3067,65 +3090,49 @@ def test_run_retrieval_query_literal_code_returns_live_file_content(
     assert result.context is None
 
 
-def test_run_retrieval_query_literal_code_ambiguous_filename_returns_safe_rejection(
+def test_run_retrieval_query_component_code_file_not_found_returns_safe_rejection(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """En retrieval-only rechaza seguro cuando el archivo es ambiguo."""
-    repo_id = "repo1"
-    first = tmp_path / repo_id / "a"
-    second = tmp_path / repo_id / "b"
-    first.mkdir(parents=True)
-    second.mkdir(parents=True)
-    (first / "hybrid_search.py").write_text("x=1\n", encoding="utf-8")
-    (second / "hybrid_search.py").write_text("x=2\n", encoding="utf-8")
-
-    class _Settings:
-        workspace_path = tmp_path
-        query_max_seconds = 30.0
-
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    """En retrieval-only rechaza seguro cuando el archivo no está en el índice."""
+    monkeypatch.setattr(
+        query_service, "_get_file_snippet", lambda repo_id, path: None
+    )
 
     result = query_service.run_retrieval_query(
-        repo_id=repo_id,
-        query="dame el codigo completo de hybrid_search.py",
+        repo_id="repo1",
+        query="dame el codigo completo de src/coderag/unknownmodule.py",
         top_n=20,
         top_k=5,
     )
 
-    assert result.diagnostics["literal_mode"] is True
-    assert result.diagnostics["literal_exact_match"] is False
-    assert result.diagnostics["literal_failure_reason"] == "ambiguous_filename"
+    assert result.diagnostics["component_mode"] is True
+    assert result.diagnostics["literal_failure_reason"] == "file_not_found"
     assert result.chunks == []
     assert result.citations == []
 
 
-def test_run_retrieval_query_literal_code_respects_include_context_flag(
+def test_run_retrieval_query_component_code_respects_include_context_flag(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """Incluye contexto literal solo cuando include_context=true en modo literal."""
-    repo_id = "repo1"
-    target_path = tmp_path / repo_id / "src" / "coderag"
-    target_path.mkdir(parents=True)
+    """Incluye contexto de componente solo cuando include_context=true."""
     content = "print('ok')\n"
-    (target_path / "tool.py").write_text(content, encoding="utf-8")
-
-    class _Settings:
-        workspace_path = tmp_path
-        query_max_seconds = 30.0
-
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        query_service,
+        "_get_file_snippet",
+        lambda repo_id, path: _snippet(
+            content, path, 1, 1, source="lexical_file_full"
+        ),
+    )
 
     with_context = query_service.run_retrieval_query(
-        repo_id=repo_id,
+        repo_id="repo1",
         query="dame el codigo completo de src/coderag/tool.py",
         top_n=20,
         top_k=5,
         include_context=True,
     )
     without_context = query_service.run_retrieval_query(
-        repo_id=repo_id,
+        repo_id="repo1",
         query="dame el codigo completo de src/coderag/tool.py",
         top_n=20,
         top_k=5,
@@ -3136,22 +3143,25 @@ def test_run_retrieval_query_literal_code_respects_include_context_flag(
     assert without_context.context is None
 
 
-def test_run_query_literal_code_blocks_when_workspace_is_unavailable(
+def test_run_query_component_code_works_without_workspace(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """Bloquea modo literal sin intentar fallback cuando el workspace ya no existe."""
-
-    class _Settings:
-        workspace_path = tmp_path
-        inventory_page_size = 25
-        query_max_seconds = 30.0
+    """Resuelve desde el índice persistido aunque no exista workspace local."""
 
     def _fail_hybrid_search(*args: object, **kwargs: object) -> None:
-        raise AssertionError("hybrid_search no debe correr cuando literal se bloquea")
+        raise AssertionError("hybrid_search no debe correr en modo componente")
 
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
     monkeypatch.setattr(query_service, "hybrid_search", _fail_hybrid_search)
+    monkeypatch.setattr(
+        query_service, "_has_local_repo_workspace", lambda repo_id: False
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_get_file_snippet",
+        lambda repo_id, path: _snippet(
+            "SETTINGS = {}\n", path, 1, 1, source="lexical_file_full"
+        ),
+    )
 
     result = query_service.run_query(
         repo_id="repo-sin-workspace",
@@ -3160,30 +3170,31 @@ def test_run_query_literal_code_blocks_when_workspace_is_unavailable(
         top_k=3,
     )
 
-    assert "workspace local disponible" in result.answer
-    assert result.citations == []
-    assert result.diagnostics["literal_mode"] is True
-    assert result.diagnostics["literal_exact_match"] is False
-    assert result.diagnostics["literal_failure_reason"] == "workspace_unavailable"
-    assert result.diagnostics["fallback_reason"] == "literal_workspace_required"
+    assert result.diagnostics["component_mode"] is True
+    assert result.diagnostics["resolution_path"] == "exact_path"
+    assert "SETTINGS = {}" in result.answer
+    assert len(result.citations) == 1
 
 
-def test_run_retrieval_query_literal_code_blocks_when_workspace_is_unavailable(
+def test_run_retrieval_query_component_code_works_without_workspace(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """Bloquea modo literal retrieval-only sin leer archivos locales inexistentes."""
-
-    class _Settings:
-        workspace_path = tmp_path
-        inventory_page_size = 25
-        query_max_seconds = 30.0
+    """Retrieval-only resuelve desde el índice persistido sin workspace local."""
 
     def _fail_hybrid_search(*args: object, **kwargs: object) -> None:
-        raise AssertionError("hybrid_search no debe correr cuando literal se bloquea")
+        raise AssertionError("hybrid_search no debe correr en modo componente")
 
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
     monkeypatch.setattr(query_service, "hybrid_search", _fail_hybrid_search)
+    monkeypatch.setattr(
+        query_service, "_has_local_repo_workspace", lambda repo_id: False
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_get_file_snippet",
+        lambda repo_id, path: _snippet(
+            "SETTINGS = {}\n", path, 1, 1, source="lexical_file_full"
+        ),
+    )
 
     result = query_service.run_retrieval_query(
         repo_id="repo-sin-workspace",
@@ -3193,36 +3204,48 @@ def test_run_retrieval_query_literal_code_blocks_when_workspace_is_unavailable(
         include_context=True,
     )
 
-    assert "workspace local disponible" in result.answer
-    assert result.chunks == []
-    assert result.citations == []
-    assert result.context is None
-    assert result.diagnostics["literal_mode"] is True
-    assert result.diagnostics["literal_exact_match"] is False
-    assert result.diagnostics["literal_failure_reason"] == "workspace_unavailable"
-    assert result.diagnostics["fallback_reason"] == "literal_workspace_required"
+    assert result.diagnostics["component_mode"] is True
+    assert len(result.chunks) == 1
+    assert result.context is not None
 
 
-def test_run_query_literal_code_exact_symbol_returns_symbol_span(
+def test_run_query_component_code_exact_symbol_returns_symbol_span(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
     """Devuelve solo el símbolo exacto cuando se solicita código completo por función."""
     repo_id = "repo1"
-    target_path = tmp_path / repo_id / "src" / "coderag"
-    target_path.mkdir(parents=True)
-    (target_path / "tool.py").write_text(
-        "def helper() -> int:\n"
-        "    return 1\n\n"
-        "def target_symbol() -> int:\n"
-        "    return 42\n",
-        encoding="utf-8",
+
+    def _get_symbol_definitions(
+        repo_id_arg: str,
+        symbol_name: str,
+        symbol_type: str | None = None,
+        module_name: str | None = None,
+    ):
+        assert symbol_name == "target_symbol"
+        return [
+            {
+                "path": "src/coderag/tool.py",
+                "label": "target_symbol",
+                "kind": "function",
+                "start_line": 4,
+                "end_line": 5,
+            }
+        ]
+
+    def _get_symbol_snippet(repo_id_arg: str, path: str, symbol_name: str):
+        return _snippet(
+            "def target_symbol() -> int:\n    return 42\n",
+            path,
+            4,
+            5,
+            symbol_name=symbol_name,
+            symbol_type="function",
+        )
+
+    monkeypatch.setattr(
+        query_service, "_get_symbol_definitions", _get_symbol_definitions
     )
-
-    class _Settings:
-        workspace_path = tmp_path
-
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "_get_symbol_snippet", _get_symbol_snippet)
 
     result = query_service.run_query(
         repo_id=repo_id,
@@ -3231,36 +3254,45 @@ def test_run_query_literal_code_exact_symbol_returns_symbol_span(
         top_k=5,
     )
 
-    assert result.diagnostics["literal_mode"] is True
-    assert result.diagnostics["literal_exact_match"] is True
-    assert "Símbolo: target_symbol" in result.answer
+    assert result.diagnostics["component_mode"] is True
+    assert result.diagnostics["component_name"] == "target_symbol"
     assert "def target_symbol()" in result.answer
     assert "def helper()" not in result.answer
     assert result.citations[0].start_line == 4
-    assert result.citations[0].reason == "literal_symbol_exact_match"
+    assert result.citations[0].reason == "component_graph_symbol_match"
 
 
-def test_run_retrieval_query_literal_code_exact_symbol_returns_symbol_chunk(
+def test_run_retrieval_query_component_code_exact_symbol_returns_symbol_chunk(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """En retrieval-only retorna chunk literal de símbolo exacto único."""
+    """En retrieval-only retorna chunk de componente para símbolo exacto único."""
     repo_id = "repo1"
-    target_path = tmp_path / repo_id / "src" / "coderag"
-    target_path.mkdir(parents=True)
-    (target_path / "tool.py").write_text(
-        "def alpha() -> int:\n"
-        "    return 1\n\n"
-        "def exact_match_symbol() -> int:\n"
-        "    return 7\n",
-        encoding="utf-8",
+
+    monkeypatch.setattr(
+        query_service,
+        "_get_symbol_definitions",
+        lambda repo_id_arg, symbol_name, symbol_type=None, module_name=None: [
+            {
+                "path": "src/coderag/tool.py",
+                "label": "exact_match_symbol",
+                "kind": "function",
+                "start_line": 4,
+                "end_line": 5,
+            }
+        ],
     )
-
-    class _Settings:
-        workspace_path = tmp_path
-        query_max_seconds = 30.0
-
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        query_service,
+        "_get_symbol_snippet",
+        lambda repo_id_arg, path, symbol_name: _snippet(
+            "def exact_match_symbol() -> int:\n    return 7\n",
+            path,
+            4,
+            5,
+            symbol_name=symbol_name,
+            symbol_type="function",
+        ),
+    )
 
     result = query_service.run_retrieval_query(
         repo_id=repo_id,
@@ -3270,42 +3302,45 @@ def test_run_retrieval_query_literal_code_exact_symbol_returns_symbol_chunk(
         include_context=True,
     )
 
-    assert result.diagnostics["literal_mode"] is True
-    assert result.diagnostics["literal_exact_match"] is True
+    assert result.diagnostics["component_mode"] is True
     assert len(result.chunks) == 1
-    assert result.chunks[0].kind == "literal_symbol"
+    assert result.chunks[0].kind == "component_symbol"
     assert "def exact_match_symbol()" in result.chunks[0].text
-    assert "def alpha()" not in result.chunks[0].text
-    assert result.citations[0].reason == "literal_symbol_exact_match"
+    assert result.citations[0].reason == "component_graph_symbol_match"
     assert result.context is not None
     assert "def exact_match_symbol()" in result.context
 
 
-def test_run_query_literal_code_ambiguous_symbol_returns_safe_rejection(
+def test_run_query_component_code_ambiguous_symbol_returns_disambiguation(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    """Rechaza de forma segura cuando el símbolo exacto aparece en múltiples archivos."""
+    """Devuelve lista de desambiguación cuando el símbolo existe en múltiples archivos."""
     repo_id = "repo1"
-    first = tmp_path / repo_id / "a"
-    second = tmp_path / repo_id / "b"
-    first.mkdir(parents=True)
-    second.mkdir(parents=True)
-    (first / "tool_a.py").write_text(
-        "def duplicated_symbol() -> int:\n"
-        "    return 1\n",
-        encoding="utf-8",
-    )
-    (second / "tool_b.py").write_text(
-        "def duplicated_symbol() -> int:\n"
-        "    return 2\n",
-        encoding="utf-8",
-    )
 
-    class _Settings:
-        workspace_path = tmp_path
+    def _fail_hybrid_search(*args: object, **kwargs: object) -> None:
+        raise AssertionError("hybrid_search no debe correr en modo componente")
 
-    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "hybrid_search", _fail_hybrid_search)
+    monkeypatch.setattr(
+        query_service,
+        "_get_symbol_definitions",
+        lambda repo_id_arg, symbol_name, symbol_type=None, module_name=None: [
+            {
+                "path": "a/tool_a.py",
+                "label": "duplicated_symbol",
+                "kind": "function",
+                "start_line": 1,
+                "end_line": 2,
+            },
+            {
+                "path": "b/tool_b.py",
+                "label": "duplicated_symbol",
+                "kind": "function",
+                "start_line": 1,
+                "end_line": 2,
+            },
+        ],
+    )
 
     result = query_service.run_query(
         repo_id=repo_id,
@@ -3314,7 +3349,7 @@ def test_run_query_literal_code_ambiguous_symbol_returns_safe_rejection(
         top_k=5,
     )
 
-    assert result.diagnostics["literal_mode"] is True
-    assert result.diagnostics["literal_exact_match"] is False
-    assert result.diagnostics["literal_failure_reason"] == "ambiguous_symbol"
+    assert result.diagnostics["component_mode"] is True
+    assert result.diagnostics["literal_failure_reason"] == "ambiguous_component"
+    assert len(result.diagnostics["component_candidates"]) == 2
     assert result.citations == []

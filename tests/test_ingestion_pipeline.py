@@ -76,6 +76,19 @@ def test_index_lexical_backend_uses_postgres_when_active(
     assert len(lexical_calls) == 1
     assert lexical_calls[0]["repo_id"] == "r1"
 
+    metadatas = lexical_calls[0]["metadatas"]
+    docs = lexical_calls[0]["docs"]
+    file_full_entries = [
+        (doc, meta)
+        for doc, meta in zip(docs, metadatas)
+        if meta["entity_type"] == "file_full"
+    ]
+    assert len(file_full_entries) == 1
+    full_doc, full_meta = file_full_entries[0]
+    assert full_doc == "print('ok')"
+    assert full_meta["path"] == "a.py"
+    assert full_meta["id"] == "r1:file_full:a.py"
+
 
 def test_index_lexical_backend_requires_postgres(
     monkeypatch: pytest.MonkeyPatch,

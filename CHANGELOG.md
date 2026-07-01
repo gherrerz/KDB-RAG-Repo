@@ -8,6 +8,32 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Added
 
+- `/query` y `/query/retrieval` ahora detectan la intención de "código de
+  componente" en lenguaje natural (además de las frases fijas previas de modo
+  literal), por ejemplo *"muéstrame la implementación del servicio
+  FooService"* o *"cómo está implementado UserRepository"*. El componente se
+  identifica vía Neo4j (`GraphBuilder.query_symbol_definitions`) y se extrae
+  **exclusivamente desde el índice persistido** (Chroma `code_symbols` +
+  Postgres `lexical_corpus`), sin depender del workspace local del clone.
+  Nuevos diagnostics: `component_mode`, `component_name`, `component_type`,
+  `resolution_path`, `literal_source`, y `component_candidates` cuando el
+  nombre es ambiguo (se devuelve una lista de desambiguación en vez de
+  adivinar). Implementado en `src/coderag/api/literal_mode.py`,
+  `src/coderag/ingestion/graph_builder.py` y el nuevo
+  `src/coderag/retrieval/code_snippet_store.py`.
+- Ingesta: se persiste el contenido íntegro de cada archivo en
+  `lexical_corpus` (`entity_type="file_full"`, sin embedding) para poder
+  servir "código completo del archivo" sin necesitar el workspace local.
+  Excluido del ranking FTS general (`entity_type <> 'file_full'`) para no
+  interferir con la búsqueda léxica existente.
+
+### Changed
+
+- El modo de código literal de `/query`/`/query/retrieval` ya no depende del
+  workspace local del repositorio ni bloquea la solicitud cuando este no
+  existe (worker distribuido, workspace purgado); ahora resuelve y extrae
+  siempre desde el índice persistido.
+
 - Resolución de URLs y credenciales de infraestructura (Chroma, Postgres, Neo4j,
   Redis) diferenciada por entorno mediante variables con sufijo
   `_DEV`/`_TEST`/`_PROD`, gobernadas por `RUNTIME_ENVIRONMENT`. Precedencia por

@@ -84,6 +84,36 @@ Notas de comportamiento:
   metadata runtime después del preflight de storage y antes de delegar al
   servicio de consulta.
 
+#### Modo de código de componente
+
+`POST /query` y `POST /query/retrieval` detectan cuando la consulta pide el
+código fuente de un componente (archivo, clase, función, servicio,
+controlador, etc.), ya sea con frases fijas ("dame el código completo de...")
+o en lenguaje natural ("muéstrame la implementación del servicio
+FooService", "cómo está implementado UserRepository", "el código del
+controlador BarController").
+
+- El componente se identifica primero por ruta/símbolo exacto y, si el
+  nombre corresponde a un componente (clase/servicio/controlador/etc.), se
+  resuelve vía grafo Neo4j (`Symbol.name_lc`), acotado opcionalmente por
+  módulo.
+- La extracción del código se hace **exclusivamente desde el índice
+  persistido** (Chroma `code_symbols` y Postgres `lexical_corpus`), no desde
+  el workspace local del clone. Por eso funciona igual con o sin
+  `workspace_available`.
+- Si el nombre resuelve a más de un candidato sin un ganador claro (se
+  descartan test/fixtures como desempate suave), la respuesta no adivina:
+  devuelve una lista de desambiguación en `diagnostics.component_candidates`
+  (`path`, `symbol`, `kind`) y pide precisar módulo o ruta.
+- Diagnostics relevantes: `component_mode`, `component_name`,
+  `component_type`, `resolution_path`
+  (`exact_path` | `graph_symbol_match`), `literal_source`
+  (`chroma_symbol` | `lexical_symbol` | `lexical_file_full`),
+  `literal_failure_reason` (`file_not_found` | `component_not_found` |
+  `ambiguous_component`), `component_candidates`.
+- Citations usan `reason`: `component_graph_symbol_match` o
+  `component_persisted_snippet`.
+
 ### Catalog
 
 #### GET /repos
@@ -114,8 +144,10 @@ Notas de comportamiento:
 
 - `query_ready=true` ya no exige workspace local si Chroma, Postgres y Neo4j
   estan disponibles.
-- `workspace_available=false` no bloquea query semántico, retrieval-only ni
-  inventory query, pero sí implica que modo literal quedará rechazado.
+- `workspace_available=false` no bloquea query semántico, retrieval-only,
+  inventory query ni el modo de código de componente: este último resuelve y
+  extrae exclusivamente desde el índice persistido (Chroma/Postgres), sin
+  depender del workspace local.
 - El payload expone `lexical_loaded` como único indicador público de readiness
   léxico.
 
@@ -516,6 +548,8 @@ Valores frecuentes de `reason`:
 - `graph_external_dependency_source`: evidencia derivada de un import externo, citando el archivo fuente donde aparece.
 - `graph_direct_impact_match`: evidencia de un dependiente directo del archivo objetivo.
 - `graph_transitive_impact_match`: evidencia de un dependiente transitivo del archivo objetivo.
+- `component_graph_symbol_match`: código de componente resuelto por nombre de símbolo vía grafo Neo4j.
+- `component_persisted_snippet`: código de archivo completo resuelto por ruta exacta desde el índice persistido.
 
 ### QueryResponse
 

@@ -108,9 +108,32 @@ _QUERY_LEXICAL_DOCUMENTS = sql_text(
     FROM {POSTGRES_LEXICAL_CORPUS_TABLE_NAME}
     WHERE
         repo_id = :repo_id
+        AND entity_type <> 'file_full'
         AND fts_vector @@ plainto_tsquery(:lang, :text)
     ORDER BY score DESC
     LIMIT :top_n
+    """
+)
+
+_GET_LEXICAL_DOCUMENT_BY_PATH = sql_text(
+    f"""
+    SELECT id, doc, path, symbol_name, entity_type, metadata
+    FROM {POSTGRES_LEXICAL_CORPUS_TABLE_NAME}
+    WHERE repo_id = :repo_id AND path = :path AND entity_type = :entity_type
+    LIMIT 1
+    """
+)
+
+_GET_LEXICAL_SYMBOL_DOCUMENT = sql_text(
+    f"""
+    SELECT id, doc, path, symbol_name, entity_type, metadata
+    FROM {POSTGRES_LEXICAL_CORPUS_TABLE_NAME}
+    WHERE
+        repo_id = :repo_id
+        AND path = :path
+        AND symbol_name = :symbol_name
+        AND entity_type = 'symbol'
+    LIMIT 1
     """
 )
 
@@ -205,6 +228,41 @@ class LexicalStore:
                 }
             )
         return results
+
+    def get_file_document(self, repo_id: str, path: str) -> dict | None:
+        """Recupera el contenido íntegro persistido de un archivo (sin FTS ranking)."""
+        with self._session_factory.get_connection() as connection:
+            row = connection.execute(
+                _GET_LEXICAL_DOCUMENT_BY_PATH,
+                {"repo_id": repo_id, "path": path, "entity_type": "file_full"},
+            ).mappings().first()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "text": row["doc"],
+            "metadata": _coerce_query_metadata(row.get("metadata")),
+        }
+
+    def get_symbol_document(
+        self,
+        repo_id: str,
+        path: str,
+        symbol_name: str,
+    ) -> dict | None:
+        """Recupera el snippet persistido de un símbolo exacto (sin FTS ranking)."""
+        with self._session_factory.get_connection() as connection:
+            row = connection.execute(
+                _GET_LEXICAL_SYMBOL_DOCUMENT,
+                {"repo_id": repo_id, "path": path, "symbol_name": symbol_name},
+            ).mappings().first()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "text": row["doc"],
+            "metadata": _coerce_query_metadata(row.get("metadata")),
+        }
 
     def has_corpus(self, repo_id: str) -> bool:
         """Indica si el repositorio tiene documentos indexados."""

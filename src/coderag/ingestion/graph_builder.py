@@ -751,6 +751,62 @@ class GraphBuilder:
             )
             return [record.data() for record in records]
 
+    def query_symbol_definitions(
+        self,
+        repo_id: str,
+        symbol_name: str,
+        symbol_type: str | None = None,
+        module_name: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Resuelve definiciones de símbolo por nombre exacto (case-insensitive).
+
+        ``symbol_type`` es un filtro suave: los tipos naturales del usuario
+        (p. ej. "servicio", "controlador") rara vez coinciden con los tipos
+        reales de AST (class/function/method/...), así que solo se aplica
+        cuando efectivamente reduce el conjunto de resultados.
+        """
+        query = """
+        MATCH (f:File {repo_id: $repo_id})-[:DECLARES]->(s:Symbol {repo_id: $repo_id})
+        WHERE s.name_lc = toLower($symbol_name)
+          AND (
+              $module_name IS NULL OR
+              f.path STARTS WITH $module_name + '/' OR
+              f.path CONTAINS '/' + $module_name + '/' OR
+              split(f.path, '/')[0] = $module_name
+          )
+        RETURN
+            f.path AS path,
+            s.name AS label,
+            s.type AS kind,
+            s.start_line AS start_line,
+            s.end_line AS end_line
+        ORDER BY path
+        LIMIT $limit
+        """
+        with self._managed_session(
+            operation="consultar definiciones de simbolo",
+            repo_id=repo_id,
+        ) as session:
+            records = session.run(
+                query,
+                repo_id=repo_id,
+                symbol_name=symbol_name,
+                module_name=module_name,
+                limit=limit,
+            )
+            results = [record.data() for record in records]
+
+        if symbol_type:
+            filtered = [
+                record
+                for record in results
+                if (record.get("kind") or "").lower() == symbol_type.lower()
+            ]
+            if filtered:
+                return filtered
+        return results
+
     def query_repo_modules(self, repo_id: str) -> list[str]:
         """Lista módulos persistidos del repositorio sin depender del workspace."""
         query = """

@@ -38,6 +38,7 @@ from coderag.api.query_diagnostics import (
 )
 from coderag.ingestion.graph_builder import GraphBuilder
 from coderag.llm.openai_client import AnswerClient
+from coderag.retrieval import code_snippet_store as code_snippet_store_service
 from coderag.retrieval.context_assembler import assemble_context
 from coderag.retrieval.graph_expand import expand_with_graph, expand_with_graph_with_diagnostics
 from coderag.retrieval.hybrid_search import hybrid_search
@@ -263,12 +264,62 @@ def _inventory_graph_first_hooks(
     )
 
 
+def _get_symbol_definitions(
+    repo_id: str,
+    symbol_name: str,
+    symbol_type: str | None = None,
+    module_name: str | None = None,
+) -> list[dict]:
+    """Resuelve definiciones de símbolo desde Neo4j para el modo de componente."""
+    graph = GraphBuilder()
+    try:
+        return graph.query_symbol_definitions(
+            repo_id,
+            symbol_name,
+            symbol_type=symbol_type,
+            module_name=module_name,
+        )
+    finally:
+        graph.close()
+
+
+_get_symbol_snippet = code_snippet_store_service.get_symbol_snippet
+_get_file_snippet = code_snippet_store_service.get_file_snippet
+_is_component_code_query = literal_mode_service.is_component_code_query
+
+
 def _literal_mode_hooks() -> literal_mode_service.LiteralModeHooks:
     """Build literal mode hooks from current query_service collaborators."""
     return literal_mode_service.LiteralModeHooks(
         get_settings=get_settings,
         resolve_repo_file_path=_resolve_repo_file_path,
         has_local_repo_workspace=_has_local_repo_workspace,
+        get_symbol_definitions=_get_symbol_definitions,
+        get_symbol_snippet=_get_symbol_snippet,
+        get_file_snippet=_get_file_snippet,
+    )
+
+
+def _build_component_code_response(repo_id: str, query: str) -> QueryResponse:
+    """Construye respuesta determinística de código de componente vía índice persistido."""
+    return literal_mode_service.build_component_code_response(
+        repo_id=repo_id,
+        query=query,
+        hooks=_literal_mode_hooks(),
+    )
+
+
+def _build_component_retrieval_response(
+    repo_id: str,
+    query: str,
+    include_context: bool,
+) -> RetrievalQueryResponse:
+    """Construye respuesta retrieval-only de código de componente vía índice persistido."""
+    return literal_mode_service.build_component_retrieval_response(
+        repo_id=repo_id,
+        query=query,
+        include_context=include_context,
+        hooks=_literal_mode_hooks(),
     )
 
 
@@ -1051,8 +1102,8 @@ def run_retrieval_query(
             include_context=include_context,
         )
 
-    if _is_literal_code_query(query):
-        return _build_literal_retrieval_response(
+    if _is_component_code_query(query):
+        return _build_component_retrieval_response(
             repo_id=repo_id,
             query=query,
             include_context=include_context,
@@ -1222,8 +1273,8 @@ def run_query(
             diagnostics=diagnostics,
         )
 
-    if _is_literal_code_query(query):
-        return _build_literal_code_response(repo_id=repo_id, query=query)
+    if _is_component_code_query(query):
+        return _build_component_code_response(repo_id=repo_id, query=query)
 
     budget_seconds = max(1.0, float(settings.query_max_seconds))
     verify_enabled = (

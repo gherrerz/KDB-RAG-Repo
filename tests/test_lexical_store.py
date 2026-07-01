@@ -221,6 +221,100 @@ class TestQuery:
 
 
 # ===========================================================================
+# query excluye entity_type=file_full del ranking general
+# ===========================================================================
+
+
+class TestQueryExcludesFileFull:
+    def test_sql_excluye_entity_type_file_full(self):
+        """El FTS general no debe rankear documentos de archivo completo."""
+        from coderag.storage.lexical_store import _QUERY_LEXICAL_DOCUMENTS
+
+        assert "entity_type <> 'file_full'" in str(_QUERY_LEXICAL_DOCUMENTS)
+
+
+# ===========================================================================
+# get_file_document / get_symbol_document
+# ===========================================================================
+
+
+class TestGetFileDocument:
+    def test_recupera_contenido_integro_por_path_exacto(self):
+        """get_file_document recupera el documento file_full por path exacto."""
+        store, connection, _ = _make_store()
+        row = {
+            "id": "r1:file_full:src/foo.py",
+            "doc": "print('hola')\n",
+            "path": "src/foo.py",
+            "symbol_name": "",
+            "entity_type": "file_full",
+            "metadata": {"path": "src/foo.py", "start_line": 1, "end_line": 1},
+        }
+        result = MagicMock()
+        result.mappings.return_value.first.return_value = row
+        connection.execute.return_value = result
+
+        document = store.get_file_document("r1", "src/foo.py")
+
+        assert document == {
+            "id": "r1:file_full:src/foo.py",
+            "text": "print('hola')\n",
+            "metadata": {"path": "src/foo.py", "start_line": 1, "end_line": 1},
+        }
+        _, params = connection.execute.call_args.args
+        assert params == {
+            "repo_id": "r1",
+            "path": "src/foo.py",
+            "entity_type": "file_full",
+        }
+
+    def test_retorna_none_si_no_existe(self):
+        """get_file_document retorna None cuando no hay fila."""
+        store, connection, _ = _make_store()
+        result = MagicMock()
+        result.mappings.return_value.first.return_value = None
+        connection.execute.return_value = result
+
+        assert store.get_file_document("r1", "src/missing.py") is None
+
+
+class TestGetSymbolDocument:
+    def test_recupera_snippet_exacto_de_simbolo(self):
+        """get_symbol_document filtra por path y symbol_name exactos."""
+        store, connection, _ = _make_store()
+        row = {
+            "id": "r1:sym",
+            "doc": "def foo(): pass",
+            "path": "src/foo.py",
+            "symbol_name": "foo",
+            "entity_type": "symbol",
+            "metadata": {"symbol_name": "foo", "start_line": 1, "end_line": 1},
+        }
+        result = MagicMock()
+        result.mappings.return_value.first.return_value = row
+        connection.execute.return_value = result
+
+        document = store.get_symbol_document("r1", "src/foo.py", "foo")
+
+        assert document["text"] == "def foo(): pass"
+        _, params = connection.execute.call_args.args
+        assert params == {
+            "repo_id": "r1",
+            "path": "src/foo.py",
+            "symbol_name": "foo",
+        }
+
+    def test_retorna_none_si_no_existe(self):
+        """get_symbol_document retorna None cuando no hay fila."""
+        store, connection, _ = _make_store()
+        result = MagicMock()
+        result.mappings.return_value.first.return_value = None
+        connection.execute.return_value = result
+
+        assert store.get_symbol_document("r1", "src/foo.py", "missing") is None
+
+
+# ===========================================================================
 # has_corpus
 # ===========================================================================
 

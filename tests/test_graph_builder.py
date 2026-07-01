@@ -1331,3 +1331,129 @@ def test_query_file_purpose_summaries_returns_path_map() -> None:
         "repo_id": "repo-x",
         "paths": ["src/coderag/core/settings.py"],
     }
+
+
+def _symbol_definition_record(
+    path: str,
+    label: str,
+    kind: str,
+    start_line: int,
+    end_line: int,
+) -> Any:
+    """Build a fake Neo4j record exposing ``.data()`` for symbol lookups."""
+
+    payload = {
+        "path": path,
+        "label": label,
+        "kind": kind,
+        "start_line": start_line,
+        "end_line": end_line,
+    }
+
+    class _Record:
+        def data(self) -> dict[str, object]:
+            return payload
+
+    return _Record()
+
+
+def test_query_symbol_definitions_matches_by_name_case_insensitive() -> None:
+    """Resuelve el símbolo por nombre exacto (case-insensitive) vía DECLARES."""
+
+    class _SymbolSession:
+        def __init__(self) -> None:
+            self.query = ""
+            self.kwargs: dict[str, Any] = {}
+
+        def run(self, query: str, **kwargs: Any) -> list[Any]:
+            self.query = query
+            self.kwargs = kwargs
+            return [
+                _symbol_definition_record(
+                    "src/foo_service.py", "FooService", "class", 10, 40
+                )
+            ]
+
+        def __enter__(self) -> "_SymbolSession":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class _SymbolDriver:
+        def __init__(self) -> None:
+            self.last_session: _SymbolSession | None = None
+
+        def session(self) -> _SymbolSession:
+            self.last_session = _SymbolSession()
+            return self.last_session
+
+    builder = GraphBuilder.__new__(GraphBuilder)
+    driver = _SymbolDriver()
+    builder.driver = driver
+
+    records = builder.query_symbol_definitions(
+        "repo-x",
+        "fooservice",
+        module_name="src",
+        limit=20,
+    )
+
+    assert records == [
+        {
+            "path": "src/foo_service.py",
+            "label": "FooService",
+            "kind": "class",
+            "start_line": 10,
+            "end_line": 40,
+        }
+    ]
+    assert driver.last_session is not None
+    assert "s.name_lc = toLower($symbol_name)" in driver.last_session.query
+    assert driver.last_session.kwargs == {
+        "repo_id": "repo-x",
+        "symbol_name": "fooservice",
+        "module_name": "src",
+        "limit": 20,
+    }
+
+
+def test_query_symbol_definitions_applies_soft_type_filter_only_when_useful() -> None:
+    """Filtra por symbol_type solo cuando reduce el resultado; si no, no filtra."""
+
+    class _SymbolSession:
+        def run(self, query: str, **kwargs: Any) -> list[Any]:
+            return [
+                _symbol_definition_record(
+                    "src/order_service.py", "OrderService", "class", 1, 5
+                ),
+                _symbol_definition_record(
+                    "src/order_service_factory.py", "OrderService", "function", 1, 5
+                ),
+            ]
+
+        def __enter__(self) -> "_SymbolSession":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class _SymbolDriver:
+        def session(self) -> _SymbolSession:
+            return _SymbolSession()
+
+    builder = GraphBuilder.__new__(GraphBuilder)
+    builder.driver = _SymbolDriver()
+
+    # "servicio" no coincide con ningún symbol_type real -> no filtra, devuelve ambos.
+    unfiltered = builder.query_symbol_definitions(
+        "repo-x", "OrderService", symbol_type="servicio"
+    )
+    assert len(unfiltered) == 2
+
+    # "class" sí coincide con un symbol_type real -> filtra al subconjunto útil.
+    filtered = builder.query_symbol_definitions(
+        "repo-x", "OrderService", symbol_type="class"
+    )
+    assert len(filtered) == 1
+    assert filtered[0]["path"] == "src/order_service.py"
