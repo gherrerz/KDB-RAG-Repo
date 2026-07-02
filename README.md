@@ -421,6 +421,9 @@ Rutas principales:
 
 El endpoint `/mcp` coexiste con la API REST en el mismo proceso/puerto y deja que cualquier agente
 de IA descubra (`tools/list`) y ejecute (`tools/call`) las operaciones de consulta/lectura/ingesta.
+Además expone **prompts** (`query_repo_guide`, `query_retrieval_guide`, `hybrid_rag_workflow`) y
+**resources** de guía (`rag://guide/*`) y estado en vivo de los repos (`rag://repos`,
+`rag://repos/{repo_id}/status`) para ayudar a los agentes a usar bien las tools.
 Se controla con `MCP_ENABLED` y `MCP_API_TOKEN` (header `X-MCP-Token`).
 
 Referencia completa por journeys y contratos:

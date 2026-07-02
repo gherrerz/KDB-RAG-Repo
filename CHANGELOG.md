@@ -8,6 +8,17 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Added
 
+- El servidor MCP (`/mcp`) ahora expone, además de las tools, **prompts** y
+  **resources** para guiar a los agentes. Prompts: `query_repo_guide`,
+  `query_retrieval_guide` (guías de uso de las tools de consulta) y
+  `hybrid_rag_workflow` (flujo end-to-end). Resources estáticos de guía
+  (`rag://guide/tools-overview`, `rag://guide/query-cookbook`,
+  `rag://guide/parameters`, `rag://guide/capabilities`, `rag://guide/errors`) y
+  resources en vivo (`rag://repos` con el catálogo de repos indexados y el
+  template `rag://repos/{repo_id}/status` con su readiness). Cambio puramente
+  aditivo: el contrato de las tools no cambia. Implementado en
+  `src/coderag/api/mcp_prompts.py` y `src/coderag/api/mcp_resources.py`,
+  registrados desde `src/coderag/api/mcp_server.py`.
 - `/query` y `/query/retrieval` ahora detectan la intención de "código de
   componente" en lenguaje natural (además de las frases fijas previas de modo
   literal), por ejemplo *"muéstrame la implementación del servicio

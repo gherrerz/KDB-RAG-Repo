@@ -319,9 +319,13 @@ Servidor MCP (Model Context Protocol) montado sobre la misma app FastAPI
 Cualquier agente de IA compatible con MCP puede conectarse a `/mcp` (transporte
 HTTP streamable) para **descubrir** (`tools/list`) y **ejecutar** (`tools/call`)
 las operaciones expuestas. Las tools se derivan automáticamente del OpenAPI y su
-nombre es el `operation_id` de cada ruta.
+nombre es el `operation_id` de cada ruta. Además de tools, el servidor expone
+**prompts** (`prompts/list`, `prompts/get`) y **resources** (`resources/list`,
+`resources/templates/list`, `resources/read`) para guiar a los agentes.
 
-- Implementación: `src/coderag/api/mcp_server.py` (`setup_mcp`)
+- Implementación: `src/coderag/api/mcp_server.py` (`setup_mcp`); prompts en
+  `src/coderag/api/mcp_prompts.py`, resources en
+  `src/coderag/api/mcp_resources.py`
 - Header de auth: `X-MCP-Token: str` (requerido solo si `MCP_API_TOKEN` está configurado)
 - Headers de identidad (opcionales, pass-through): `x-role-id`, `x-user-id`,
   `x-country-id`. Se fijan en la conexión `/mcp` (cliente MCP o gateway) y el
@@ -341,6 +345,30 @@ Tools publicadas (default-deny; solo consulta y lectura directa):
 | `list_repos` | `GET /repos` |
 | `repo_status` | `GET /repos/{repo_id}/status` |
 | `storage_health` | `GET /health` |
+
+Prompts publicados (`prompts/list` + `prompts/get`):
+
+| Prompt | Argumentos | Propósito |
+| --- | --- | --- |
+| `query_repo_guide` | `repo_id`, `pregunta` | Cómo usar `query_repo` (Hybrid RAG + síntesis LLM con citas). |
+| `query_retrieval_guide` | `repo_id`, `pregunta` | Cómo usar `query_retrieval` (evidencia cruda sin LLM). |
+| `hybrid_rag_workflow` | — | Flujo end-to-end: readiness → elegir tool → frasear → citar. |
+
+Resources publicados (`resources/list`, `resources/templates/list`, `resources/read`):
+
+| URI | Tipo | Contenido |
+| --- | --- | --- |
+| `rag://guide/tools-overview` | estático (md) | Las 5 tools y cuándo usar cada una. |
+| `rag://guide/query-cookbook` | estático (md) | Recetas de fraseo (incluye atajos graph-first). |
+| `rag://guide/parameters` | estático (md) | Parámetros, defaults y tuning. |
+| `rag://guide/capabilities` | estático (md) | Lenguajes, colecciones, metadata, pesos (anti-alucinación). |
+| `rag://guide/errors` | estático (md) | Errores 422/503 y recuperación. |
+| `rag://repos` | dinámico (json) | Catálogo en vivo de `repo_id` indexados. |
+| `rag://repos/{repo_id}/status` | template (json) | Readiness en vivo de un repo. |
+
+Los resources dinámicos leen estado en vivo reutilizando el cliente HTTP ASGI
+interno de `fastapi-mcp` (mismas rutas REST, mismo proceso); ante fallo devuelven
+un JSON de error legible en lugar de propagar una excepción.
 
 Notas de comportamiento:
 

@@ -1,9 +1,19 @@
 """Montaje del servidor MCP sobre la app FastAPI existente.
 
-Expone un endpoint ``/mcp`` (transporte HTTP streamable) cuyas tools se derivan
-automáticamente del OpenAPI de FastAPI. Solo se publican las operaciones de
-consulta, lectura e ingesta; los endpoints administrativos/destructivos quedan
-fuera mediante un filtro ``include_operations`` (default-deny).
+Expone un endpoint ``/mcp`` (transporte HTTP streamable) que ofrece:
+
+- **Tools** derivadas automáticamente del OpenAPI de FastAPI. Solo se publican las
+  operaciones de consulta, lectura e ingesta; los endpoints
+  administrativos/destructivos quedan fuera mediante un filtro
+  ``include_operations`` (default-deny).
+- **Prompts** que guían a los agentes en el uso de ``query_repo`` y
+  ``query_retrieval`` (ver ``mcp_prompts.py``).
+- **Resources** de guía estática y estado en vivo de los repos (ver
+  ``mcp_resources.py``).
+
+``fastapi-mcp`` solo deriva tools; prompts y resources se registran sobre el
+servidor MCP low-level subyacente (``mcp.server``) tras construir ``FastApiMCP`` y
+antes de ``mount_http`` para que sus capabilities se anuncien en el handshake.
 """
 
 import logging
@@ -12,6 +22,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi_mcp import AuthConfig, FastApiMCP
 
 from coderag.api.identity_headers import IDENTITY_HEADER_NAMES
+from coderag.api.mcp_prompts import register_mcp_prompts
+from coderag.api.mcp_resources import register_mcp_resources
 from coderag.core.settings import Settings, get_settings
 
 _log = logging.getLogger(__name__)
@@ -74,10 +86,17 @@ def setup_mcp(app: FastAPI, settings: Settings | None = None) -> FastApiMCP:
         # Reenvía la identidad del llamante desde la conexión /mcp a cada tool.
         headers=["authorization", *IDENTITY_HEADER_NAMES],
     )
+    # Registrar prompts y resources sobre el servidor MCP low-level ANTES de
+    # mount_http: sus capabilities se calculan por conexión inspeccionando los
+    # handlers registrados, por lo que deben existir en el momento del montaje.
+    prompt_count = register_mcp_prompts(mcp.server)
+    resource_count = register_mcp_resources(mcp.server, mcp._http_client)
     mcp.mount_http(mount_path=settings.mcp_mount_path)
     _log.info(
-        "Servidor MCP montado en %s con %d tools.",
+        "Servidor MCP montado en %s con %d tools, %d prompts y %d resources.",
         settings.mcp_mount_path,
         len(MCP_INCLUDED_OPERATIONS),
+        prompt_count,
+        resource_count,
     )
     return mcp

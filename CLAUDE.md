@@ -44,16 +44,21 @@ Módulos clave bajo `src/coderag/`:
 | GET | `/repos/{id}/status` | Readiness: `query_ready`, `embedding_compatible` |
 | GET | `/health` | Estado de todos los componentes de storage |
 | POST | `/webhook/bitbucket` | Webhook directo BB Server/DC → dispara ingesta |
-| POST/GET | `/mcp` | Servidor MCP (envoltura `fastapi-mcp`) para agentes de IA: `tools/list` + `tools/call` |
+| POST/GET | `/mcp` | Servidor MCP (envoltura `fastapi-mcp`) para agentes de IA: tools + prompts + resources |
 
 `/query` y `/query/retrieval` exigen `query_ready=true` y compatibilidad de embeddings o devuelven 422.
 
 El servidor MCP (`/mcp`) coexiste con la API REST en el mismo proceso/puerto; deriva sus tools del
 OpenAPI (nombre = `operation_id`). Solo expone consulta/lectura/ingesta (admin/destructivo excluido por
-`include_operations`). Reenvía headers de identidad opcionales
+`include_operations`). Además expone **prompts** (`query_repo_guide`, `query_retrieval_guide`,
+`hybrid_rag_workflow`) y **resources** (guías `rag://guide/*` + estado en vivo `rag://repos` y
+`rag://repos/{repo_id}/status`), registrados sobre el servidor MCP low-level tras construir
+`FastApiMCP` y antes de `mount_http` (fastapi-mcp 0.4.0 no expone prompts/resources nativamente).
+Reenvía headers de identidad opcionales
 `x-role-id`/`x-user-id`/`x-country-id` (pass-through, allowlist de `fastapi-mcp`; ver
 `src/coderag/api/identity_headers.py`). Config: `MCP_ENABLED`, `MCP_API_TOKEN` (header `X-MCP-Token`),
-`MCP_MOUNT_PATH`, `MCP_SERVER_NAME`. Impl: `src/coderag/api/mcp_server.py`.
+`MCP_MOUNT_PATH`, `MCP_SERVER_NAME`. Impl: `src/coderag/api/mcp_server.py`,
+`src/coderag/api/mcp_prompts.py`, `src/coderag/api/mcp_resources.py`.
 
 ---
 
