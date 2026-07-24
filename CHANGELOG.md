@@ -8,6 +8,21 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Added
 
+- Nuevo documento `docs/MCP_CONTRACT.md`: contrato de integración MCP
+  autocontenido para consumidores externos (payloads de entrada/salida de las
+  5 tools, los 3 prompts y los 7 resources, tabla consolidada de códigos de
+  error `REPO_*`, ejemplos JSON-RPC de `tools/call`/`prompts/get`/
+  `resources/read`, y una sesión completa de handshake). Enlazado desde
+  `docs/API_REFERENCE.md` en la sección `POST/GET /mcp`.
+- Nuevo endpoint público `GET /info` (sin autenticación) para el contrato de
+  integración Hexa: expone `{name, version, server_type: "tools", description,
+  sensitive_fields}` (modelo `McpInfoResponse`). `sensitive_fields` declara los
+  campos con contenido libre de usuario (`query`, `question`, `answer`).
+- `GET /health` (tool MCP `storage_health`) se extiende de forma aditiva con
+  los campos del contrato Hexa `status: healthy|degraded|unhealthy`, `name`,
+  `version`, `uptime_s` y `dependencies` (modelo `McpDependencyStatus`),
+  preservando el shape legacy (`ok`, `strict`, `items`, `cached`, ...) para no
+  romper consumidores existentes (K8s probes, `storage_health` tool).
 - El servidor MCP (`/mcp`) ahora expone, además de las tools, **prompts** y
   **resources** para guiar a los agentes. Prompts: `query_repo_guide`,
   `query_retrieval_guide` (guías de uso de las tools de consulta) y
@@ -40,6 +55,16 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- **BREAKING** el servidor MCP (`/mcp`) migra su autenticación del header
+  `X-MCP-Token` a `Authorization: Bearer {MCP_API_TOKEN}` (contrato de
+  integración Hexa). Falta o incompatibilidad de token responde `401` con
+  `{message, code:"invalid_mcp_token"}`; `MCP_ENABLED=false` sigue respondiendo
+  `404`. Clientes existentes deben actualizar el header enviado.
+- Los errores 422/503 de `query_repo` y `query_retrieval` añaden de forma
+  aditiva los campos `error: "REPO_VALIDATION"|"REPO_UNAVAILABLE"` y
+  `retryable: bool` al body de `detail`, preservando el campo `code` legacy
+  (`repo_not_ready`, `embedding_incompatible`) para no romper consumidores
+  existentes.
 - El modo de código literal de `/query`/`/query/retrieval` ya no depende del
   workspace local del repositorio ni bloquea la solicitud cuando este no
   existe (worker distribuido, workspace purgado); ahora resuelve y extrae
@@ -66,6 +91,10 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Fixed
 
+- `scripts/mcp_smoke.sh` enviaba el header legacy `X-MCP-Token` en vez de
+  `Authorization: Bearer {MCP_API_TOKEN}`, quedando desalineado con el
+  contrato de autenticación MCP realmente implementado en
+  `src/coderag/api/mcp_server.py`. Corregido para usar el header Bearer.
 - El arranque de la API podía **colgarse indefinidamente** ejecutando una migración
   Alembic (observado en `0004_add_ingestion_snapshots_table`), dejando el pod en estado
   degradado. La causa real es un **bloqueo a nivel de socket/red a través del service mesh

@@ -78,20 +78,34 @@ def test_exposed_operations_declare_identity_headers() -> None:
 def test_ensure_mcp_access_allows_matching_token(monkeypatch) -> None:
     monkeypatch.setattr(mcp_server, "get_settings", lambda: _settings(token="secret"))
     # No debe lanzar.
-    assert _ensure_mcp_access(token="secret") is None
+    assert _ensure_mcp_access(authorization="Bearer secret") is None
 
 
 def test_ensure_mcp_access_rejects_invalid_token(monkeypatch) -> None:
     monkeypatch.setattr(mcp_server, "get_settings", lambda: _settings(token="secret"))
     with pytest.raises(HTTPException) as exc:
-        _ensure_mcp_access(token="wrong")
-    assert exc.value.status_code == 403
+        _ensure_mcp_access(authorization="Bearer wrong")
+    assert exc.value.status_code == 401
+
+
+def test_ensure_mcp_access_rejects_missing_authorization_header(monkeypatch) -> None:
+    monkeypatch.setattr(mcp_server, "get_settings", lambda: _settings(token="secret"))
+    with pytest.raises(HTTPException) as exc:
+        _ensure_mcp_access(authorization=None)
+    assert exc.value.status_code == 401
+
+
+def test_ensure_mcp_access_rejects_malformed_authorization_header(monkeypatch) -> None:
+    monkeypatch.setattr(mcp_server, "get_settings", lambda: _settings(token="secret"))
+    with pytest.raises(HTTPException) as exc:
+        _ensure_mcp_access(authorization="secret")
+    assert exc.value.status_code == 401
 
 
 def test_ensure_mcp_access_open_without_token(monkeypatch) -> None:
     """Sin token configurado el acceso queda abierto (solo flag)."""
     monkeypatch.setattr(mcp_server, "get_settings", lambda: _settings(token=""))
-    assert _ensure_mcp_access(token=None) is None
+    assert _ensure_mcp_access(authorization=None) is None
 
 
 def test_ensure_mcp_access_returns_404_when_disabled(monkeypatch) -> None:
@@ -99,5 +113,5 @@ def test_ensure_mcp_access_returns_404_when_disabled(monkeypatch) -> None:
         mcp_server, "get_settings", lambda: _settings(enabled=False, token="secret")
     )
     with pytest.raises(HTTPException) as exc:
-        _ensure_mcp_access(token="secret")
+        _ensure_mcp_access(authorization="Bearer secret")
     assert exc.value.status_code == 404

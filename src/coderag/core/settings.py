@@ -196,6 +196,13 @@ class Settings(BaseSettings):
         default="repositories-kdb-mcp",
         alias="MCP_SERVER_NAME",
     )
+    mcp_server_description: str = Field(
+        default=(
+            "Ingesta y consulta de repositorios Git con RAG híbrido "
+            "(vector + lexical + grafo)."
+        ),
+        alias="MCP_SERVER_DESCRIPTION",
+    )
     chroma_remote_batch_size_override: int = Field(
         default=0,
         alias="CHROMA_REMOTE_BATCH_SIZE_OVERRIDE",

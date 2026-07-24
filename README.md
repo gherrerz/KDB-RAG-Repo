@@ -414,6 +414,7 @@ Rutas principales:
 - GET /repos/{repo_id}/snapshots
 - GET /providers/models
 - GET /health
+- GET /info
 - GET /admin/chroma/diagnostics
 - POST /admin/chroma/query
 - POST /admin/reset
@@ -424,7 +425,10 @@ de IA descubra (`tools/list`) y ejecute (`tools/call`) las operaciones de consul
 Además expone **prompts** (`query_repo_guide`, `query_retrieval_guide`, `hybrid_rag_workflow`) y
 **resources** de guía (`rag://guide/*`) y estado en vivo de los repos (`rag://repos`,
 `rag://repos/{repo_id}/status`) para ayudar a los agentes a usar bien las tools.
-Se controla con `MCP_ENABLED` y `MCP_API_TOKEN` (header `X-MCP-Token`).
+Se controla con `MCP_ENABLED` y `MCP_API_TOKEN` (header `Authorization: Bearer
+{MCP_API_TOKEN}`). `GET /health` incluye ahora `status`/`name`/`version`/
+`uptime_s`/`dependencies` (contrato de integración Hexa) y `GET /info` expone
+metadata pública sin autenticación.
 
 Referencia completa por journeys y contratos:
 

@@ -2,12 +2,12 @@
 # Smoke test manual del servidor MCP (transporte streamable HTTP).
 # Uso: ./scripts/mcp_smoke.sh [BASE_URL] [MCP_TOKEN]
 #   BASE_URL   default http://127.0.0.1:8000
-#   MCP_TOKEN  opcional; se envía como header X-MCP-Token si MCP_API_TOKEN está configurado.
+#   MCP_TOKEN  opcional; se envía como header "Authorization: Bearer" si MCP_API_TOKEN está configurado.
 set -euo pipefail
 BASE="${1:-http://127.0.0.1:8000}"
 TOKEN="${2:-}"
 ACCEPT="Accept: application/json, text/event-stream"
-AUTH=(); [ -n "$TOKEN" ] && AUTH=(-H "X-MCP-Token: $TOKEN")
+AUTH=(); [ -n "$TOKEN" ] && AUTH=(-H "Authorization: Bearer $TOKEN")
 # Headers de identidad opcionales: el servidor MCP los reenvía a cada tool.
 AUTH+=(-H "x-role-id: smoke-role" -H "x-user-id: smoke-user" -H "x-country-id: cl")
 

@@ -213,7 +213,35 @@ Incluye además el bloque top-level `postgres_startup` cuando el runtime tiene
 Postgres operativo habilitado, para exponer la política y el resultado del
 bootstrap de migraciones Alembic.
 
+Extensión aditiva (contrato de integración Hexa): el body también incluye
+`status: healthy|degraded|unhealthy`, `name`, `version`, `uptime_s` y
+`dependencies` (mapa de `McpDependencyStatus` con `status`+`latency_ms`),
+preservando todos los campos legacy (`ok`, `strict`, `items`, `cached`, ...).
+
 - Response schema: `StorageHealthResponse`
+
+#### GET /info
+
+Metadata estática del servidor MCP, sin autenticación. Exigido por el
+contrato de integración Hexa para que el orquestador descubra el servidor
+sin negociar un token primero.
+
+Response:
+
+```json
+{
+  "name": "coderag-mcp",
+  "version": "0.1.0",
+  "server_type": "tools",
+  "description": "Ingesta y consulta de repositorios Git con RAG híbrido (vector + lexical + grafo).",
+  "sensitive_fields": ["query", "question", "answer"]
+}
+```
+
+`sensitive_fields` declara los campos de las tools MCP con contenido libre de
+usuario, para que Hexa configure su Dual-LLM Sanitizer.
+
+- Response schema: `McpInfoResponse`
 
 #### GET /admin/chroma/diagnostics
 
@@ -326,15 +354,20 @@ nombre es el `operation_id` de cada ruta. Además de tools, el servidor expone
 - Implementación: `src/coderag/api/mcp_server.py` (`setup_mcp`); prompts en
   `src/coderag/api/mcp_prompts.py`, resources en
   `src/coderag/api/mcp_resources.py`
-- Header de auth: `X-MCP-Token: str` (requerido solo si `MCP_API_TOKEN` está configurado)
+- Header de auth: `Authorization: Bearer {MCP_API_TOKEN}` (requerido solo si
+  `MCP_API_TOKEN` está configurado; formato exigido por el contrato de
+  integración Hexa, reemplaza al header legacy `X-MCP-Token`).
 - Headers de identidad (opcionales, pass-through): `x-role-id`, `x-user-id`,
   `x-country-id`. Se fijan en la conexión `/mcp` (cliente MCP o gateway) y el
   servidor los **reenvía** a cada llamada interna de tool (allowlist de
   `fastapi-mcp`). Están declarados en el OpenAPI de cada operación expuesta. Por
   limitación de `fastapi-mcp` 0.4.0 no aparecen como argumentos JSON de la tool.
 - Error responses:
-  - `403`: token MCP inválido cuando `MCP_API_TOKEN` está configurado (`detail` es objeto)
+  - `401`: token MCP faltante o inválido cuando `MCP_API_TOKEN` está configurado (`detail` es objeto `{message, code:"invalid_mcp_token"}`)
   - `404`: servidor MCP deshabilitado (`MCP_ENABLED=false`) (`detail` es objeto)
+- Errores de las tools `query_repo`/`query_retrieval` (422/503): el body de
+  `detail` añade de forma aditiva `error: "REPO_VALIDATION"|"REPO_UNAVAILABLE"`
+  y `retryable: bool`, preservando el campo `code` legacy.
 
 Tools publicadas (default-deny; solo consulta y lectura directa):
 
@@ -380,6 +413,10 @@ Notas de comportamiento:
 - Se controla con `MCP_ENABLED` (gate) y `MCP_API_TOKEN` (auth). Sin token, el
   endpoint queda accesible solo tras el feature flag (se emite warning al arranque).
 
+> Referencia completa del contrato MCP (payloads de entrada/salida por tool,
+> prompts, resources y todos los códigos de error posibles) en
+> [MCP_CONTRACT.md](MCP_CONTRACT.md).
+
 ## Mapping interno
 
 | Method | Path | Internal service | Request model | Response model |
@@ -394,7 +431,8 @@ Notas de comportamiento:
 | GET | `/repos/{repo_id}/status` | `get_repo_query_status` | Path/query params | `RepoQueryStatusResponse` |
 | GET | `/repos/{repo_id}/snapshots` | `JobManager.list_repo_ingest_snapshots` | Path/query params | `RepoIngestionSnapshotsResponse` |
 | GET | `/providers/models` | `discover_models` | Query params | `ProviderModelCatalogResponse` |
-| GET | `/health` | `run_storage_preflight` | N/A | `StorageHealthResponse` |
+| GET | `/health` | `run_storage_preflight` | N/A | `StorageHealthResponse` (extendido con `status`/`name`/`version`/`uptime_s`/`dependencies`) |
+| GET | `/info` | `info` | N/A | `McpInfoResponse` |
 | GET | `/admin/chroma/diagnostics` | `build_managed_vector_index` + Chroma diagnostics | Query params | `ChromaDiagnosticsResponse` |
 | POST | `/admin/chroma/query` | `build_managed_vector_index` + Chroma direct read | `ChromaQueryRequest` | `ChromaQueryResponse` |
 | DELETE | `/repos/{repo_id}` | `JobManager.delete_repo` | Path params | `RepoDeleteResponse` |

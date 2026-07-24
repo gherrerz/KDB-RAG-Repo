@@ -92,10 +92,13 @@ Expone las operaciones de la API como tools MCP en `/mcp` (envoltura automática
 con `fastapi-mcp`, montada sobre la misma app). Ver `docs/API_REFERENCE.md`.
 
 - `MCP_ENABLED`: habilita el montaje de `/mcp`. Default: `true`.
-- `MCP_API_TOKEN`: token requerido en el header `X-MCP-Token` para acceder a
-  `/mcp`. Default: vacío.
+- `MCP_API_TOKEN`: token requerido en el header `Authorization: Bearer
+  {MCP_API_TOKEN}` para acceder a `/mcp` (contrato de integración Hexa;
+  reemplaza al header legacy `X-MCP-Token`). Default: vacío.
 - `MCP_MOUNT_PATH`: path de montaje del servidor MCP. Default: `/mcp`.
 - `MCP_SERVER_NAME`: nombre anunciado del servidor MCP. Default: `coderag-mcp`.
+- `MCP_SERVER_DESCRIPTION`: descripción publicada sin autenticación en
+  `GET /info` (contrato Hexa). Default: descripción genérica del servicio.
 
 Notas operativas:
 
@@ -106,6 +109,8 @@ Notas operativas:
 - Solo se publican operaciones de consulta, lectura e ingesta; los endpoints
   admin/destructivos (`/admin/*`, `DELETE /repos/{id}`) quedan fuera del servidor
   MCP por diseño (filtro `include_operations`).
+- `GET /health` y `GET /info` no requieren autenticación y siguen el contrato
+  de integración Hexa (ver `docs/API_REFERENCE.md`).
 - Headers de identidad opcionales (`x-role-id`, `x-user-id`, `x-country-id`): se
   fijan en la conexión `/mcp` y el servidor los reenvía (pass-through) a cada tool.
   No se exige su presencia. Definidos en `src/coderag/api/identity_headers.py`.

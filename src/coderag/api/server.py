@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -12,6 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.openapi.utils import get_openapi
 
 from coderag.api.identity_headers import identity_headers
+from coderag.api.mcp_server import MCP_SENSITIVE_FIELDS, MCP_SERVER_TYPE
 from coderag.core.logging import configure_logging
 from coderag.core.models import (
     AdminResetRequest,
@@ -23,6 +25,8 @@ from coderag.core.models import (
     InventoryQueryRequest,
     InventoryQueryResponse,
     JobInfo,
+    McpDependencyStatus,
+    McpInfoResponse,
     ProviderModelCatalogResponse,
     QueryRequest,
     QueryResponse,
@@ -60,6 +64,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Ejecuta validación estricta de storage durante el arranque de la API."""
+    app.state.started_at = time.monotonic()
     settings = get_settings()
     if hasattr(settings, "decode_vertex_service_account_b64"):
         settings.decode_vertex_service_account_b64()
@@ -213,6 +218,8 @@ def _ensure_repo_query_ready(readiness: dict[str, object]) -> None:
         raise HTTPException(
             status_code=422,
             detail={
+                "error": "REPO_VALIDATION",
+                "retryable": False,
                 "message": (
                     "El embedding seleccionado para consulta no es compatible "
                     "con la última ingesta del repositorio. Reingesta con el "
@@ -227,6 +234,8 @@ def _ensure_repo_query_ready(readiness: dict[str, object]) -> None:
         raise HTTPException(
             status_code=422,
             detail={
+                "error": "REPO_VALIDATION",
+                "retryable": False,
                 "message": (
                     "El repositorio no está listo para consultas. "
                     "Reingesta el repositorio o revisa el estado de índices."
@@ -531,6 +540,8 @@ def query_repo(request: QueryRequest) -> QueryResponse:
         raise HTTPException(
             status_code=503,
             detail={
+                "error": "REPO_UNAVAILABLE",
+                "retryable": True,
                 "message": "Preflight de storage falló antes de consulta.",
                 "health": exc.report,
             },
@@ -631,6 +642,8 @@ def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
         raise HTTPException(
             status_code=503,
             detail={
+                "error": "REPO_UNAVAILABLE",
+                "retryable": True,
                 "message": "Preflight de storage falló antes de retrieval.",
                 "health": exc.report,
             },
@@ -833,6 +846,39 @@ def repo_status(
     return RepoQueryStatusResponse(**status_payload)
 
 
+def _build_mcp_health_fields(report: dict[str, object]) -> dict[str, object]:
+    """Deriva los campos exigidos por el contrato de integración MCP Hexa."""
+    items = cast(list[dict[str, object]], report.get("items", []))
+    dependencies: dict[str, McpDependencyStatus] = {}
+    has_noncritical_failure = False
+    for item in items:
+        ok = bool(item.get("ok"))
+        if not ok and not bool(item.get("critical")):
+            has_noncritical_failure = True
+        dependencies[str(item.get("name"))] = McpDependencyStatus(
+            status="healthy" if ok else "unhealthy",
+            latency_ms=float(item.get("latency_ms", 0.0) or 0.0),
+        )
+
+    if not bool(report.get("ok")):
+        status = "unhealthy"
+    elif has_noncritical_failure:
+        status = "degraded"
+    else:
+        status = "healthy"
+
+    settings = get_settings()
+    started_at = getattr(app.state, "started_at", None)
+    uptime_s = int(time.monotonic() - started_at) if started_at else 0
+    return {
+        "status": status,
+        "name": settings.mcp_server_name,
+        "version": app.version,
+        "uptime_s": uptime_s,
+        "dependencies": dependencies,
+    }
+
+
 @app.get(
     "/health",
     response_model=StorageHealthResponse,
@@ -842,7 +888,9 @@ def repo_status(
     summary="Salud de storage",
     description=(
         "Ejecuta preflight de storage y devuelve el estado consolidado de "
-        "componentes críticos y no críticos."
+        "componentes críticos y no críticos. Incluye el shape exigido por "
+        "el contrato de integración MCP Hexa (status, name, version, "
+        "uptime_s, dependencies)."
     ),
 )
 def storage_health() -> StorageHealthResponse:
@@ -851,7 +899,31 @@ def storage_health() -> StorageHealthResponse:
         run_storage_preflight(context="health", force=True)
     )
     app.state.storage_health = report
-    return StorageHealthResponse(**report)
+    payload = dict(report)
+    payload.update(_build_mcp_health_fields(report))
+    return StorageHealthResponse(**payload)
+
+
+@app.get(
+    "/info",
+    tags=["Admin"],
+    summary="Metadata del servidor MCP",
+    description=(
+        "Contrato de integración MCP Hexa: metadata estática del servidor "
+        "(name, version, server_type, description, sensitive_fields), sin "
+        "autenticación."
+    ),
+)
+def info() -> McpInfoResponse:
+    """Metadata endpoint exigido por el contrato de integración MCP Hexa."""
+    settings = get_settings()
+    return McpInfoResponse(
+        name=settings.mcp_server_name,
+        version=app.version,
+        server_type=MCP_SERVER_TYPE,
+        description=settings.mcp_server_description,
+        sensitive_fields=MCP_SENSITIVE_FIELDS,
+    )
 
 
 @app.get(

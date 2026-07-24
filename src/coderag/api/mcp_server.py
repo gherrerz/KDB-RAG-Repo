@@ -38,16 +38,46 @@ MCP_INCLUDED_OPERATIONS: list[str] = [
     "storage_health",
 ]
 
+# Metadata publicada en GET /info (contrato Hexa). "tools" refleja que este
+# servidor expone N operaciones discretas y sincrónicas (no un pipeline agent
+# de orquestación interna de cara a Hexa).
+MCP_SERVER_TYPE = "tools"
+
+# Campos que pueden contener datos libres ingresados por usuarios (parámetros
+# de tools o contenido devuelto). Declarados para que Hexa configure su
+# DualLLM Sanitizer.
+MCP_SENSITIVE_FIELDS: list[str] = [
+    "query",
+    "question",
+    "answer",
+]
+
+
+def _parse_bearer_token(authorization: str | None) -> str | None:
+    """Extrae el token de un header ``Authorization: Bearer <token>``.
+
+    Retorna ``None`` si el header está ausente o no sigue el esquema Bearer
+    (comparación case-insensitive del esquema, con trim del token).
+    """
+    if not authorization:
+        return None
+    parts = authorization.strip().split(maxsplit=1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    token = parts[1].strip()
+    return token or None
+
 
 def _ensure_mcp_access(
-    token: str | None = Header(default=None, alias="X-MCP-Token"),
+    authorization: str | None = Header(default=None),
 ) -> None:
-    """Protege el endpoint MCP con flag y token dedicado.
+    """Protege el endpoint MCP con flag y token Bearer dedicado.
 
-    Espeja el contrato de los endpoints admin: 404 si el servidor MCP está
-    deshabilitado y 403 si hay un token configurado que no coincide. Cuando no
-    se define ``MCP_API_TOKEN`` el acceso queda abierto (solo protegido por el
-    feature flag); el arranque emite una advertencia de seguridad en ese caso.
+    Contrato Hexa: ``Authorization: Bearer {MCP_API_TOKEN}`` y HTTP 401 si el
+    header falta o el token no coincide. 404 si el servidor MCP está
+    deshabilitado. Cuando no se define ``MCP_API_TOKEN`` el acceso queda
+    abierto (solo protegido por el feature flag); el arranque emite una
+    advertencia de seguridad en ese caso.
     """
     settings = get_settings()
     if not bool(getattr(settings, "mcp_enabled", False)):
@@ -60,14 +90,16 @@ def _ensure_mcp_access(
         )
 
     expected_token = str(getattr(settings, "mcp_api_token", "") or "").strip()
-    if expected_token and (token or "").strip() != expected_token:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "message": "Token inválido para el endpoint MCP.",
-                "code": "invalid_mcp_token",
-            },
-        )
+    if expected_token:
+        token = _parse_bearer_token(authorization)
+        if token != expected_token:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "message": "Token inválido para el endpoint MCP.",
+                    "code": "invalid_mcp_token",
+                },
+            )
 
 
 def setup_mcp(app: FastAPI, settings: Settings | None = None) -> FastApiMCP:

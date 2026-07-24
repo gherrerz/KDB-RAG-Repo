@@ -902,6 +902,47 @@ class RepoQueryStatusResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="Advertencias de readiness no bloqueantes.")
 
 
+class McpInfoResponse(BaseModel):
+    """Metadata publicada en GET /info, contrato de integración MCP Hexa."""
+
+    name: str = Field(description="Nombre único del servidor MCP.")
+    version: str = Field(description="Versión semántica del servicio.")
+    server_type: Literal["tools", "agent"] = Field(
+        description="tools: operaciones discretas y sincrónicas."
+    )
+    description: str = Field(description="Breve descripción del sistema integrado.")
+    sensitive_fields: list[str] = Field(
+        description=(
+            "Campos que pueden contener datos libres ingresados por "
+            "usuarios, usados por Hexa para configurar el DualLLM Sanitizer."
+        )
+    )
+
+
+class McpDependencyStatus(BaseModel):
+    """Estado de una dependencia individual reportada en GET /health."""
+
+    status: Literal["healthy", "unhealthy"] = Field(
+        description="Salud de la dependencia evaluada."
+    )
+    latency_ms: float = Field(description="Latencia del chequeo en milisegundos.")
+
+
+class McpHealthResponse(BaseModel):
+    """Shape de GET /health exigido por el contrato de integración MCP Hexa."""
+
+    status: Literal["healthy", "degraded", "unhealthy"] = Field(
+        description="Estado global consolidado del servicio."
+    )
+    name: str = Field(description="Nombre del servidor MCP.")
+    version: str = Field(description="Versión semántica del servicio.")
+    uptime_s: int = Field(description="Segundos transcurridos desde el arranque.")
+    dependencies: dict[str, McpDependencyStatus] = Field(
+        default_factory=dict,
+        description="Estado por dependencia crítica/no crítica evaluada.",
+    )
+
+
 class StorageHealthItem(BaseModel):
     """Resultado de salud para un componente de almacenamiento del sistema."""
 
@@ -939,6 +980,24 @@ class StorageHealthResponse(BaseModel):
     postgres_startup: PostgresStartupStatus | None = Field(
         default=None,
         description="Estado del bootstrap de migraciones PostgreSQL, cuando aplica.",
+    )
+    status: Literal["healthy", "degraded", "unhealthy"] | None = Field(
+        default=None,
+        description="Estado consolidado exigido por el contrato de integración MCP Hexa.",
+    )
+    name: str | None = Field(
+        default=None, description="Nombre del servidor MCP (contrato Hexa)."
+    )
+    version: str | None = Field(
+        default=None, description="Versión semántica del servicio (contrato Hexa)."
+    )
+    uptime_s: int | None = Field(
+        default=None,
+        description="Segundos transcurridos desde el arranque (contrato Hexa).",
+    )
+    dependencies: dict[str, McpDependencyStatus] | None = Field(
+        default=None,
+        description="Estado por dependencia, keyed por nombre (contrato Hexa).",
     )
 
 
@@ -1004,3 +1063,4 @@ class RetrievalChunk(BaseModel):
     text: str
     score: float
     metadata: dict[str, Any]
+

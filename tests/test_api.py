@@ -1529,6 +1529,8 @@ def test_retrieval_query_endpoint_returns_422_when_repo_not_ready(monkeypatch) -
     assert response.status_code == 422
     payload = response.json()
     assert payload["detail"]["code"] == "repo_not_ready"
+    assert payload["detail"]["error"] == "REPO_VALIDATION"
+    assert payload["detail"]["retryable"] is False
 
 
 def test_retrieval_query_endpoint_blocks_when_storage_preflight_fails(monkeypatch) -> None:
@@ -1565,6 +1567,8 @@ def test_retrieval_query_endpoint_blocks_when_storage_preflight_fails(monkeypatc
     assert response.status_code == 503
     payload = response.json()
     assert payload["detail"]["health"]["failed_components"] == ["neo4j"]
+    assert payload["detail"]["error"] == "REPO_UNAVAILABLE"
+    assert payload["detail"]["retryable"] is True
 
 
 def test_query_endpoint_blocks_when_storage_preflight_fails(monkeypatch) -> None:
@@ -1602,6 +1606,8 @@ def test_query_endpoint_blocks_when_storage_preflight_fails(monkeypatch) -> None
     assert response.status_code == 503
     payload = response.json()
     assert payload["detail"]["health"]["failed_components"] == ["neo4j"]
+    assert payload["detail"]["error"] == "REPO_UNAVAILABLE"
+    assert payload["detail"]["retryable"] is True
 
 
 def test_query_endpoint_blocks_when_chroma_space_preflight_fails(monkeypatch) -> None:
@@ -1704,6 +1710,8 @@ def test_query_endpoint_returns_422_when_repo_is_not_ready(monkeypatch) -> None:
     assert payload["detail"]["code"] == "repo_not_ready"
     assert payload["detail"]["repo_status"]["query_ready"] is False
     assert payload["detail"]["repo_status"]["lexical_loaded"] is False
+    assert payload["detail"]["error"] == "REPO_VALIDATION"
+    assert payload["detail"]["retryable"] is False
     assert "bm25_loaded" not in payload["detail"]["repo_status"]
 
 
@@ -1772,6 +1780,8 @@ def test_query_endpoint_returns_422_when_embedding_is_incompatible(monkeypatch) 
     payload = response.json()
     assert payload["detail"]["code"] == "embedding_incompatible"
     assert payload["detail"]["repo_status"]["embedding_compatible"] is False
+    assert payload["detail"]["error"] == "REPO_VALIDATION"
+    assert payload["detail"]["retryable"] is False
 
 
 @pytest.mark.parametrize(
