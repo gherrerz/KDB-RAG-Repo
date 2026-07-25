@@ -15,7 +15,7 @@ necesidad de leer el código fuente.
 | --- | --- |
 | Nombre del servidor MCP | `repositories-kdb-mcp` (default en código sin `MCP_SERVER_NAME`; el `.env.example` distribuido usa `coderag-mcp`) |
 | Versión del servicio | `0.1.0` (`app.version`, expuesta en `/health` e `/info`) |
-| Protocolo MCP | `mcp==1.23.0` |
+| Protocolo MCP | `mcp==1.28.1` |
 | Envoltura HTTP | `fastapi-mcp==0.4.0` |
 | Transporte | HTTP streamable (`Accept: application/json, text/event-stream`) |
 | Endpoint de montaje | `POST/GET {MCP_MOUNT_PATH}` (default `/mcp`) |
@@ -571,7 +571,7 @@ Detalle completo de variables en [CONFIGURATION.md](CONFIGURATION.md).
 
 ## 10. Versionado
 
-- `fastapi-mcp==0.4.0`, `mcp==1.23.0` (`requirements-runtime.txt`).
+- `fastapi-mcp==0.4.0`, `mcp==1.28.1` (`requirements-runtime.txt`).
 - Cambios rompientes de este contrato (nuevas tools, cambios de shape,
   cambios de auth) se documentan en [CHANGELOG.md](../CHANGELOG.md) bajo
   `[Unreleased]` con la marca **BREAKING** cuando corresponda.

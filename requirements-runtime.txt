@@ -1,10 +1,11 @@
 fastapi==0.137.1
 # Envoltura MCP automática: deriva tools MCP del OpenAPI de FastAPI y monta /mcp en la
-# misma app. fastapi-mcp 0.4.0 solo fija mcp>=1.12 (sin tope). mcp==1.23.0 exige
-# pydantic>=2.11 y uvicorn>=0.31.1, por lo que se elevan pydantic, pydantic-settings y
-# uvicorn abajo. Respeta starlette 1.3.1 (>=0.27) y httpx 0.27.2 (>=0.27.1).
+# misma app. fastapi-mcp 0.4.0 solo fija mcp>=1.12 (sin tope). mcp==1.28.1 (última estable
+# de la línea v1.x; v2 aún es alpha/beta) exige pydantic>=2.11 y uvicorn>=0.31.1, por lo que
+# se elevan pydantic, pydantic-settings y uvicorn abajo. Respeta starlette 1.3.1 (>=0.27) y
+# httpx 0.27.2 (>=0.27.1,<1.0.0).
 fastapi-mcp==0.4.0
-mcp==1.23.0
+mcp==1.28.1
 # starlette pin explícito por CVEs: CVE-2025-62727 (DoS header Range), CVE-2026-48818 (SSRF/NTLM
 # vía rutas UNC en StaticFiles, Windows) y CVE-2026-54283 (DoS por bypass de límites de formularios).
 # 1.3.1 corrige las tres; FastAPI 0.137.x admite starlette 1.x.

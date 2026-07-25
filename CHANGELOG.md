@@ -55,6 +55,12 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- Bump de la dependencia `mcp` 1.23.0 → 1.28.1 en `requirements.txt` y
+  `requirements-runtime.txt`. Sin cambios de código: la versión sigue en la
+  línea estable v1.x (misma API `Server`/`mcp.types` usada por
+  `mcp_prompts.py`/`mcp_resources.py`) y satisface los mínimos ya pineados de
+  `pydantic`/`uvicorn`/`starlette`/`httpx`. Referencia actualizada en
+  `docs/MCP_CONTRACT.md`.
 - **BREAKING** el servidor MCP (`/mcp`) migra su autenticación del header
   `X-MCP-Token` a `Authorization: Bearer {MCP_API_TOKEN}` (contrato de
   integración Hexa). Falta o incompatibilidad de token responde `401` con
