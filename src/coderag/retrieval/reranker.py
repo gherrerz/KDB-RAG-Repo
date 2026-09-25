@@ -125,6 +125,31 @@ _DOCUMENTATION_TOKENS = {
     "readme",
     "reference",
 }
+# Vocabulario de "género documental": palabras que piden un documento (guía,
+# instalación, despliegue, manual, etc.) sin activar la intención documental
+# completa. Su ÚNICO efecto es omitir la penalización por defecto de docs; no
+# suma bonus de docs ni cambia ningún otro ranking. Se mantiene corto a
+# propósito: solo términos cuyo destino natural es un documento. Los tokens
+# de la consulta ya vienen sin tildes. "manual" puede ser adjetivo ("prueba
+# manual"); se acepta porque el costo es solo dejar de penalizar docs.
+_DOCUMENTATION_GENRE_TOKENS = {
+    "guia",
+    "guias",
+    "instalacion",
+    "install",
+    "installation",
+    "setup",
+    "deploy",
+    "deployment",
+    "despliegue",
+    "instrucciones",
+    "instructions",
+    "manual",
+    "tutorial",
+    "tutoriales",
+    "changelog",
+    "contributing",
+}
 _CONTEXT_OVERVIEW_TOKENS = {
     "context",
     "contexto",
@@ -251,6 +276,7 @@ class QueryProfile:
     prefers_symbol_definitions: bool
     prefers_docs: bool
     prefers_runtime_config: bool
+    documentation_genre_intent: bool = False
 
 
 def _normalize_text(value: str) -> str:
@@ -350,6 +376,7 @@ def _build_query_profile(query: str) -> QueryProfile:
     )
     prefers_docs = documentation_lookup_intent
     prefers_runtime_config = runtime_config_intent
+    documentation_genre_intent = bool(token_set & _DOCUMENTATION_GENRE_TOKENS)
     return QueryProfile(
         raw_query=query,
         normalized_query=normalized_query,
@@ -370,6 +397,7 @@ def _build_query_profile(query: str) -> QueryProfile:
         prefers_symbol_definitions=prefers_symbol_definitions,
         prefers_docs=prefers_docs,
         prefers_runtime_config=prefers_runtime_config,
+        documentation_genre_intent=documentation_genre_intent,
     )
 
 
@@ -793,12 +821,14 @@ def _score_chunk(
         and not profile.prefers_docs
         and not profile.prefers_symbol_definitions
         and not profile.prefers_runtime_config
+        and not profile.documentation_genre_intent
         and _is_documentation_document(path)
     ):
         # Comportamiento "código primero" por defecto: sin intención
         # documental, un spec o README no debería ganarle a un archivo de
         # código solo por tener más prosa parecida a la consulta. Las
-        # búsquedas de definiciones y de configuración ya demueven docs.
+        # búsquedas de definiciones y de configuración ya demueven docs, y
+        # las de género documental (guía, instalación, etc.) piden docs.
         score -= default_docs_penalty
 
     if profile.test_intent and test_path:

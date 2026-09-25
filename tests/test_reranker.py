@@ -1110,3 +1110,86 @@ def test_is_documentation_document_covers_folders_and_prose_files() -> None:
     assert _is_documentation_document("notas.rst") is True
     assert _is_documentation_document("src/routes/Registro.tsx") is False
     assert _is_documentation_document("requirements.txt") is False
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "guia de instalacion del proyecto",
+        "how do I deploy this project",
+        "tutorial de despliegue",
+    ],
+)
+def test_rerank_documentation_genre_query_skips_default_docs_penalty(
+    query: str,
+) -> None:
+    """Las consultas de género documental no penalizan docs por defecto."""
+    chunks = [
+        _chunk("guide", "notas/instalacion.md", 0.66),
+        _chunk("view", "src/routes/Registro.tsx", 0.60),
+    ]
+    profile = _build_query_profile(query)
+
+    assert profile.documentation_genre_intent is True
+    assert profile.prefers_docs is False
+
+    ranked = rerank(
+        query=query,
+        chunks=chunks,
+        top_k=2,
+        default_docs_penalty=0.40,
+    )
+
+    assert ranked[0].metadata["path"] == "notas/instalacion.md"
+
+
+def test_rerank_non_genre_query_still_gets_default_docs_penalty() -> None:
+    """Una consulta funcional sin género documental sigue penalizando docs."""
+    chunks = [
+        _chunk("guide", "notas/instalacion.md", 0.66),
+        _chunk("view", "src/routes/Registro.tsx", 0.60),
+    ]
+
+    profile = _build_query_profile(_NEUTRAL_QUERY)
+
+    assert profile.documentation_genre_intent is False
+
+    ranked = rerank(
+        query=_NEUTRAL_QUERY,
+        chunks=chunks,
+        top_k=2,
+        default_docs_penalty=0.40,
+    )
+
+    assert ranked[0].metadata["path"] == "src/routes/Registro.tsx"
+
+
+def test_rerank_documentation_genre_does_not_change_other_rankings() -> None:
+    """El género documental solo omite la penalización: no suma bonus."""
+    chunks = [
+        _chunk("guide", "notas/instalacion.md", 0.60),
+        _chunk("view", "src/routes/Registro.tsx", 0.60),
+    ]
+    query = "setup del registro de nuevos usuarios"
+    profile = _build_query_profile(query)
+
+    assert profile.documentation_genre_intent is True
+    with_penalty = rerank(
+        query=query,
+        chunks=[chunk.model_copy() for chunk in chunks],
+        top_k=2,
+        default_docs_penalty=0.40,
+    )
+    without_penalty = rerank(
+        query=query,
+        chunks=[chunk.model_copy() for chunk in chunks],
+        top_k=2,
+        default_docs_penalty=0.0,
+    )
+
+    assert [item.id for item in with_penalty] == [
+        item.id for item in without_penalty
+    ]
+    assert [round(item.score, 6) for item in with_penalty] == [
+        round(item.score, 6) for item in without_penalty
+    ]
