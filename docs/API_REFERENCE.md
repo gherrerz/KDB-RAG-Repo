@@ -62,6 +62,36 @@ Ejecuta modo retrieval-only (sin síntesis LLM).
   - `422`: `repo_not_ready` o `embedding_incompatible` (`detail` es objeto)
   - `503`: preflight de storage falló antes de retrieval (`detail` es objeto)
 
+Filtros opcionales `path_globs` y `languages`:
+
+- `path_globs` (`list[str]`, hasta 20, cada uno de hasta 256 caracteres, sin
+  cadenas vacías): globs sobre la ruta relativa al repositorio, con `/` como
+  separador. Distinguen mayúsculas y minúsculas; `*` y `?` no cruzan `/`,
+  `[abc]`/`[!abc]` son clases de caracteres y `**` cruza directorios (`**/`
+  equivale a "cero o más directorios": `**/*.tsx` acepta `app.tsx` y
+  `src/ui/app.tsx`). No hay coincidencia implícita por nombre base (`*.tsx`
+  solo acepta archivos en la raíz) y un glob terminado en `/` equivale a
+  `<glob>**`. Varios globs se combinan con OR.
+- `languages` (`list[str]`, hasta 20, cada uno de hasta 32 caracteres): etiquetas
+  de lenguaje del índice (`typescript`, `javascript`, `python`, `java`,
+  `kotlin`, `swift`, `go`, `markdown`, `yaml`, `json`, `toml`, `text`). Se
+  normalizan a minúsculas y se combinan con OR; con `path_globs` se combinan
+  con AND. Los resúmenes de módulo tienen lenguaje `module`. En la pata léxica
+  el lenguaje se deriva de la extensión del archivo (`LANG_MAP`); en la vectorial
+  se filtra por la metadata `language` de Chroma.
+- Sin ninguno de los dos (o con listas vacías) no se filtra y la respuesta es
+  la misma que antes. `POST /query` no acepta estos campos.
+- Garantía: ningún chunk ni cita devueltos incumple el filtro; se reaplica tras
+  la expansión de grafo y en los atajos graph-first y de código de componente
+  (los chunks o citas que lo incumplen se descartan y `answer`/`context` se
+  reconstruyen con la evidencia restante). Con filtro activo,
+  `diagnostics.retrieval_filter` informa `path_globs`, `languages` y, en los
+  atajos, `dropped_chunks`.
+- Con filtro activo el pool de candidatos se amplía de forma acotada (hasta 3
+  veces `top_n`, con tope de 300 salvo que `top_n` ya lo supere), porque el
+  post-filtrado reduce los candidatos. Un filtro muy restrictivo puede devolver
+  menos de `top_k` chunks.
+
 #### POST /inventory/query
 
 Ejecuta consulta de inventario paginada.
@@ -586,6 +616,8 @@ Notas de `diagnostics` en respuestas de query/retrieval con expansión semántic
 | `embedding_provider` | `str \| null` | no | `"vertex"` |
 | `embedding_model` | `str \| null` | no | `"text-embedding-005"` |
 | `include_context` | `bool` | no | `false` |
+| `path_globs` | `list[str] \| null` | no | `null` |
+| `languages` | `list[str] \| null` | no | `null` |
 
 ### InventoryQueryRequest
 
@@ -950,6 +982,17 @@ Request:
   "top_n": 60,
   "top_k": 15,
   "include_context": false
+}
+```
+
+Request con filtros (solo código TypeScript bajo `src/`):
+
+```json
+{
+  "repo_id": "macrozheng-mall-main",
+  "query": "pantalla de inicio de sesión con formulario",
+  "path_globs": ["src/**/*.tsx", "src/**/*.ts"],
+  "languages": ["typescript"]
 }
 ```
 

@@ -2171,3 +2171,296 @@ def test_chroma_query_endpoint_supports_filtered_collection_count(
     payload = response.json()
     assert payload["result"]["count"] == 9
     assert payload["effective_params"]["where"] == {"language": "python"}
+
+
+def _patch_retrieval_pipeline_for_filters(monkeypatch) -> dict:
+    """Aísla el pipeline retrieval-only con chunks dentro y fuera de filtro.
+
+    Retorna un dict que registra los kwargs recibidos por ``hybrid_search`` y
+    devuelve siempre los mismos candidatos, sin importar el filtro, para
+    comprobar que la garantía final descarta lo que incumple.
+    """
+    from coderag.api import query_service
+    from coderag.core.models import RetrievalChunk
+
+    calls: dict = {"hybrid_kwargs": []}
+
+    class _Settings:
+        query_max_seconds = 30.0
+        max_context_tokens = 256
+        inventory_page_size = 50
+        openai_embedding_model = "text-embedding-3-small"
+
+        @staticmethod
+        def resolve_embedding_provider(provider: str | None) -> str:
+            return provider or "openai"
+
+        @staticmethod
+        def resolve_embedding_model(provider: str, model: str | None) -> str:
+            _ = provider
+            return model or "text-embedding-3-small"
+
+    def _chunk(chunk_id: str, path: str, language: str) -> RetrievalChunk:
+        return RetrievalChunk(
+            id=chunk_id,
+            text=f"contenido de {path}",
+            score=0.9,
+            metadata={
+                "path": path,
+                "language": language,
+                "start_line": 1,
+                "end_line": 3,
+            },
+        )
+
+    def fake_hybrid_search(**kwargs):
+        calls["hybrid_kwargs"].append(kwargs)
+        return [
+            _chunk("tsx", "src/screens/Login.tsx", "typescript"),
+            _chunk("md", "docs/login.md", "markdown"),
+            _chunk("py", "scripts/seed.py", "python"),
+            _chunk("ts-out", "tools/build.ts", "typescript"),
+        ]
+
+    graph_records = [
+        {"labels": ["File"], "props": {"path": "src/screens/Home.tsx"},
+         "relation_types": ["IMPORTS_FILE"]},
+        {"labels": ["File"], "props": {"path": "docs/architecture.md"},
+         "relation_types": ["IMPORTS_FILE"]},
+    ]
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "hybrid_search", fake_hybrid_search)
+    monkeypatch.setattr(
+        query_service, "rerank", lambda query, chunks, top_k: chunks
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_resolve_graph_first_inventory_route",
+        lambda **kwargs: (None, False, None, None),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_apply_internal_file_importer_seed_boost",
+        lambda repo_id, query, chunks: (chunks, 0, {}, []),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_apply_external_import_seed_boost",
+        lambda repo_id, query, chunks: (chunks, 0, {}),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_build_internal_file_importer_seed_chunks",
+        lambda repo_id, matched_paths, chunks: ([], 0),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_build_external_import_seed_chunks",
+        lambda repo_id, matched_paths, chunks: ([], 0),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "expand_with_graph_with_diagnostics",
+        lambda chunks, query=None: (list(graph_records), {}),
+    )
+    monkeypatch.setattr(
+        query_service,
+        "_refine_top_unique_symbol_span",
+        lambda repo_id, query, reranked: reranked,
+    )
+    monkeypatch.setattr(server.jobs, "list_repo_ids", lambda: ["mall"])
+    monkeypatch.setattr(
+        server,
+        "get_repo_query_status",
+        lambda **kwargs: {
+            "repo_id": "mall",
+            "listed_in_catalog": True,
+            "query_ready": True,
+            "chroma_counts": {
+                "code_symbols": 4,
+                "code_files": 1,
+                "code_modules": 1,
+            },
+            "lexical_loaded": True,
+            "graph_available": True,
+            "warnings": [],
+        },
+    )
+    return calls
+
+
+def test_retrieval_query_endpoint_filters_chunks_by_path_and_language(
+    monkeypatch,
+) -> None:
+    """Con filtros, /query/retrieval devuelve solo chunks que los cumplen."""
+    calls = _patch_retrieval_pipeline_for_filters(monkeypatch)
+
+    response = TestClient(app).post(
+        "/query/retrieval",
+        json={
+            "repo_id": "mall",
+            "query": "pantalla de inicio de sesion",
+            "top_n": 10,
+            "top_k": 10,
+            "include_context": True,
+            "path_globs": ["src/**/*.tsx", "src/**/*.ts"],
+            "languages": ["TypeScript"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [chunk["path"] for chunk in payload["chunks"]] == [
+        "src/screens/Login.tsx"
+    ]
+    assert payload["statistics"]["total_after_rerank"] == 1
+    # El registro de grafo fuera del filtro no llega a contexto ni citas.
+    assert "docs/architecture.md" not in (payload["context"] or "")
+    assert all(
+        citation["path"].startswith("src/")
+        for citation in payload["citations"]
+    )
+    assert payload["diagnostics"]["retrieval_filter"] == {
+        "path_globs": ["src/**/*.tsx", "src/**/*.ts"],
+        "languages": ["typescript"],
+    }
+    # El filtro (con lenguajes normalizados) viaja hasta hybrid_search.
+    sent_filter = calls["hybrid_kwargs"][0]["retrieval_filter"]
+    assert sent_filter.languages == frozenset({"typescript"})
+
+
+def test_retrieval_query_endpoint_without_filters_is_unchanged(
+    monkeypatch,
+) -> None:
+    """Sin filtros no se envía filtro a hybrid_search ni se descarta nada."""
+    calls = _patch_retrieval_pipeline_for_filters(monkeypatch)
+
+    response = TestClient(app).post(
+        "/query/retrieval",
+        json={
+            "repo_id": "mall",
+            "query": "pantalla de inicio de sesion",
+            "top_n": 10,
+            "top_k": 10,
+            "include_context": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [chunk["path"] for chunk in payload["chunks"]] == [
+        "src/screens/Login.tsx",
+        "docs/login.md",
+        "scripts/seed.py",
+        "tools/build.ts",
+    ]
+    assert "retrieval_filter" not in payload["diagnostics"]
+    assert "retrieval_filter" not in calls["hybrid_kwargs"][0]
+    assert "docs/architecture.md" in payload["context"]
+
+
+def test_retrieval_query_endpoint_treats_empty_filter_lists_as_no_filter(
+    monkeypatch,
+) -> None:
+    """`[]` equivale a no filtrar: mismo resultado que sin los campos."""
+    calls = _patch_retrieval_pipeline_for_filters(monkeypatch)
+
+    response = TestClient(app).post(
+        "/query/retrieval",
+        json={
+            "repo_id": "mall",
+            "query": "pantalla de inicio de sesion",
+            "top_n": 10,
+            "top_k": 10,
+            "path_globs": [],
+            "languages": [],
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["chunks"]) == 4
+    assert "retrieval_filter" not in calls["hybrid_kwargs"][0]
+
+
+def test_retrieval_query_endpoint_forwards_filters_to_service(
+    monkeypatch,
+) -> None:
+    """Propaga path_globs y languages (normalizados) a run_retrieval_query."""
+    from coderag.api import query_service
+
+    captured: dict[str, object] = {}
+
+    def fake_run_retrieval_query(**kwargs):
+        captured.update(kwargs)
+        return {
+            "mode": "retrieval_only",
+            "answer": "ok",
+            "chunks": [],
+            "citations": [],
+            "statistics": {
+                "total_before_rerank": 0,
+                "total_after_rerank": 0,
+                "graph_nodes_count": 0,
+            },
+            "diagnostics": {},
+            "context": None,
+        }
+
+    _patch_retrieval_pipeline_for_filters(monkeypatch)
+    monkeypatch.setattr(
+        query_service, "run_retrieval_query", fake_run_retrieval_query
+    )
+
+    client = TestClient(app)
+    with_filters = client.post(
+        "/query/retrieval",
+        json={
+            "repo_id": "mall",
+            "query": "hola",
+            "path_globs": [" src/** "],
+            "languages": [" Python "],
+        },
+    )
+    assert with_filters.status_code == 200
+    assert captured["path_globs"] == ["src/**"]
+    assert captured["languages"] == ["python"]
+
+    without_filters = client.post(
+        "/query/retrieval",
+        json={"repo_id": "mall", "query": "hola"},
+    )
+    assert without_filters.status_code == 200
+    assert captured["path_globs"] is None
+    assert captured["languages"] is None
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"path_globs": [""]},
+        {"path_globs": ["   "]},
+        {"path_globs": ["a" * 257]},
+        {"path_globs": ["src/**"] * 21},
+        {"languages": [""]},
+        {"languages": ["x" * 33]},
+        {"languages": ["python"] * 21},
+        {"path_globs": "src/**"},
+    ],
+)
+def test_retrieval_query_endpoint_rejects_invalid_filters(extra) -> None:
+    """Valida cotas y valores vacíos de los filtros con 422."""
+    response = TestClient(app).post(
+        "/query/retrieval",
+        json={"repo_id": "mall", "query": "hola", **extra},
+    )
+
+    assert response.status_code == 422
+
+
+def test_query_endpoint_ignores_retrieval_filters() -> None:
+    """/query no cambia: su modelo no incorpora los filtros."""
+    from coderag.core.models import QueryRequest
+
+    assert "path_globs" not in QueryRequest.model_fields
+    assert "languages" not in QueryRequest.model_fields

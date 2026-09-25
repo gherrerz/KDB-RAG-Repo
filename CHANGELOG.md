@@ -8,6 +8,23 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Added
 
+- `POST /query/retrieval` (y la tool MCP `query_retrieval`) acepta los filtros
+  opcionales `path_globs` (globs de ruta relativa; `**` cruza directorios,
+  distingue mayúsculas, OR entre globs) y `languages` (lenguaje del archivo,
+  normalizado a minúsculas; AND con `path_globs`), con cotas de largo y sin
+  cadenas vacías (422 en caso contrario). Sin filtros el comportamiento es el
+  mismo de antes y `POST /query` no cambia. La lógica vive en el nuevo helper
+  `src/coderag/retrieval/retrieval_filter.py`, compartido por: la pata
+  vectorial (el lenguaje se empuja al `where` de Chroma con `$and`/`$in`), la
+  pata léxica (Postgres no tiene columna de lenguaje: se deriva de la
+  extensión con `LANG_MAP` y se filtra en Python, sin migración de esquema) y
+  la garantía final, que reaplica el filtro tras la expansión de grafo y en los
+  atajos graph-first y de código de componente, de modo que ningún chunk ni
+  cita devueltos lo incumple. Con filtro activo el pool de candidatos se amplía
+  de forma acotada (hasta 3x `top_n`, tope 300) y
+  `diagnostics.retrieval_filter` informa el filtro aplicado. Documentado en
+  `docs/API_REFERENCE.md`, `docs/MCP_CONTRACT.md` y en el prompt/resource MCP
+  de parámetros.
 - Nuevo documento `docs/MCP_CONTRACT.md`: contrato de integración MCP
   autocontenido para consumidores externos (payloads de entrada/salida de las
   5 tools, los 3 prompts y los 7 resources, tabla consolidada de códigos de
