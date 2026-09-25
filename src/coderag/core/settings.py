@@ -33,6 +33,15 @@ GitSshStrictHostKeyChecking = Literal["yes", "accept-new", "no"]
 ChromaMode = Literal["embedded", "remote"]
 RuntimeEnvironment = Literal["development", "test", "production"]
 
+# Configuración de FTS neutra: sin stemming ni stop-words de un idioma, para
+# que el mismo índice sirva a repositorios en español e inglés. Las tildes se
+# pliegan por separado (ver ``coderag.core.text_folding``).
+DEFAULT_LEXICAL_FTS_LANGUAGE = "simple"
+
+# Pesos por defecto de la fusión híbrida (vector + léxico).
+DEFAULT_HYBRID_VECTOR_WEIGHT = 0.55
+DEFAULT_HYBRID_LEXICAL_WEIGHT = 0.45
+
 
 # Sufijo de variable de entorno por ambiente activo. Permite apuntar a
 # servidores y credenciales distintos por entorno (servidores separados).
@@ -266,7 +275,22 @@ class Settings(BaseSettings):
         default="development",
         alias="RUNTIME_ENVIRONMENT",
     )
-    lexical_fts_language: str = Field(default="english", alias="LEXICAL_FTS_LANGUAGE")
+    lexical_fts_language: str = Field(
+        default=DEFAULT_LEXICAL_FTS_LANGUAGE,
+        alias="LEXICAL_FTS_LANGUAGE",
+    )
+    hybrid_vector_weight: float = Field(
+        default=DEFAULT_HYBRID_VECTOR_WEIGHT,
+        alias="HYBRID_VECTOR_WEIGHT",
+        ge=0.0,
+        le=1.0,
+    )
+    hybrid_lexical_weight: float = Field(
+        default=DEFAULT_HYBRID_LEXICAL_WEIGHT,
+        alias="HYBRID_LEXICAL_WEIGHT",
+        ge=0.0,
+        le=1.0,
+    )
     neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")
     neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
     neo4j_password: str = Field(default="password", alias="NEO4J_PASSWORD")

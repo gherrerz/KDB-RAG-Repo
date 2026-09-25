@@ -55,6 +55,25 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- **BREAKING (requiere reingesta):** `LEXICAL_FTS_LANGUAGE` pasa de `english` a
+  `simple` por defecto, una configuración de texto neutra (sin stemming ni
+  stop-words de un idioma) para que el índice léxico sirva a repositorios en
+  español e inglés. Además, las tildes se pliegan al indexar (solo el texto que
+  entra a `to_tsvector`; `doc`, `path` y `symbol_name` se guardan y devuelven
+  sin cambios) y al consultar, con un helper compartido
+  (`src/coderag/core/text_folding.py`) usado por `LexicalStore` y la migración
+  legacy (vía `translate()`, sin extensión `unaccent` ni cambio de esquema).
+  Los `tsvector` se guardan al ingerir con la configuración vigente en ese
+  momento, por lo que **los repositorios ya indexados deben reingerirse** para
+  que la búsqueda léxica sea coherente. Los fallbacks `"english"` de
+  `lexical_store.py`, `lexical_index.py`, `reset_service.py` y
+  `postgres_legacy_migration.py` usan ahora la constante compartida
+  `DEFAULT_LEXICAL_FTS_LANGUAGE`.
+- Los pesos de la fusión híbrida son configurables por variable de entorno:
+  `HYBRID_VECTOR_WEIGHT` y `HYBRID_LEXICAL_WEIGHT` (defaults `0.55` / `0.45`,
+  rango `[0, 1]`). `hybrid_search` los lee de `Settings` en cada consulta; las
+  constantes `VECTOR_WEIGHT` / `LEXICAL_WEIGHT` quedan como defaults. Los textos
+  de los prompts y resources MCP ya no fijan los valores numéricos.
 - El reranker (`src/coderag/retrieval/reranker.py`) reconoce la intención de
   código en consultas en español: se suman `codigo`, `funcion(es)`,
   `metodo(s)`, `clase(s)`, `simbolo(s)`, `componente(s)`, `pantalla(s)`,

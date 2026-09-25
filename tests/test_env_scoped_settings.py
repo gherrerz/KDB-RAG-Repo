@@ -8,6 +8,7 @@ Chroma, Postgres, Neo4j y Redis (endpoints y credenciales).
 from urllib.parse import unquote, urlsplit
 
 import pytest
+from pydantic import ValidationError
 
 from coderag.core.settings import Settings
 
@@ -78,3 +79,48 @@ def test_non_infra_variables_are_not_scoped(
     monkeypatch.setenv("POSTGRES_POOL_SIZE_TEST", "99")
 
     assert Settings().postgres_pool_size == 7
+
+
+def test_lexical_fts_language_defaults_to_simple(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El default neutro es ``simple`` y se puede sobrescribir por entorno."""
+    monkeypatch.delenv("LEXICAL_FTS_LANGUAGE", raising=False)
+    assert Settings(_env_file=None).lexical_fts_language == "simple"
+
+    monkeypatch.setenv("LEXICAL_FTS_LANGUAGE", "spanish")
+    assert Settings(_env_file=None).lexical_fts_language == "spanish"
+
+
+def test_hybrid_weights_default_and_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Los pesos híbridos tienen defaults 0.55/0.45 y aceptan override."""
+    monkeypatch.delenv("HYBRID_VECTOR_WEIGHT", raising=False)
+    monkeypatch.delenv("HYBRID_LEXICAL_WEIGHT", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.hybrid_vector_weight == 0.55
+    assert settings.hybrid_lexical_weight == 0.45
+
+    monkeypatch.setenv("HYBRID_VECTOR_WEIGHT", "0.3")
+    monkeypatch.setenv("HYBRID_LEXICAL_WEIGHT", "0.7")
+    settings = Settings(_env_file=None)
+    assert settings.hybrid_vector_weight == 0.3
+    assert settings.hybrid_lexical_weight == 0.7
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["HYBRID_VECTOR_WEIGHT", "HYBRID_LEXICAL_WEIGHT"],
+)
+@pytest.mark.parametrize("value", ["-0.1", "1.5"])
+def test_hybrid_weights_reject_values_outside_unit_range(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: str,
+) -> None:
+    """Los pesos fuera de [0, 1] fallan la validación de Settings."""
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
