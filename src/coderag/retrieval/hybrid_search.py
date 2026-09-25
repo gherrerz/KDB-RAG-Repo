@@ -21,6 +21,7 @@ from coderag.core.text_folding import normalize_search_text
 from coderag.core.vector_index import build_managed_vector_index
 from coderag.ingestion.embedding import EmbeddingClient
 from coderag.ingestion.index_chroma import ChromaIndex
+from coderag.retrieval.retrieval_filter import RetrievalFilter
 
 
 VECTOR_COLLECTIONS = ["code_symbols", "code_files", "code_modules"]
@@ -29,6 +30,11 @@ LOGGER = logging.getLogger(__name__)
 # (HYBRID_VECTOR_WEIGHT / HYBRID_LEXICAL_WEIGHT) en cada consulta.
 VECTOR_WEIGHT = DEFAULT_HYBRID_VECTOR_WEIGHT
 LEXICAL_WEIGHT = DEFAULT_HYBRID_LEXICAL_WEIGHT
+# Con un filtro por ruta/lenguaje activo, el post-filtrado en Python reduce el
+# pool de candidatos. Se amplía de forma acotada: hasta 3x el pool base, sin
+# superar FILTERED_CANDIDATE_POOL_CAP (salvo que el pool base ya lo exceda).
+FILTERED_CANDIDATE_POOL_MULTIPLIER = 3
+FILTERED_CANDIDATE_POOL_CAP = 300
 _EXACT_IDENTIFIER_QUERY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
 
 
@@ -175,7 +181,7 @@ def _query_collection(
     chroma: Any,
     collection_name: str,
     query_embedding: list[float],
-    repo_id: str,
+    where: dict[str, Any],
     top_n: int,
 ) -> tuple[str, dict]:
     """Consulta una colección de Chroma y devuelve su nombre junto al resultado."""
@@ -183,7 +189,7 @@ def _query_collection(
         collection_name=collection_name,
         query_embedding=query_embedding,
         top_n=top_n,
-        where={"repo_id": repo_id},
+        where=where,
     )
     return collection_name, result
 
@@ -203,8 +209,14 @@ def _run_vector_search(
     query_embedding: list[float],
     repo_id: str,
     candidate_top_n: int,
+    retrieval_filter: RetrievalFilter | None = None,
 ) -> list[dict]:
     """Ejecuta la recuperación vectorial sobre las colecciones configuradas."""
+    where: dict[str, Any] = (
+        retrieval_filter.chroma_where(repo_id)
+        if retrieval_filter is not None
+        else {"repo_id": repo_id}
+    )
     vector_results: list[dict] = []
     try:
         with ThreadPoolExecutor(max_workers=len(VECTOR_COLLECTIONS)) as executor:
@@ -214,7 +226,7 @@ def _run_vector_search(
                     chroma,
                     collection_name,
                     query_embedding,
-                    repo_id,
+                    where,
                     candidate_top_n,
                 )
                 for collection_name in VECTOR_COLLECTIONS
@@ -243,7 +255,7 @@ def _run_vector_search(
                     collection_name=collection_name,
                     query_embedding=query_embedding,
                     top_n=candidate_top_n,
-                    where={"repo_id": repo_id},
+                    where=where,
                 )
                 vector_results.append(result)
             except Exception as inner_exc:
@@ -264,15 +276,34 @@ def _candidate_top_n(query: str, top_n: int) -> int:
     return max(top_n, min(max(top_n * 4, 40), 100))
 
 
+def _filtered_candidate_top_n(candidate_top_n: int) -> int:
+    """Amplía de forma acotada el pool cuando hay filtro por ruta/lenguaje."""
+    return min(
+        candidate_top_n * FILTERED_CANDIDATE_POOL_MULTIPLIER,
+        max(candidate_top_n, FILTERED_CANDIDATE_POOL_CAP),
+    )
+
+
 def hybrid_search(
     repo_id: str,
     query: str,
     top_n: int = 50,
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
+    retrieval_filter: RetrievalFilter | None = None,
 ) -> list[RetrievalChunk]:
-    """Busque datos de repositorios indexados con vector y fusión léxica."""
+    """Busque datos de repositorios indexados con vector y fusión léxica.
+
+    Con ``retrieval_filter`` activo, ambas patas devuelven solo chunks que
+    cumplen ruta y lenguaje (ver ``coderag.retrieval.retrieval_filter``).
+    """
+    if retrieval_filter is not None and not (
+        retrieval_filter.path_globs or retrieval_filter.languages
+    ):
+        retrieval_filter = None
     candidate_top_n = _candidate_top_n(query=query, top_n=top_n)
+    if retrieval_filter is not None:
+        candidate_top_n = _filtered_candidate_top_n(candidate_top_n)
     embedder = EmbeddingClient(
         provider=embedding_provider,
         model=embedding_model,
@@ -306,6 +337,7 @@ def hybrid_search(
             query_embedding=query_embedding,
             repo_id=repo_id,
             candidate_top_n=candidate_top_n,
+            retrieval_filter=retrieval_filter,
         )
         if _vector_results_empty(vector_results) and repository_has_query_ready_lexical_data(
             settings,
@@ -318,6 +350,7 @@ def hybrid_search(
                 query_embedding=query_embedding,
                 repo_id=repo_id,
                 candidate_top_n=candidate_top_n,
+                retrieval_filter=retrieval_filter,
             )
     else:
         LOGGER.warning(
@@ -335,6 +368,10 @@ def hybrid_search(
         distances = vector_result.get("distances", [[]])[0]
 
         for item_id, doc, meta, distance in zip(ids, docs, metas, distances):
+            if retrieval_filter is not None and not (
+                retrieval_filter.matches_metadata(meta or {})
+            ):
+                continue
             score = 1.0 / (1.0 + float(distance))
             weighted_score = score * vector_weight
             scores[item_id] += weighted_score
@@ -351,6 +388,12 @@ def hybrid_search(
         text=normalized_query,
         top_n=candidate_top_n,
     )
+    if retrieval_filter is not None:
+        lexical_results = [
+            item
+            for item in lexical_results
+            if retrieval_filter.matches_metadata(item.get("metadata") or {})
+        ]
 
     max_lexical_score = max(
         (float(item["score"]) for item in lexical_results), default=0.0

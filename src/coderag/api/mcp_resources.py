@@ -109,6 +109,8 @@ Solo `query_retrieval`:
 | Parámetro | Default | Notas |
 |-----------|---------|-------|
 | `include_context` | `false` | `true` añade el contexto ensamblado (más tokens). |
+| `path_globs` | (sin filtro) | Globs de ruta (`src/**/*.tsx`); OR entre ellos. |
+| `languages` | (sin filtro) | Lenguajes (`typescript`, `python`); AND con globs. |
 
 Si `embedding_provider`/`embedding_model` no coinciden con la ingesta, la consulta
 devuelve 422 por incompatibilidad. Consulta `last_embedding_*` en `repo_status`.

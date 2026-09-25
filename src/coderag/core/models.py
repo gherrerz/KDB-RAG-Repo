@@ -272,6 +272,11 @@ class QueryRequest(BaseModel):
     )
 
 
+MAX_RETRIEVAL_FILTER_ITEMS = 20
+MAX_PATH_GLOB_LENGTH = 256
+MAX_LANGUAGE_LENGTH = 32
+
+
 class RetrievalQueryRequest(BaseModel):
     """Modelo de entrada para consultas retrieval-only sin síntesis LLM."""
 
@@ -305,6 +310,66 @@ class RetrievalQueryRequest(BaseModel):
             "Incluye el contexto ensamblado completo del pipeline en la respuesta."
         ),
     )
+    path_globs: list[str] | None = Field(
+        default=None,
+        max_length=MAX_RETRIEVAL_FILTER_ITEMS,
+        description=(
+            "Filtro opcional por globs de ruta relativa al repositorio "
+            "(distingue mayúsculas; `*` no cruza `/`, `**` cruza "
+            "directorios; sin coincidencia implícita por nombre base). Varios "
+            "globs se combinan con OR. Sin valor no se filtra por ruta."
+        ),
+        examples=[["src/**/*.tsx", "src/**/*.ts"]],
+    )
+    languages: list[str] | None = Field(
+        default=None,
+        max_length=MAX_RETRIEVAL_FILTER_ITEMS,
+        description=(
+            "Filtro opcional por lenguaje del archivo (etiquetas como "
+            "`typescript`, `python`, `markdown`; sin distinguir mayúsculas). "
+            "Varios lenguajes se combinan con OR y con `path_globs` con AND. "
+            "Sin valor no se filtra por lenguaje."
+        ),
+        examples=[["typescript", "javascript"]],
+    )
+
+    @field_validator("path_globs")
+    @classmethod
+    def _validate_path_globs(cls, value: list[str] | None) -> list[str] | None:
+        """Recorta espacios y rechaza globs vacíos o demasiado largos."""
+        if value is None:
+            return None
+        cleaned: list[str] = []
+        for item in value:
+            glob = item.strip()
+            if not glob:
+                raise ValueError("path_globs no admite cadenas vacías.")
+            if len(glob) > MAX_PATH_GLOB_LENGTH:
+                raise ValueError(
+                    "Cada glob de path_globs admite hasta "
+                    f"{MAX_PATH_GLOB_LENGTH} caracteres."
+                )
+            cleaned.append(glob)
+        return cleaned
+
+    @field_validator("languages")
+    @classmethod
+    def _validate_languages(cls, value: list[str] | None) -> list[str] | None:
+        """Normaliza lenguajes a minúsculas y rechaza valores vacíos."""
+        if value is None:
+            return None
+        cleaned: list[str] = []
+        for item in value:
+            language = item.strip().lower()
+            if not language:
+                raise ValueError("languages no admite cadenas vacías.")
+            if len(language) > MAX_LANGUAGE_LENGTH:
+                raise ValueError(
+                    "Cada lenguaje de languages admite hasta "
+                    f"{MAX_LANGUAGE_LENGTH} caracteres."
+                )
+            cleaned.append(language)
+        return cleaned
 
 
 class InventoryQueryRequest(BaseModel):
