@@ -42,6 +42,14 @@ DEFAULT_LEXICAL_FTS_LANGUAGE = "simple"
 DEFAULT_HYBRID_VECTOR_WEIGHT = 0.55
 DEFAULT_HYBRID_LEXICAL_WEIGHT = 0.45
 
+# Penalización por defecto del reranker sobre rutas de documentación cuando la
+# consulta no tiene intención documental. Se calibra contra la escala de score
+# del reranker (base entre ~0.3 y ~0.75) y las demociones de docs que ya
+# existen (0.15 con intención de código, 0.30 en configuración, 0.45 en
+# búsqueda de definiciones): 0.40 cierra las brechas típicas entre un spec y
+# un archivo de código con similitud vectorial parecida.
+DEFAULT_RERANK_DEFAULT_DOCS_PENALTY = 0.40
+
 
 # Sufijo de variable de entorno por ambiente activo. Permite apuntar a
 # servidores y credenciales distintos por entorno (servidores separados).
@@ -290,6 +298,11 @@ class Settings(BaseSettings):
         alias="HYBRID_LEXICAL_WEIGHT",
         ge=0.0,
         le=1.0,
+    )
+    rerank_default_docs_penalty: float = Field(
+        default=DEFAULT_RERANK_DEFAULT_DOCS_PENALTY,
+        alias="RERANK_DEFAULT_DOCS_PENALTY",
+        ge=0.0,
     )
     neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")
     neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
