@@ -1,7 +1,11 @@
 """Pruebas del reranker heurístico basado en intención de consulta."""
 
 from coderag.core.models import RetrievalChunk
-from coderag.retrieval.reranker import rerank
+from coderag.retrieval.reranker import (
+    _build_query_profile,
+    _is_docs_path,
+    rerank,
+)
 
 
 def test_rerank_prioritizes_runtime_config_over_tests_for_natural_query() -> None:
@@ -855,5 +859,117 @@ def test_rerank_context_intent_prefers_productive_code_over_test_and_config() ->
     assert "docs/ARCHITECTURE.md" in top_paths
     assert ranked[0].metadata["path"] != "k8s/base/api-configmap.yaml"
     assert ranked[0].metadata["path"] != "tests/test_storage_health.py"
+
+
+def test_rerank_detects_spanish_code_intent_and_prefers_tsx_over_markdown() -> None:
+    """Una consulta en español sobre UI activa la intención de código."""
+    query = "pantalla de inicio de sesion con formulario y ruta"
+    chunks = [
+        RetrievalChunk(
+            id="notes",
+            text="Apuntes sobre el flujo de acceso de usuarios.",
+            score=0.62,
+            metadata={
+                "path": "notes/login-screen.md",
+                "symbol_name": "Login screen",
+                "symbol_type": "section",
+                "start_line": 1,
+                "end_line": 8,
+            },
+        ),
+        RetrievalChunk(
+            id="screen",
+            text="export function LoginScreen() { return <form /> }",
+            score=0.60,
+            metadata={
+                "path": "src/screens/LoginScreen.tsx",
+                "symbol_name": "LoginScreen",
+                "symbol_type": "function",
+                "start_line": 3,
+                "end_line": 9,
+            },
+        ),
+    ]
+
+    assert _build_query_profile(query).code_intent is True
+
+    ranked = rerank(query=query, chunks=chunks, top_k=2)
+
+    assert ranked[0].metadata["path"] == "src/screens/LoginScreen.tsx"
+
+
+def test_rerank_spanish_docs_query_keeps_documentation_first() -> None:
+    """Un término de UI en español no convierte una consulta de docs en código."""
+    chunks = [
+        RetrievalChunk(
+            id="screen",
+            text="export function LoginScreen() { return <form /> }",
+            score=0.62,
+            metadata={
+                "path": "src/screens/LoginScreen.tsx",
+                "symbol_name": "LoginScreen",
+                "symbol_type": "function",
+                "start_line": 3,
+                "end_line": 9,
+            },
+        ),
+        RetrievalChunk(
+            id="docs",
+            text="Guia de uso de la pantalla de inicio de sesion.",
+            score=0.60,
+            metadata={
+                "path": "docs/pantallas.md",
+                "symbol_name": "Pantalla de inicio de sesion",
+                "symbol_type": "section",
+                "start_line": 1,
+                "end_line": 6,
+            },
+        ),
+    ]
+
+    ranked = rerank(
+        query="documentacion de la pantalla de inicio de sesion",
+        chunks=chunks,
+        top_k=2,
+    )
+
+    assert ranked[0].metadata["path"] == "docs/pantallas.md"
+
+
+def test_rerank_penalizes_openspec_markdown_like_docs_under_code_intent() -> None:
+    """Las rutas openspec/ cuentan como documentación frente a código."""
+    chunks = [
+        RetrievalChunk(
+            id="spec",
+            text="Lineamientos generales del cambio.",
+            score=0.66,
+            metadata={
+                "path": "openspec/changes/registro/design.md",
+                "symbol_name": "Diseno",
+                "symbol_type": "section",
+                "start_line": 1,
+                "end_line": 5,
+            },
+        ),
+        RetrievalChunk(
+            id="code",
+            text="export const valor = 1;",
+            score=0.60,
+            metadata={
+                "path": "src/registro/valor.ts",
+                "symbol_name": "valor",
+                "symbol_type": "file",
+                "start_line": 1,
+                "end_line": 1,
+            },
+        ),
+    ]
+
+    assert _is_docs_path("openspec/changes/registro/design.md") is True
+    assert _is_docs_path("src/registro/valor.ts") is False
+
+    ranked = rerank(query="funcion registrar usuario", chunks=chunks, top_k=2)
+
+    assert ranked[0].metadata["path"] == "src/registro/valor.ts"
 
 

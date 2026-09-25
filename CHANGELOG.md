@@ -55,6 +55,17 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- El reranker (`src/coderag/retrieval/reranker.py`) reconoce la intención de
+  código en consultas en español: se suman `codigo`, `funcion(es)`,
+  `metodo(s)`, `clase(s)`, `simbolo(s)`, `componente(s)`, `pantalla(s)`,
+  `formulario(s)`, `pagina(s)`, `hook(s)` y `endpoint(s)` a los disparadores
+  de código (y `funcion`, `metodo`, `simbolo` a los de búsqueda de definición).
+  Se omiten a propósito `archivo`, `ruta` y `servicio`, porque también aparecen
+  en consultas de configuración y documentación. Además, las rutas bajo
+  `openspec/` se tratan como documentación (`_is_docs_path`), de modo que sus
+  `.md` reciben la misma penalización que `docs/` cuando la consulta pide
+  código. Antes, una consulta como *"pantalla de inicio de sesión con
+  formulario"* no activaba la intención de código y ganaba la documentación.
 - Bump de la dependencia `mcp` 1.23.0 → 1.28.1 en `requirements.txt` y
   `requirements-runtime.txt`. Sin cambios de código: la versión sigue en la
   línea estable v1.x (misma API `Server`/`mcp.types` usada por
