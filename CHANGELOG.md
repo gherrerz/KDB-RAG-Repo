@@ -82,6 +82,15 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- Las consultas de "género documental" (`guia`, `instalacion`/`install`,
+  `setup`, `deploy`/`despliegue`, `manual`, `tutorial`, `changelog`,
+  `contributing`, `instrucciones`/`instructions`) omiten la penalización por
+  defecto de documentos de `RERANK_DEFAULT_DOCS_PENALTY`, porque piden un
+  documento aunque no activen la intención documental completa. Es un
+  vocabulario corto y aparte de `_DOCUMENTATION_TOKENS`: su único efecto es
+  omitir esa penalización y no cambia ningún otro ranking. Corrige la
+  regresión detectada al medir consultas como "guía de instalación" o
+  "how do I deploy this project". Parte de STORY-156 / KAN-270.
 - El reranker penaliza por defecto los documentos cuando la consulta no tiene
   intención documental: rutas `docs/`, `openspec/`, `guides/`, README y
   archivos `.md`/`.mdx`/`.rst`/`.adoc` pierden `RERANK_DEFAULT_DOCS_PENALTY`
