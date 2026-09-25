@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from coderag.core.settings import Settings
+from coderag.ingestion.pipeline import _parse_csv_set
 from coderag.ingestion.repo_scanner import (
     detect_language,
     scan_repository,
@@ -207,3 +209,58 @@ def test_scan_repository_excludes_paths_by_glob_pattern(tmp_path: Path) -> None:
     assert "src/secret.generated.ts" not in scanned_paths
     assert "docs/draft.md" not in scanned_paths
     assert stats["excluded_pattern"] == 2
+
+
+def test_scan_repository_excludes_lockfiles_at_any_depth(tmp_path: Path) -> None:
+    """Los lockfiles del default se excluyen en la raíz y en subcarpetas."""
+    default_files = Settings.model_fields["scan_excluded_files"].default
+    excluded_files = _parse_csv_set(default_files)
+    (tmp_path / "apps" / "web").mkdir(parents=True)
+    (tmp_path / "pnpm-lock.yaml").write_text("lockfileVersion: 9\n", encoding="utf-8")
+    (tmp_path / "apps" / "web" / "pnpm-lock.yaml").write_text(
+        "lockfileVersion: 9\n", encoding="utf-8"
+    )
+    (tmp_path / "apps" / "web" / "Package-Lock.json").write_text(
+        "{}\n", encoding="utf-8"
+    )
+    (tmp_path / "Cargo.lock").write_text("version = 3\n", encoding="utf-8")
+    (tmp_path / "go.sum").write_text("example.com/x v1 h1:abc\n", encoding="utf-8")
+    (tmp_path / "docker-compose.yaml").write_text(
+        "services: {}\n", encoding="utf-8"
+    )
+    (tmp_path / "apps" / "web" / "app.tsx").write_text(
+        "export const App = () => null;\n", encoding="utf-8"
+    )
+
+    scanned, stats = scan_repository_with_stats(
+        tmp_path,
+        max_file_size=100_000,
+        excluded_dirs=set(),
+        excluded_extensions=set(),
+        excluded_files=excluded_files,
+    )
+    scanned_paths = {item.path for item in scanned}
+
+    assert scanned_paths == {"docker-compose.yaml", "apps/web/app.tsx"}
+    assert stats["excluded_file"] == 5
+
+
+def test_scan_excluded_files_default_lists_known_lockfiles() -> None:
+    """El default de SCAN_EXCLUDED_FILES conserva lo previo y suma lockfiles."""
+    default_files = Settings.model_fields["scan_excluded_files"].default
+    parsed = _parse_csv_set(default_files)
+
+    assert {".gitignore", ".env", ".env.example", ".dockerignore"} <= parsed
+    assert {
+        "pnpm-lock.yaml",
+        "package-lock.json",
+        "yarn.lock",
+        "npm-shrinkwrap.json",
+        "poetry.lock",
+        "pipfile.lock",
+        "uv.lock",
+        "cargo.lock",
+        "composer.lock",
+        "gemfile.lock",
+        "go.sum",
+    } <= parsed
