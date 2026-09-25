@@ -97,6 +97,16 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Fixed
 
+- Los lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`,
+  `npm-shrinkwrap.json`, `poetry.lock`, `Pipfile.lock`, `uv.lock`,
+  `Cargo.lock`, `composer.lock`, `Gemfile.lock`, `go.sum`) ya no se indexan:
+  se agregan al default de `SCAN_EXCLUDED_FILES` (`src/coderag/core/settings.py`),
+  que se compara por nombre de archivo en cualquier nivel del árbol. La rama
+  YAML del chunker generaba un `config_key` por línea de `pnpm-lock.yaml`, y
+  esos fragmentos desplazaban al código en los resultados de recuperación.
+  `.env.example`, `k8s/base/api-configmap.yaml` y `docs/CONFIGURATION.md`
+  quedan alineados. Un repositorio ya indexado debe reingerirse para dejar de
+  contener lockfiles.
 - `scripts/mcp_smoke.sh` enviaba el header legacy `X-MCP-Token` en vez de
   `Authorization: Bearer {MCP_API_TOKEN}`, quedando desalineado con el
   contrato de autenticación MCP realmente implementado en
