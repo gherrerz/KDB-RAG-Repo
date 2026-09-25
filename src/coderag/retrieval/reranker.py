@@ -48,6 +48,31 @@ _CODE_TOKENS = {
     "code",
     "symbol",
     "preflight",
+    # Equivalentes en español (los tokens de la consulta ya vienen sin tildes).
+    # Se omiten a propósito términos ambiguos como "archivo", "ruta" o
+    # "servicio": aparecen igual en consultas de configuración y de docs, y
+    # activarían el bonus de código sobre ellas.
+    "codigo",
+    "funcion",
+    "funciones",
+    "metodo",
+    "metodos",
+    "clase",
+    "clases",
+    "simbolo",
+    "simbolos",
+    "componente",
+    "componentes",
+    "pantalla",
+    "pantallas",
+    "formulario",
+    "formularios",
+    "pagina",
+    "paginas",
+    "hook",
+    "hooks",
+    "endpoint",
+    "endpoints",
 }
 _TEST_TOKENS = {
     "test",
@@ -67,14 +92,20 @@ _DEFINITION_LOOKUP_TOKENS = {
     "defined",
     "function",
     "functions",
+    "funcion",
+    "funciones",
     "implement",
     "implementacion",
     "implemented",
     "implementation",
     "method",
     "methods",
+    "metodo",
+    "metodos",
     "source",
     "symbol",
+    "simbolo",
+    "simbolos",
 }
 _DOCUMENTATION_TOKENS = {
     "api",
@@ -122,6 +153,8 @@ _DOC_PATH_SEGMENTS = {
     "docs",
     "documentation",
     "guides",
+    # Las specs/propuestas de OpenSpec son documentación aunque sean .md.
+    "openspec",
 }
 _EXAMPLE_PATH_SEGMENTS = {
     "demo",
