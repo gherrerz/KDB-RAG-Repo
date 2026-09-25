@@ -82,6 +82,20 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- El reranker penaliza por defecto los documentos cuando la consulta no tiene
+  intención documental: rutas `docs/`, `openspec/`, `guides/`, README y
+  archivos `.md`/`.mdx`/`.rst`/`.adoc` pierden `RERANK_DEFAULT_DOCS_PENALTY`
+  puntos de score (default `0.40`, misma escala que las demociones de docs ya
+  existentes de `0.15`/`0.30`/`0.45`). Así un índice se comporta "código
+  primero" en consultas funcionales, por ejemplo títulos de historias sin
+  términos de código, donde los specs ganaban por similitud vectorial. Las
+  consultas con intención documental (`documentación`, `readme`, `guide`,
+  `arquitectura`, etc.) no cambian, y las de definición o configuración no
+  acumulan la penalización porque ya demueven docs. **Cambia el ranking de las
+  consultas sin intención documental:** para volver al orden anterior basta
+  `RERANK_DEFAULT_DOCS_PENALTY=0`. Nueva variable (`>= 0`, se lee en cada
+  consulta; ver `docs/CONFIGURATION.md`), también en `.env.example` y en el
+  configmap base de k8s. Sin reingesta. Parte de STORY-156 / KAN-270.
 - **BREAKING (requiere reingesta):** `LEXICAL_FTS_LANGUAGE` pasa de `english` a
   `simple` por defecto, una configuración de texto neutra (sin stemming ni
   stop-words de un idioma) para que el índice léxico sirva a repositorios en

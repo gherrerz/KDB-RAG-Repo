@@ -124,3 +124,27 @@ def test_hybrid_weights_reject_values_outside_unit_range(
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_rerank_default_docs_penalty_default_and_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La penalización por defecto de docs es 0.40, acepta 0 y overrides."""
+    monkeypatch.delenv("RERANK_DEFAULT_DOCS_PENALTY", raising=False)
+    assert Settings(_env_file=None).rerank_default_docs_penalty == 0.40
+
+    monkeypatch.setenv("RERANK_DEFAULT_DOCS_PENALTY", "0")
+    assert Settings(_env_file=None).rerank_default_docs_penalty == 0.0
+
+    monkeypatch.setenv("RERANK_DEFAULT_DOCS_PENALTY", "0.25")
+    assert Settings(_env_file=None).rerank_default_docs_penalty == 0.25
+
+
+def test_rerank_default_docs_penalty_rejects_negative_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Una penalización negativa premiaría docs y falla la validación."""
+    monkeypatch.setenv("RERANK_DEFAULT_DOCS_PENALTY", "-0.1")
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
