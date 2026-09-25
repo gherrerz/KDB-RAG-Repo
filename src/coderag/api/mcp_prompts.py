@@ -29,10 +29,10 @@ from mcp.types import (
 
 _QUERY_REPO_GUIDE = """\
 Vas a responder una pregunta sobre el repositorio **{repo_id}** usando la tool MCP \
-`query_repo`. Esta tool ejecuta Hybrid RAG (vector Chroma 0.55 + léxico Postgres \
-0.45 + expansión de grafo Neo4j), rerankea por intención y **sintetiza una \
-respuesta con un LLM**, devolviendo `answer` + `citations` (path, start_line, \
-end_line, score, reason) + `diagnostics`.
+`query_repo`. Esta tool ejecuta Hybrid RAG (vector Chroma + léxico Postgres, con \
+pesos configurables en el servidor, + expansión de grafo Neo4j), rerankea \
+por intención y **sintetiza una respuesta con un LLM**, devolviendo `answer` + \
+`citations` (path, start_line, end_line, score, reason) + `diagnostics`.
 
 Antes de llamar:
 1. Confirma que `{repo_id}` está `query_ready=true` leyendo el resource \
