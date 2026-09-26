@@ -8,6 +8,16 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Added
 
+- Nuevo script `scripts/measure_code_share.py` (solo biblioteca estándar) que
+  mide qué porción de los resultados de `POST /query/retrieval` es código: lanza
+  consultas en español (por defecto los 6 títulos de historias del run 2 de la
+  prueba del flujo federado) con el mismo cuerpo que usa hexa-st-be, clasifica
+  cada fragmento por extensión (código, documentación, configuración/datos,
+  lockfile u otro), imprime la tabla por consulta y el promedio, y una línea
+  PASS/FAIL contra `--threshold` (0,5 por defecto) y "ninguna consulta en 0".
+  Admite `--languages`, `--path-globs` y `--json-out`; solo falla (código de
+  salida distinto de cero) ante errores de transporte. Sirve para medir el AC-7
+  de STORY-156 / KAN-270.
 - `POST /query/retrieval` (y la tool MCP `query_retrieval`) acepta los filtros
   opcionales `path_globs` (globs de ruta relativa; `**` cruza directorios,
   distingue mayúsculas, OR entre globs) y `languages` (lenguaje del archivo,
