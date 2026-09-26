@@ -17,7 +17,9 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
   PASS/FAIL contra `--threshold` (0,5 por defecto) y "ninguna consulta en 0".
   Admite `--languages`, `--path-globs` y `--json-out`; solo falla (código de
   salida distinto de cero) ante errores de transporte. Sirve para medir el AC-7
-  de STORY-156 / KAN-270.
+  de STORY-156 / KAN-270. `--top-n` vale 100 por defecto, el mismo valor que
+  hexa-st-be envía desde STORY-156 (con 60 el promedio medido fue 37,5 % y con
+  100, 57,5 %).
 - `POST /query/retrieval` (y la tool MCP `query_retrieval`) acepta los filtros
   opcionales `path_globs` (globs de ruta relativa; `**` cruza directorios,
   distingue mayúsculas, OR entre globs) y `languages` (lenguaje del archivo,
