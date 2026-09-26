@@ -33,6 +33,23 @@ GitSshStrictHostKeyChecking = Literal["yes", "accept-new", "no"]
 ChromaMode = Literal["embedded", "remote"]
 RuntimeEnvironment = Literal["development", "test", "production"]
 
+# Configuración de FTS neutra: sin stemming ni stop-words de un idioma, para
+# que el mismo índice sirva a repositorios en español e inglés. Las tildes se
+# pliegan por separado (ver ``coderag.core.text_folding``).
+DEFAULT_LEXICAL_FTS_LANGUAGE = "simple"
+
+# Pesos por defecto de la fusión híbrida (vector + léxico).
+DEFAULT_HYBRID_VECTOR_WEIGHT = 0.55
+DEFAULT_HYBRID_LEXICAL_WEIGHT = 0.45
+
+# Penalización por defecto del reranker sobre rutas de documentación cuando la
+# consulta no tiene intención documental. Se calibra contra la escala de score
+# del reranker (base entre ~0.3 y ~0.75) y las demociones de docs que ya
+# existen (0.15 con intención de código, 0.30 en configuración, 0.45 en
+# búsqueda de definiciones): 0.40 cierra las brechas típicas entre un spec y
+# un archivo de código con similitud vectorial parecida.
+DEFAULT_RERANK_DEFAULT_DOCS_PENALTY = 0.40
+
 
 # Sufijo de variable de entorno por ambiente activo. Permite apuntar a
 # servidores y credenciales distintos por entorno (servidores separados).
@@ -266,7 +283,27 @@ class Settings(BaseSettings):
         default="development",
         alias="RUNTIME_ENVIRONMENT",
     )
-    lexical_fts_language: str = Field(default="english", alias="LEXICAL_FTS_LANGUAGE")
+    lexical_fts_language: str = Field(
+        default=DEFAULT_LEXICAL_FTS_LANGUAGE,
+        alias="LEXICAL_FTS_LANGUAGE",
+    )
+    hybrid_vector_weight: float = Field(
+        default=DEFAULT_HYBRID_VECTOR_WEIGHT,
+        alias="HYBRID_VECTOR_WEIGHT",
+        ge=0.0,
+        le=1.0,
+    )
+    hybrid_lexical_weight: float = Field(
+        default=DEFAULT_HYBRID_LEXICAL_WEIGHT,
+        alias="HYBRID_LEXICAL_WEIGHT",
+        ge=0.0,
+        le=1.0,
+    )
+    rerank_default_docs_penalty: float = Field(
+        default=DEFAULT_RERANK_DEFAULT_DOCS_PENALTY,
+        alias="RERANK_DEFAULT_DOCS_PENALTY",
+        ge=0.0,
+    )
     neo4j_uri: str = Field(default="bolt://localhost:7687", alias="NEO4J_URI")
     neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
     neo4j_password: str = Field(default="password", alias="NEO4J_PASSWORD")
@@ -364,7 +401,14 @@ class Settings(BaseSettings):
         alias="SCAN_EXCLUDED_EXTENSIONS",
     )
     scan_excluded_files: str = Field(
-        default=".gitignore,.env,.env.example,.dockerignore",
+        # Los lockfiles se excluyen por nombre (en cualquier nivel del árbol):
+        # no aportan código y sus líneas dominan los resultados de recuperación.
+        default=(
+            ".gitignore,.env,.env.example,.dockerignore,"
+            "pnpm-lock.yaml,package-lock.json,yarn.lock,npm-shrinkwrap.json,"
+            "poetry.lock,Pipfile.lock,uv.lock,Cargo.lock,composer.lock,"
+            "Gemfile.lock,go.sum"
+        ),
         alias="SCAN_EXCLUDED_FILES",
     )
     scan_excluded_patterns: str = Field(
@@ -566,6 +610,24 @@ class Settings(BaseSettings):
         if self.chroma_remote_max_split_depth <= 0:
             raise ValueError(
                 "CHROMA_REMOTE_MAX_SPLIT_DEPTH debe ser mayor a cero."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_hybrid_weights_not_both_zero(self) -> "Settings":
+        """Rechaza la fusión híbrida con ambos pesos en cero.
+
+        Con ambos en cero el score fusionado se anula y el orden final
+        depende solo de los ajustes posteriores, es decir, queda arbitrario.
+        Que uno solo sea cero sigue siendo válido (fusión de un único canal).
+        """
+        if self.hybrid_vector_weight == 0.0 and (
+            self.hybrid_lexical_weight == 0.0
+        ):
+            raise ValueError(
+                "HYBRID_VECTOR_WEIGHT y HYBRID_LEXICAL_WEIGHT no pueden ser "
+                "ambos 0: la fusión híbrida quedaría sin señal y el ranking "
+                "sería arbitrario. Al menos uno debe ser mayor a cero."
             )
         return self
 

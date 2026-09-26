@@ -3353,3 +3353,154 @@ def test_run_query_component_code_ambiguous_symbol_returns_disambiguation(
     assert result.diagnostics["literal_failure_reason"] == "ambiguous_component"
     assert len(result.diagnostics["component_candidates"]) == 2
     assert result.citations == []
+
+
+def _patch_reverse_import_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simula una consulta graph-first de importadores con dos archivos."""
+
+    class _Settings:
+        inventory_page_size = 50
+
+    class _FakeGraphBuilder:
+        def query_file_paths_by_suffix(
+            self,
+            repo_id: str,
+            candidates: list[str],
+            limit: int = 20,
+        ) -> list[dict[str, object]]:
+            return [
+                {
+                    "path": "src/coderag/storage/metadata_store.py",
+                    "match_score": 2,
+                }
+            ]
+
+        def query_file_importers(
+            self,
+            repo_id: str,
+            target_paths: list[str],
+            limit: int = 100,
+        ) -> list[dict[str, object]]:
+            return [
+                {
+                    "target_path": target_paths[0],
+                    "label": "worker.py",
+                    "path": "src/coderag/jobs/worker.py",
+                    "kind": "file_importer",
+                    "start_line": 1,
+                    "end_line": 1,
+                },
+                {
+                    "target_path": target_paths[0],
+                    "label": "guia.md",
+                    "path": "docs/guia.md",
+                    "kind": "file_importer",
+                    "start_line": 1,
+                    "end_line": 1,
+                },
+            ]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(query_service, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(query_service, "GraphBuilder", _FakeGraphBuilder)
+    monkeypatch.setattr(
+        query_service,
+        "hybrid_search",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("hybrid_search no debe ejecutarse")
+        ),
+    )
+
+
+def test_run_retrieval_query_graph_first_short_circuit_respects_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El atajo graph-first no devuelve chunks ni texto fuera del filtro."""
+    _patch_reverse_import_inventory(monkeypatch)
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="which files import metadata_store.py directly",
+        top_n=10,
+        top_k=5,
+        include_context=True,
+        path_globs=["src/**"],
+        languages=["python"],
+    )
+
+    assert [chunk.path for chunk in result.chunks] == [
+        "src/coderag/jobs/worker.py"
+    ]
+    assert all(
+        citation.path == "src/coderag/jobs/worker.py"
+        for citation in result.citations
+    )
+    assert "docs/guia.md" not in result.answer
+    assert "docs/guia.md" not in (result.context or "")
+    assert result.statistics.total_after_rerank == 1
+    assert result.diagnostics["retrieval_filter"]["dropped_chunks"] == 1
+
+
+def test_run_retrieval_query_graph_first_without_filter_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sin filtro el atajo devuelve ambos archivos y no agrega diagnostics."""
+    _patch_reverse_import_inventory(monkeypatch)
+
+    result = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query="which files import metadata_store.py directly",
+        top_n=10,
+        top_k=5,
+    )
+
+    assert [chunk.path for chunk in result.chunks] == [
+        "src/coderag/jobs/worker.py",
+        "docs/guia.md",
+    ]
+    assert "retrieval_filter" not in result.diagnostics
+
+
+def test_run_retrieval_query_component_short_circuit_respects_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El atajo de componente no expone por texto un archivo excluido."""
+    content = "SECRETO_FUERA_DE_FILTRO = 1\n"
+    monkeypatch.setattr(
+        query_service,
+        "_get_file_snippet",
+        lambda repo_id, path: _snippet(
+            content, path, 1, 1, source="lexical_file_full"
+        ),
+    )
+    query = "dame el codigo completo de src/coderag/tool.py"
+
+    outside = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query=query,
+        top_n=20,
+        top_k=5,
+        include_context=True,
+        path_globs=["docs/**"],
+    )
+    inside = query_service.run_retrieval_query(
+        repo_id="repo1",
+        query=query,
+        top_n=20,
+        top_k=5,
+        include_context=True,
+        path_globs=["src/**"],
+        languages=["python"],
+    )
+
+    assert outside.chunks == []
+    assert outside.citations == []
+    assert "SECRETO_FUERA_DE_FILTRO" not in outside.answer
+    assert outside.context == ""
+    assert outside.statistics.total_after_rerank == 0
+    assert [chunk.path for chunk in inside.chunks] == ["src/coderag/tool.py"]
+    assert "SECRETO_FUERA_DE_FILTRO" in inside.answer
+    assert inside.context == content
+    assert inside.diagnostics["retrieval_filter"]["dropped_chunks"] == 0

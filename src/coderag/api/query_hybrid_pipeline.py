@@ -8,6 +8,7 @@ from time import monotonic
 
 from coderag.api.citation_filters import is_noisy_path, select_high_signal_citations
 from coderag.core.models import Citation, RetrievalChunk
+from coderag.retrieval.retrieval_filter import RetrievalFilter
 
 
 @dataclass
@@ -78,10 +79,23 @@ def prepare_hybrid_graph_seed_input(
     embedding_model: str | None,
     *,
     hooks: HybridSeedPreparationHooks,
+    retrieval_filter: RetrievalFilter | None = None,
 ) -> HybridGraphSeedInput:
-    """Ejecuta la preparación híbrida común hasta el input de expansión."""
+    """Ejecuta la preparación híbrida común hasta el input de expansión.
+
+    Con ``retrieval_filter`` el filtro viaja a ``hybrid_search`` y se reaplica
+    sobre los chunks resultantes y sobre los seeds sintéticos de grafo, para
+    que ningún chunk que incumpla ruta/lenguaje llegue a la expansión.
+    """
     stage_timings: dict[str, float] = {}
 
+    # El kwarg solo se envía con filtro activo: sin filtro, la llamada es
+    # idéntica a la previa (los colaboradores inyectados no lo conocen).
+    filter_kwargs: dict[str, RetrievalFilter] = (
+        {"retrieval_filter": retrieval_filter}
+        if retrieval_filter is not None
+        else {}
+    )
     retrieval_started_at = monotonic()
     initial = hooks.hybrid_search(
         repo_id=repo_id,
@@ -89,7 +103,10 @@ def prepare_hybrid_graph_seed_input(
         top_n=top_n,
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,
+        **filter_kwargs,
     )
+    if retrieval_filter is not None:
+        initial = retrieval_filter.filter_chunks(initial)
     stage_timings["hybrid_search_ms"] = hooks.elapsed_milliseconds(
         retrieval_started_at
     )
@@ -125,6 +142,8 @@ def prepare_hybrid_graph_seed_input(
 
     rerank_started_at = monotonic()
     reranked = hooks.rerank(query=query, chunks=initial, top_k=top_k)
+    if retrieval_filter is not None:
+        reranked = retrieval_filter.filter_chunks(reranked)
     stage_timings["rerank_ms"] = hooks.elapsed_milliseconds(rerank_started_at)
 
     (
@@ -143,6 +162,11 @@ def prepare_hybrid_graph_seed_input(
         matched_paths=external_import_matched_paths,
         chunks=reranked,
     )
+    if retrieval_filter is not None:
+        reverse_graph_seed_chunks = retrieval_filter.filter_chunks(
+            reverse_graph_seed_chunks
+        )
+        graph_seed_chunks = retrieval_filter.filter_chunks(graph_seed_chunks)
     graph_seed_input = reranked + reverse_graph_seed_chunks + graph_seed_chunks
 
     return HybridGraphSeedInput(

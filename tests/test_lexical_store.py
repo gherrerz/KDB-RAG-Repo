@@ -396,6 +396,26 @@ class TestDeleteAll:
 
 
 class TestFtsLanguage:
+    def test_idioma_por_defecto_es_simple(self):
+        """Sin idioma explícito se usa la configuración neutra ``simple``."""
+        from coderag.storage.lexical_store import LexicalStore
+
+        store = LexicalStore(
+            "postgresql://fake/db",
+            session_factory=_session_factory_mock(MagicMock()),
+        )
+        assert store._lang == "simple"
+
+        connection = MagicMock()
+        connection.execute.return_value = _result(rows=[])
+        store = LexicalStore(
+            "postgresql://fake/db",
+            session_factory=_session_factory_mock(connection),
+        )
+        store.query(repo_id="r1", text="algo")
+        _, params = connection.execute.call_args.args
+        assert params["lang"] == "simple"
+
     def test_idioma_personalizado_se_pasa_a_query(self):
         """El fts_language configurable se usa en plainto_tsquery."""
         store, connection, _ = _make_store(language="spanish")
@@ -416,3 +436,54 @@ class TestFtsLanguage:
 
         _, rows = connection.execute.call_args.args
         assert rows[0]["lang"] == "spanish"
+
+
+class TestAccentFolding:
+    def test_index_documents_pliega_solo_la_entrada_de_tsvector(self):
+        """to_tsvector recibe texto sin tildes; doc y path quedan intactos."""
+        store, connection, _ = _make_store(language="simple")
+
+        meta = {"id": "r:1", "path": "src/Pantalla/Sesión.tsx",
+                "symbol_name": "iniciarSesión", "entity_type": "symbol"}
+        store.index_documents(
+            repo_id="r",
+            docs=["// Función que valida el formulario de sesión"],
+            metadatas=[meta],
+        )
+
+        statement, rows = connection.execute.call_args.args
+        row = rows[0]
+        assert row["doc"] == "// Función que valida el formulario de sesión"
+        assert row["path"] == "src/Pantalla/Sesión.tsx"
+        assert row["symbol_name"] == "iniciarSesión"
+        assert row["fts_doc"] == (
+            "// Funcion que valida el formulario de sesion"
+        )
+        assert row["fts_path"] == "src/Pantalla/Sesion.tsx"
+        assert row["fts_symbol_name"] == "iniciarSesion"
+        compiled = str(statement.compile(dialect=postgresql.dialect()))
+        assert "to_tsvector(%(lang)s, coalesce(%(fts_doc)s" in compiled
+
+    def test_query_pliega_tildes_de_forma_idempotente(self):
+        """Consultar con o sin tilde envía el mismo texto plegado."""
+        store, connection, _ = _make_store(language="simple")
+        connection.execute.return_value = _result(rows=[])
+
+        store.query(repo_id="r1", text="Función ÁRBOL")
+        _, with_accents = connection.execute.call_args.args
+        store.query(repo_id="r1", text="Funcion ARBOL")
+        _, without_accents = connection.execute.call_args.args
+
+        assert with_accents["text"] == "Funcion ARBOL"
+        assert with_accents["text"] == without_accents["text"]
+
+    def test_query_devuelve_doc_original_sin_plegar(self):
+        """El texto devuelto al llamador es el ``doc`` persistido."""
+        meta = {"id": "r1:f", "path": "f.py"}
+        row = _make_row("r1:f", "def función(): pass", 0.4, meta)
+        store, connection, _ = _make_store(language="simple")
+        connection.execute.return_value = _result(rows=[row])
+
+        results = store.query(repo_id="r1", text="funcion")
+
+        assert results[0]["text"] == "def función(): pass"

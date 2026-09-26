@@ -8,6 +8,35 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Added
 
+- Nuevo script `scripts/measure_code_share.py` (solo biblioteca estándar) que
+  mide qué porción de los resultados de `POST /query/retrieval` es código: lanza
+  consultas en español (por defecto los 6 títulos de historias del run 2 de la
+  prueba del flujo federado) con el mismo cuerpo que usa hexa-st-be, clasifica
+  cada fragmento por extensión (código, documentación, configuración/datos,
+  lockfile u otro), imprime la tabla por consulta y el promedio, y una línea
+  PASS/FAIL contra `--threshold` (0,5 por defecto) y "ninguna consulta en 0".
+  Admite `--languages`, `--path-globs` y `--json-out`; solo falla (código de
+  salida distinto de cero) ante errores de transporte. Sirve para medir el AC-7
+  de STORY-156 / KAN-270. `--top-n` vale 100 por defecto, el mismo valor que
+  hexa-st-be envía desde STORY-156 (con 60 el promedio medido fue 37,5 % y con
+  100, 57,5 %).
+- `POST /query/retrieval` (y la tool MCP `query_retrieval`) acepta los filtros
+  opcionales `path_globs` (globs de ruta relativa; `**` cruza directorios,
+  distingue mayúsculas, OR entre globs) y `languages` (lenguaje del archivo,
+  normalizado a minúsculas; AND con `path_globs`), con cotas de largo y sin
+  cadenas vacías (422 en caso contrario). Sin filtros el comportamiento es el
+  mismo de antes y `POST /query` no cambia. La lógica vive en el nuevo helper
+  `src/coderag/retrieval/retrieval_filter.py`, compartido por: la pata
+  vectorial (el lenguaje se empuja al `where` de Chroma con `$and`/`$in`), la
+  pata léxica (Postgres no tiene columna de lenguaje: se deriva de la
+  extensión con `LANG_MAP` y se filtra en Python, sin migración de esquema) y
+  la garantía final, que reaplica el filtro tras la expansión de grafo y en los
+  atajos graph-first y de código de componente, de modo que ningún chunk ni
+  cita devueltos lo incumple. Con filtro activo el pool de candidatos se amplía
+  de forma acotada (hasta 3x `top_n`, tope 300) y
+  `diagnostics.retrieval_filter` informa el filtro aplicado. Documentado en
+  `docs/API_REFERENCE.md`, `docs/MCP_CONTRACT.md` y en el prompt/resource MCP
+  de parámetros.
 - Nuevo documento `docs/MCP_CONTRACT.md`: contrato de integración MCP
   autocontenido para consumidores externos (payloads de entrada/salida de las
   5 tools, los 3 prompts y los 7 resources, tabla consolidada de códigos de
@@ -55,6 +84,59 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- Las consultas de "género documental" (`guia`, `instalacion`/`install`,
+  `setup`, `deploy`/`despliegue`, `manual`, `tutorial`, `changelog`,
+  `contributing`, `instrucciones`/`instructions`) omiten la penalización por
+  defecto de documentos de `RERANK_DEFAULT_DOCS_PENALTY`, porque piden un
+  documento aunque no activen la intención documental completa. Es un
+  vocabulario corto y aparte de `_DOCUMENTATION_TOKENS`: su único efecto es
+  omitir esa penalización y no cambia ningún otro ranking. Corrige la
+  regresión detectada al medir consultas como "guía de instalación" o
+  "how do I deploy this project". Parte de STORY-156 / KAN-270.
+- El reranker penaliza por defecto los documentos cuando la consulta no tiene
+  intención documental: rutas `docs/`, `openspec/`, `guides/`, README y
+  archivos `.md`/`.mdx`/`.rst`/`.adoc` pierden `RERANK_DEFAULT_DOCS_PENALTY`
+  puntos de score (default `0.40`, misma escala que las demociones de docs ya
+  existentes de `0.15`/`0.30`/`0.45`). Así un índice se comporta "código
+  primero" en consultas funcionales, por ejemplo títulos de historias sin
+  términos de código, donde los specs ganaban por similitud vectorial. Las
+  consultas con intención documental (`documentación`, `readme`, `guide`,
+  `arquitectura`, etc.) no cambian, y las de definición o configuración no
+  acumulan la penalización porque ya demueven docs. **Cambia el ranking de las
+  consultas sin intención documental:** para volver al orden anterior basta
+  `RERANK_DEFAULT_DOCS_PENALTY=0`. Nueva variable (`>= 0`, se lee en cada
+  consulta; ver `docs/CONFIGURATION.md`), también en `.env.example` y en el
+  configmap base de k8s. Sin reingesta. Parte de STORY-156 / KAN-270.
+- **BREAKING (requiere reingesta):** `LEXICAL_FTS_LANGUAGE` pasa de `english` a
+  `simple` por defecto, una configuración de texto neutra (sin stemming ni
+  stop-words de un idioma) para que el índice léxico sirva a repositorios en
+  español e inglés. Además, las tildes se pliegan al indexar (solo el texto que
+  entra a `to_tsvector`; `doc`, `path` y `symbol_name` se guardan y devuelven
+  sin cambios) y al consultar, con un helper compartido
+  (`src/coderag/core/text_folding.py`) usado por `LexicalStore` y la migración
+  legacy (vía `translate()`, sin extensión `unaccent` ni cambio de esquema).
+  Los `tsvector` se guardan al ingerir con la configuración vigente en ese
+  momento, por lo que **los repositorios ya indexados deben reingerirse** para
+  que la búsqueda léxica sea coherente. Los fallbacks `"english"` de
+  `lexical_store.py`, `lexical_index.py`, `reset_service.py` y
+  `postgres_legacy_migration.py` usan ahora la constante compartida
+  `DEFAULT_LEXICAL_FTS_LANGUAGE`.
+- Los pesos de la fusión híbrida son configurables por variable de entorno:
+  `HYBRID_VECTOR_WEIGHT` y `HYBRID_LEXICAL_WEIGHT` (defaults `0.55` / `0.45`,
+  rango `[0, 1]`). `hybrid_search` los lee de `Settings` en cada consulta; las
+  constantes `VECTOR_WEIGHT` / `LEXICAL_WEIGHT` quedan como defaults. Los textos
+  de los prompts y resources MCP ya no fijan los valores numéricos.
+- El reranker (`src/coderag/retrieval/reranker.py`) reconoce la intención de
+  código en consultas en español: se suman `codigo`, `funcion(es)`,
+  `metodo(s)`, `clase(s)`, `simbolo(s)`, `componente(s)`, `pantalla(s)`,
+  `formulario(s)`, `pagina(s)`, `hook(s)` y `endpoint(s)` a los disparadores
+  de código (y `funcion`, `metodo`, `simbolo` a los de búsqueda de definición).
+  Se omiten a propósito `archivo`, `ruta` y `servicio`, porque también aparecen
+  en consultas de configuración y documentación. Además, las rutas bajo
+  `openspec/` se tratan como documentación (`_is_docs_path`), de modo que sus
+  `.md` reciben la misma penalización que `docs/` cuando la consulta pide
+  código. Antes, una consulta como *"pantalla de inicio de sesión con
+  formulario"* no activaba la intención de código y ganaba la documentación.
 - Bump de la dependencia `mcp` 1.23.0 → 1.28.1 en `requirements.txt` y
   `requirements-runtime.txt`. Sin cambios de código: la versión sigue en la
   línea estable v1.x (misma API `Server`/`mcp.types` usada por
@@ -97,6 +179,31 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Fixed
 
+- `POST /query/retrieval`: los globs de `path_globs` con clases de caracteres
+  malformadas (`[!]`, `[z-a]`) hacían fallar `re.compile` al filtrar y el
+  cliente recibía `500`. La traducción de `src/coderag/retrieval/retrieval_filter.py`
+  ahora es total y sigue `fnmatch`: `[!x]` niega, `^` y los metacaracteres de
+  regex dentro de la clase son literales, y una `[` sin cierre o con un rango
+  invertido se toma como `[` literal. La validación de `path_globs`
+  (`src/coderag/core/models.py`) conserva una guarda defensiva que responde
+  `422` ante un `re.error`. `docs/API_REFERENCE.md` y `docs/MCP_CONTRACT.md`
+  documentan las reglas y que, en citas y registros de grafo, el lenguaje se
+  deriva solo de la extensión (límite aceptado).
+- `HYBRID_VECTOR_WEIGHT` y `HYBRID_LEXICAL_WEIGHT` ya no pueden ser ambos `0`:
+  la validación de `Settings` (`src/coderag/core/settings.py`) rechaza el
+  arranque, porque con ambos en cero el score fusionado se anulaba y el
+  ranking dependía solo de los ajustes posteriores. Uno solo en `0` sigue
+  siendo válido. `docs/CONFIGURATION.md` queda alineado.
+- Los lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`,
+  `npm-shrinkwrap.json`, `poetry.lock`, `Pipfile.lock`, `uv.lock`,
+  `Cargo.lock`, `composer.lock`, `Gemfile.lock`, `go.sum`) ya no se indexan:
+  se agregan al default de `SCAN_EXCLUDED_FILES` (`src/coderag/core/settings.py`),
+  que se compara por nombre de archivo en cualquier nivel del árbol. La rama
+  YAML del chunker generaba un `config_key` por línea de `pnpm-lock.yaml`, y
+  esos fragmentos desplazaban al código en los resultados de recuperación.
+  `.env.example`, `k8s/base/api-configmap.yaml` y `docs/CONFIGURATION.md`
+  quedan alineados. Un repositorio ya indexado debe reingerirse para dejar de
+  contener lockfiles.
 - `scripts/mcp_smoke.sh` enviaba el header legacy `X-MCP-Token` en vez de
   `Authorization: Bearer {MCP_API_TOKEN}`, quedando desalineado con el
   contrato de autenticación MCP realmente implementado en

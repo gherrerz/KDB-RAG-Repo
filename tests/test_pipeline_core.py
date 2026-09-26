@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from coderag.core.models import RetrievalChunk, ScannedFile
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.retrieval.context_assembler import assemble_context
@@ -662,6 +664,131 @@ def test_hybrid_search_refreshes_stale_chroma_results_once(
     assert ranked[0].metadata["path"] == "src/providers/AuthProvider.tsx"
 
 
+def _run_weighted_hybrid_search(
+    monkeypatch,
+    settings: SimpleNamespace,
+) -> list:
+    """Ejecuta hybrid_search con un chunk solo vectorial y otro solo léxico."""
+
+    class _FakeEmbedder:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            del texts
+            return [[0.1, 0.2]]
+
+    class _FakeChroma:
+        def query(
+            self,
+            collection_name: str,
+            query_embedding: list[float],
+            top_n: int,
+            where: dict | None = None,
+        ) -> dict:
+            del query_embedding, top_n, where
+            if collection_name != "code_symbols":
+                return {
+                    "ids": [[]],
+                    "documents": [[]],
+                    "metadatas": [[]],
+                    "distances": [[]],
+                }
+            return {
+                "ids": [["vector-only"]],
+                "documents": [["export function Login() {}"]],
+                "metadatas": [[{
+                    "path": "src/vector_only.ts",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "symbol_name": "Login",
+                    "symbol_type": "function",
+                }]],
+                "distances": [[0.0]],
+            }
+
+    lexical_results = [
+        {
+            "id": "lexical-only",
+            "text": "export function Session() {}",
+            "score": 4.0,
+            "metadata": {
+                "path": "src/lexical_only.ts",
+                "start_line": 1,
+                "end_line": 1,
+                "symbol_name": "Session",
+                "symbol_type": "function",
+            },
+        }
+    ]
+    monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "build_managed_vector_index",
+        lambda: _FakeChroma(),
+    )
+    monkeypatch.setattr(hybrid_search_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "build_repository_lexical_index",
+        lambda settings: _FakeLexicalIndex(lexical_results),
+    )
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "ensure_repository_lexical_index_loaded",
+        lambda index, repo_id: None,
+    )
+    return hybrid_search_module.hybrid_search(
+        repo_id="repo-weights",
+        query="donde se inicia la sesion",
+        top_n=5,
+    )
+
+
+def test_hybrid_search_uses_default_weights_when_settings_omit_them(
+    monkeypatch,
+) -> None:
+    """Sin pesos en Settings se conservan los defaults 0.55 / 0.45."""
+    ranked = _run_weighted_hybrid_search(
+        monkeypatch,
+        SimpleNamespace(postgres_host=""),
+    )
+
+    by_id = {chunk.id: chunk for chunk in ranked}
+    assert ranked[0].id == "vector-only"
+    assert by_id["vector-only"].score - by_id["lexical-only"].score == (
+        pytest.approx(0.55 - 0.45)
+    )
+
+
+def test_hybrid_search_reads_weights_from_settings_at_call_time(
+    monkeypatch,
+) -> None:
+    """Pesos personalizados de Settings cambian el orden de la fusión."""
+    lexical_heavy = _run_weighted_hybrid_search(
+        monkeypatch,
+        SimpleNamespace(
+            postgres_host="",
+            hybrid_vector_weight=0.1,
+            hybrid_lexical_weight=0.9,
+        ),
+    )
+    vector_heavy = _run_weighted_hybrid_search(
+        monkeypatch,
+        SimpleNamespace(
+            postgres_host="",
+            hybrid_vector_weight=1.0,
+            hybrid_lexical_weight=0.0,
+        ),
+    )
+
+    assert lexical_heavy[0].id == "lexical-only"
+    assert vector_heavy[0].id == "vector-only"
+    assert vector_heavy[1].score == pytest.approx(
+        vector_heavy[0].score - 1.0
+    )
+
+
 def test_assemble_context_applies_token_limit() -> None:
     """Trunca el contexto ensamblado al presupuesto de tokens configurado."""
     chunks = [
@@ -720,3 +847,170 @@ def test_assemble_context_formats_file_and_external_graph_records() -> None:
     assert "GRAPH_EXTERNAL_DEPENDENCY" in context
     assert "REF: requests" in context
     assert "SOURCE_PATH: src/a.py" in context
+
+
+def _run_filtered_hybrid_search(monkeypatch, retrieval_filter, *, top_n=5):
+    """Ejecuta hybrid_search registrando where de Chroma y top_n léxico."""
+    seen: dict = {"where": [], "lexical_top_n": []}
+
+    class _FakeEmbedder:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            del texts
+            return [[0.1, 0.2]]
+
+    class _FakeChroma:
+        def query(self, collection_name, query_embedding, top_n, where=None):
+            del query_embedding
+            seen["where"].append(where)
+            seen["chroma_top_n"] = top_n
+            if collection_name != "code_symbols":
+                return {
+                    "ids": [[]],
+                    "documents": [[]],
+                    "metadatas": [[]],
+                    "distances": [[]],
+                }
+            # Chroma no filtra globs: devuelve también un chunk fuera de ruta.
+            return {
+                "ids": [["v-in", "v-out"]],
+                "documents": [["export const A = 1", "export const B = 2"]],
+                "metadatas": [[
+                    {
+                        "path": "src/ui/A.tsx",
+                        "language": "typescript",
+                        "symbol_name": "A",
+                        "start_line": 1,
+                        "end_line": 1,
+                    },
+                    {
+                        "path": "scripts/b.ts",
+                        "language": "typescript",
+                        "symbol_name": "B",
+                        "start_line": 1,
+                        "end_line": 1,
+                    },
+                ]],
+                "distances": [[0.1, 0.1]],
+            }
+
+    class _RecordingLexicalIndex:
+        def query(self, repo_id, text, top_n=50):
+            del repo_id, text
+            seen["lexical_top_n"].append(top_n)
+            # La pata léxica no trae `language`: se deriva de la extensión.
+            return [
+                {
+                    "id": "l-py",
+                    "text": "def a(): pass",
+                    "score": 9.0,
+                    "metadata": {"path": "src/ui/a.py", "symbol_name": "a"},
+                },
+                {
+                    "id": "l-tsx",
+                    "text": "export const C = 3",
+                    "score": 3.0,
+                    "metadata": {"path": "src/ui/C.tsx", "symbol_name": "C"},
+                },
+                {
+                    "id": "l-md",
+                    "text": "# guia",
+                    "score": 2.0,
+                    "metadata": {
+                        "path": "src/ui/guia.md",
+                        "symbol_name": "guia",
+                    },
+                },
+            ]
+
+    monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "build_managed_vector_index",
+        lambda: _FakeChroma(),
+    )
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "get_settings",
+        lambda: SimpleNamespace(postgres_host=""),
+    )
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "build_repository_lexical_index",
+        lambda settings: _RecordingLexicalIndex(),
+    )
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "ensure_repository_lexical_index_loaded",
+        lambda index, repo_id: None,
+    )
+    ranked = hybrid_search_module.hybrid_search(
+        repo_id="repo-filter",
+        query="pantalla de inicio",
+        top_n=top_n,
+        retrieval_filter=retrieval_filter,
+    )
+    return ranked, seen
+
+
+def test_hybrid_search_filter_applies_to_vector_and_lexical_legs(
+    monkeypatch,
+) -> None:
+    """Ambas patas devuelven solo chunks que cumplen ruta y lenguaje."""
+    from coderag.retrieval.retrieval_filter import RetrievalFilter
+
+    ranked, seen = _run_filtered_hybrid_search(
+        monkeypatch,
+        RetrievalFilter.from_request(["src/ui/**"], ["typescript"]),
+    )
+
+    assert {chunk.id for chunk in ranked} == {"v-in", "l-tsx"}
+    # Lenguaje empujado a Chroma junto con repo_id; globs se filtran en Python.
+    assert seen["where"] == [
+        {
+            "$and": [
+                {"repo_id": "repo-filter"},
+                {"language": {"$in": ["typescript"]}},
+            ]
+        }
+    ] * len(hybrid_search_module.VECTOR_COLLECTIONS)
+
+
+def test_hybrid_search_filter_widens_candidate_pool_within_bound(
+    monkeypatch,
+) -> None:
+    """Con filtro se amplía el pool 3x, acotado por el tope documentado."""
+    from coderag.retrieval.retrieval_filter import RetrievalFilter
+
+    _, filtered_seen = _run_filtered_hybrid_search(
+        monkeypatch,
+        RetrievalFilter.from_request(["src/**"], None),
+        top_n=60,
+    )
+    _, plain_seen = _run_filtered_hybrid_search(monkeypatch, None, top_n=60)
+
+    assert plain_seen["lexical_top_n"] == [60]
+    assert filtered_seen["lexical_top_n"] == [180]
+    assert filtered_seen["chroma_top_n"] == 180
+    assert hybrid_search_module._filtered_candidate_top_n(250) == 300
+    assert hybrid_search_module._filtered_candidate_top_n(400) == 400
+
+
+def test_hybrid_search_without_filter_keeps_previous_behavior(
+    monkeypatch,
+) -> None:
+    """Sin filtro el where es solo repo_id y no se descarta ningún chunk."""
+    ranked, seen = _run_filtered_hybrid_search(monkeypatch, None)
+
+    assert {chunk.id for chunk in ranked} == {
+        "v-in",
+        "v-out",
+        "l-py",
+        "l-tsx",
+        "l-md",
+    }
+    assert seen["where"] == [{"repo_id": "repo-filter"}] * len(
+        hybrid_search_module.VECTOR_COLLECTIONS
+    )

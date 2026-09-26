@@ -109,6 +109,8 @@ Solo `query_retrieval`:
 | Parámetro | Default | Notas |
 |-----------|---------|-------|
 | `include_context` | `false` | `true` añade el contexto ensamblado (más tokens). |
+| `path_globs` | (sin filtro) | Globs de ruta (`src/**/*.tsx`); OR entre ellos. |
+| `languages` | (sin filtro) | Lenguajes (`typescript`, `python`); AND con globs. |
 
 Si `embedding_provider`/`embedding_model` no coinciden con la ingesta, la consulta
 devuelve 422 por incompatibilidad. Consulta `last_embedding_*` en `repo_status`.
@@ -131,8 +133,10 @@ _CAPABILITIES = """\
 `end_line`, `kind` (`code_chunk` / `file_full` / `module_summary`).
 
 ## Búsqueda híbrida
-Fusión: vector Chroma (peso 0.55) + léxico Postgres FTS (peso 0.45) + ajuste por
-identificadores exactos, luego rerank por intención y expansión de grafo Neo4j
+Fusión: vector Chroma (peso por defecto 0.55) + léxico Postgres FTS (peso por
+defecto 0.45; configurables en el servidor con `HYBRID_VECTOR_WEIGHT` y
+`HYBRID_LEXICAL_WEIGHT`) + ajuste por identificadores exactos, luego rerank
+por intención y expansión de grafo Neo4j
 (CALLS / IMPORTS / EXTENDS / IMPLEMENTS).
 
 No asumas capacidades fuera de esta lista.
