@@ -336,9 +336,12 @@ class RetrievalQueryRequest(BaseModel):
     @field_validator("path_globs")
     @classmethod
     def _validate_path_globs(cls, value: list[str] | None) -> list[str] | None:
-        """Recorta espacios y rechaza globs vacíos o demasiado largos."""
+        """Recorta espacios y rechaza globs vacíos, largos o no compilables."""
         if value is None:
             return None
+        # Import diferido: retrieval_filter importa este módulo.
+        from coderag.retrieval.retrieval_filter import validate_path_glob
+
         cleaned: list[str] = []
         for item in value:
             glob = item.strip()
@@ -349,6 +352,7 @@ class RetrievalQueryRequest(BaseModel):
                     "Cada glob de path_globs admite hasta "
                     f"{MAX_PATH_GLOB_LENGTH} caracteres."
                 )
+            validate_path_glob(glob)
             cleaned.append(glob)
         return cleaned
 

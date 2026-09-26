@@ -179,6 +179,21 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Fixed
 
+- `POST /query/retrieval`: los globs de `path_globs` con clases de caracteres
+  malformadas (`[!]`, `[z-a]`) hacían fallar `re.compile` al filtrar y el
+  cliente recibía `500`. La traducción de `src/coderag/retrieval/retrieval_filter.py`
+  ahora es total y sigue `fnmatch`: `[!x]` niega, `^` y los metacaracteres de
+  regex dentro de la clase son literales, y una `[` sin cierre o con un rango
+  invertido se toma como `[` literal. La validación de `path_globs`
+  (`src/coderag/core/models.py`) conserva una guarda defensiva que responde
+  `422` ante un `re.error`. `docs/API_REFERENCE.md` y `docs/MCP_CONTRACT.md`
+  documentan las reglas y que, en citas y registros de grafo, el lenguaje se
+  deriva solo de la extensión (límite aceptado).
+- `HYBRID_VECTOR_WEIGHT` y `HYBRID_LEXICAL_WEIGHT` ya no pueden ser ambos `0`:
+  la validación de `Settings` (`src/coderag/core/settings.py`) rechaza el
+  arranque, porque con ambos en cero el score fusionado se anulaba y el
+  ranking dependía solo de los ajustes posteriores. Uno solo en `0` sigue
+  siendo válido. `docs/CONFIGURATION.md` queda alineado.
 - Los lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`,
   `npm-shrinkwrap.json`, `poetry.lock`, `Pipfile.lock`, `uv.lock`,
   `Cargo.lock`, `composer.lock`, `Gemfile.lock`, `go.sum`) ya no se indexan:

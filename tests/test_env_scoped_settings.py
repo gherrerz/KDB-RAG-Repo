@@ -126,6 +126,36 @@ def test_hybrid_weights_reject_values_outside_unit_range(
         Settings(_env_file=None)
 
 
+def test_hybrid_weights_reject_both_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ambos pesos en cero anulan la fusión: se rechaza al arrancar."""
+    monkeypatch.setenv("HYBRID_VECTOR_WEIGHT", "0")
+    monkeypatch.setenv("HYBRID_LEXICAL_WEIGHT", "0.0")
+
+    with pytest.raises(ValidationError, match="ambos 0"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    ("vector", "lexical"),
+    [("0", "1"), ("1", "0"), ("0", "0.01")],
+)
+def test_hybrid_weights_accept_a_single_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    vector: str,
+    lexical: str,
+) -> None:
+    """Un solo peso en cero es válido (fusión de un único canal)."""
+    monkeypatch.setenv("HYBRID_VECTOR_WEIGHT", vector)
+    monkeypatch.setenv("HYBRID_LEXICAL_WEIGHT", lexical)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.hybrid_vector_weight == float(vector)
+    assert settings.hybrid_lexical_weight == float(lexical)
+
+
 def test_rerank_default_docs_penalty_default_and_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

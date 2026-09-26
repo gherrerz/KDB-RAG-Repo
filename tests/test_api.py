@@ -2458,6 +2458,54 @@ def test_retrieval_query_endpoint_rejects_invalid_filters(extra) -> None:
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "glob",
+    ["src/[!].tsx", "src/[z-a].tsx", "src/[^x].tsx", "src/[", "src/[]a].tsx"],
+)
+def test_retrieval_query_endpoint_malformed_glob_never_returns_500(
+    monkeypatch,
+    glob: str,
+) -> None:
+    """Globs con clases malformadas filtran sin lanzar `re.error` (no 500)."""
+    _patch_retrieval_pipeline_for_filters(monkeypatch)
+
+    response = TestClient(app).post(
+        "/query/retrieval",
+        json={
+            "repo_id": "mall",
+            "query": "pantalla de inicio de sesion",
+            "top_n": 10,
+            "top_k": 10,
+            "path_globs": [glob],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["chunks"] == []
+
+
+def test_retrieval_query_endpoint_answers_422_when_glob_cannot_compile(
+    monkeypatch,
+) -> None:
+    """La guarda defensiva mapea un `re.error` de compilación a 422."""
+    import re
+
+    from coderag.retrieval import retrieval_filter
+
+    def broken(glob: str):
+        raise re.error("boom")
+
+    monkeypatch.setattr(retrieval_filter, "_compile_glob", broken)
+
+    response = TestClient(app).post(
+        "/query/retrieval",
+        json={"repo_id": "mall", "query": "hola", "path_globs": ["src/**"]},
+    )
+
+    assert response.status_code == 422
+    assert "path_globs" in str(response.json()["detail"])
+
+
 def test_query_endpoint_ignores_retrieval_filters() -> None:
     """/query no cambia: su modelo no incorpora los filtros."""
     from coderag.core.models import QueryRequest
