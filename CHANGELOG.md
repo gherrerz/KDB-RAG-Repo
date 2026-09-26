@@ -179,6 +179,11 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Fixed
 
+- `HYBRID_VECTOR_WEIGHT` y `HYBRID_LEXICAL_WEIGHT` ya no pueden ser ambos `0`:
+  la validación de `Settings` (`src/coderag/core/settings.py`) rechaza el
+  arranque, porque con ambos en cero el score fusionado se anulaba y el
+  ranking dependía solo de los ajustes posteriores. Uno solo en `0` sigue
+  siendo válido. `docs/CONFIGURATION.md` queda alineado.
 - Los lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`,
   `npm-shrinkwrap.json`, `poetry.lock`, `Pipfile.lock`, `uv.lock`,
   `Cargo.lock`, `composer.lock`, `Gemfile.lock`, `go.sum`) ya no se indexan:

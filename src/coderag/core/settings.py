@@ -614,6 +614,24 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _validate_hybrid_weights_not_both_zero(self) -> "Settings":
+        """Rechaza la fusión híbrida con ambos pesos en cero.
+
+        Con ambos en cero el score fusionado se anula y el orden final
+        depende solo de los ajustes posteriores, es decir, queda arbitrario.
+        Que uno solo sea cero sigue siendo válido (fusión de un único canal).
+        """
+        if self.hybrid_vector_weight == 0.0 and (
+            self.hybrid_lexical_weight == 0.0
+        ):
+            raise ValueError(
+                "HYBRID_VECTOR_WEIGHT y HYBRID_LEXICAL_WEIGHT no pueden ser "
+                "ambos 0: la fusión híbrida quedaría sin señal y el ranking "
+                "sería arbitrario. Al menos uno debe ser mayor a cero."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _validate_admin_reset_settings(self) -> "Settings":
         """Exige token explícito cuando el reset administrativo está activo."""
         if self.admin_reset_enabled and not self.admin_reset_token:
