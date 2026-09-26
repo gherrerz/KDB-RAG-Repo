@@ -278,7 +278,7 @@ Recomendacion practica:
 - `SCAN_MAX_FILE_SIZE_BYTES`: limite de bytes por archivo escaneable. Default en settings: `2000000`. `.env.example` local de este repo lo baja a `200000`.
 - `SCAN_EXCLUDED_DIRS`: carpetas excluidas del escaneo. Default en settings: lista recomendada de directorios comunes de build/cache.
 - `SCAN_EXCLUDED_EXTENSIONS`: extensiones binarias/no-texto excluidas. Default en settings: lista extensa de binarios y artefactos.
-- `SCAN_EXCLUDED_FILES`: nombres de archivo excluidos puntualmente. Default en settings: `.gitignore,.env`.
+- `SCAN_EXCLUDED_FILES`: nombres de archivo excluidos puntualmente. Se comparan por nombre (sin distinguir mayusculas) en cualquier nivel del arbol, o por ruta relativa completa. Default en settings: `.gitignore,.env,.env.example,.dockerignore` mas los lockfiles habituales (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `npm-shrinkwrap.json`, `poetry.lock`, `Pipfile.lock`, `uv.lock`, `Cargo.lock`, `composer.lock`, `Gemfile.lock`, `go.sum`). Los lockfiles no aportan codigo y, al ser YAML/JSON de miles de lineas, saturaban los resultados de recuperacion. Un repositorio ya indexado debe reingerirse para dejar de contenerlos.
 - `SCAN_EXCLUDED_PATTERNS`: patrones glob opcionales sobre la ruta relativa del archivo, por ejemplo `docs/*` o `src/*.generated.ts`. Default: vacio.
 
 Default usado por Compose para `SCAN_EXCLUDED_EXTENSIONS`:

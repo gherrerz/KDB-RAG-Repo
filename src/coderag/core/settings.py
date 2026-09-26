@@ -364,7 +364,14 @@ class Settings(BaseSettings):
         alias="SCAN_EXCLUDED_EXTENSIONS",
     )
     scan_excluded_files: str = Field(
-        default=".gitignore,.env,.env.example,.dockerignore",
+        # Los lockfiles se excluyen por nombre (en cualquier nivel del árbol):
+        # no aportan código y sus líneas dominan los resultados de recuperación.
+        default=(
+            ".gitignore,.env,.env.example,.dockerignore,"
+            "pnpm-lock.yaml,package-lock.json,yarn.lock,npm-shrinkwrap.json,"
+            "poetry.lock,Pipfile.lock,uv.lock,Cargo.lock,composer.lock,"
+            "Gemfile.lock,go.sum"
+        ),
         alias="SCAN_EXCLUDED_FILES",
     )
     scan_excluded_patterns: str = Field(

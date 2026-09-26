@@ -55,6 +55,17 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- El reranker (`src/coderag/retrieval/reranker.py`) reconoce la intención de
+  código en consultas en español: se suman `codigo`, `funcion(es)`,
+  `metodo(s)`, `clase(s)`, `simbolo(s)`, `componente(s)`, `pantalla(s)`,
+  `formulario(s)`, `pagina(s)`, `hook(s)` y `endpoint(s)` a los disparadores
+  de código (y `funcion`, `metodo`, `simbolo` a los de búsqueda de definición).
+  Se omiten a propósito `archivo`, `ruta` y `servicio`, porque también aparecen
+  en consultas de configuración y documentación. Además, las rutas bajo
+  `openspec/` se tratan como documentación (`_is_docs_path`), de modo que sus
+  `.md` reciben la misma penalización que `docs/` cuando la consulta pide
+  código. Antes, una consulta como *"pantalla de inicio de sesión con
+  formulario"* no activaba la intención de código y ganaba la documentación.
 - Bump de la dependencia `mcp` 1.23.0 → 1.28.1 en `requirements.txt` y
   `requirements-runtime.txt`. Sin cambios de código: la versión sigue en la
   línea estable v1.x (misma API `Server`/`mcp.types` usada por
@@ -97,6 +108,16 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Fixed
 
+- Los lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`,
+  `npm-shrinkwrap.json`, `poetry.lock`, `Pipfile.lock`, `uv.lock`,
+  `Cargo.lock`, `composer.lock`, `Gemfile.lock`, `go.sum`) ya no se indexan:
+  se agregan al default de `SCAN_EXCLUDED_FILES` (`src/coderag/core/settings.py`),
+  que se compara por nombre de archivo en cualquier nivel del árbol. La rama
+  YAML del chunker generaba un `config_key` por línea de `pnpm-lock.yaml`, y
+  esos fragmentos desplazaban al código en los resultados de recuperación.
+  `.env.example`, `k8s/base/api-configmap.yaml` y `docs/CONFIGURATION.md`
+  quedan alineados. Un repositorio ya indexado debe reingerirse para dejar de
+  contener lockfiles.
 - `scripts/mcp_smoke.sh` enviaba el header legacy `X-MCP-Token` en vez de
   `Authorization: Bearer {MCP_API_TOKEN}`, quedando desalineado con el
   contrato de autenticación MCP realmente implementado en
