@@ -1,14 +1,18 @@
 """Pruebas del filtro por ruta y lenguaje de consultas retrieval-only."""
 
+import re
+
 import pytest
 
 from coderag.core.models import RetrievalChunk
+from coderag.retrieval import retrieval_filter
 from coderag.retrieval.retrieval_filter import (
     RetrievalFilter,
     chunk_language,
     language_for_path,
     normalize_repo_path,
     path_matches_glob,
+    validate_path_glob,
 )
 
 
@@ -56,6 +60,88 @@ def test_path_matches_glob_semantics(
 ) -> None:
     """Cubre `**`, `*`, `?`, clases, mayúsculas y rutas anidadas."""
     assert path_matches_glob(path, glob) is expected
+
+
+@pytest.mark.parametrize(
+    ("glob", "path", "expected"),
+    [
+        # `[!]` y `[` sin cierre no abren clase: `[` literal.
+        ("src/[!].ts", "src/[!].ts", True),
+        ("src/[!].ts", "src/a.ts", False),
+        ("src/[.ts", "src/[.ts", True),
+        ("src/[", "src/[", True),
+        ("[", "[", True),
+        ("[!", "[!", True),
+        ("[]", "[]", True),
+        # Rango invertido: no es clase, `[` literal.
+        ("src/[z-a].ts", "src/[z-a].ts", True),
+        ("src/[z-a].ts", "src/b.ts", False),
+        # `^` dentro de la clase es literal, no negación.
+        ("src/[^x].ts", "src/x.ts", True),
+        ("src/[^x].ts", "src/^.ts", True),
+        ("src/[^x].ts", "src/y.ts", False),
+        # Rangos y negación con rangos.
+        ("src/[a-c].ts", "src/b.ts", True),
+        ("src/[a-c].ts", "src/d.ts", False),
+        ("src/[!a-c].ts", "src/d.ts", True),
+        ("src/[!a-c].ts", "src/b.ts", False),
+        # `]` inicial es miembro literal de la clase.
+        ("src/[]a].ts", "src/].ts", True),
+        ("src/[]a].ts", "src/a.ts", True),
+        ("src/[]a].ts", "src/b.ts", False),
+        ("src/[!]a].ts", "src/b.ts", True),
+        ("src/[!]a].ts", "src/].ts", False),
+        # `-` en los extremos y metacaracteres de regex son literales.
+        ("src/[-a].ts", "src/-.ts", True),
+        ("src/[a-].ts", "src/-.ts", True),
+        ("src/[a-].ts", "src/b.ts", False),
+        ("src/[&|~].ts", "src/|.ts", True),
+        ("src/[[].ts", "src/[.ts", True),
+        # Tras una `[` literal el resto del glob conserva su significado.
+        ("[!]*.ts", "[!]x.ts", True),
+        # Rutas anidadas con clases en varios segmentos.
+        ("src/[ab]*/[!x].ts", "src/apps/y.ts", True),
+        ("src/[ab]*/[!x].ts", "src/apps/x.ts", False),
+    ],
+)
+def test_bracket_classes_follow_fnmatch_rules_and_never_raise(
+    glob: str,
+    path: str,
+    expected: bool,
+) -> None:
+    """La traducción de clases es total y sigue las reglas documentadas."""
+    assert path_matches_glob(path, glob) is expected
+
+
+def test_backslash_inside_class_is_normalized_and_never_raises() -> None:
+    """Las `\\` del glob se normalizan a `/` antes de traducir la clase."""
+    assert path_matches_glob("a/b", "a[\\]b") is True
+    assert path_matches_glob("a/b", "a[\\") is False
+
+
+@pytest.mark.parametrize(
+    "glob",
+    ["[!]", "[z-a]", "[^x]", "[", "[]", "[[", "[a-", "[--a]", "[a&&b]"]
+    + ["[\\]", "[!\\]", "**[", "a[!-]", "[--]", "[[:alpha:]]", "[a-a]"],
+)
+def test_validate_path_glob_accepts_every_bracket_form(glob: str) -> None:
+    """Ninguna forma de clase, aun malformada, deja de compilar."""
+    validate_path_glob(glob)
+    path_matches_glob("src/a.ts", glob)
+
+
+def test_validate_path_glob_maps_re_error_to_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La guarda defensiva convierte `re.error` en `ValueError`."""
+
+    def broken(glob: str) -> None:
+        raise re.error("boom")
+
+    monkeypatch.setattr(retrieval_filter, "_compile_glob", broken)
+
+    with pytest.raises(ValueError, match="inválido"):
+        validate_path_glob("src/**")
 
 
 def test_path_matching_normalizes_backslashes_and_leading_markers() -> None:

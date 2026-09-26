@@ -71,14 +71,20 @@ Filtros opcionales `path_globs` y `languages`:
   equivale a "cero o más directorios": `**/*.tsx` acepta `app.tsx` y
   `src/ui/app.tsx`). No hay coincidencia implícita por nombre base (`*.tsx`
   solo acepta archivos en la raíz) y un glob terminado en `/` equivale a
-  `<glob>**`. Varios globs se combinan con OR.
+  `<glob>**`. Varios globs se combinan con OR. En una clase, `^` es literal
+  (la negación es `[!x]`); una `[` sin cierre o con un rango invertido
+  (`[z-a]`) se toma como `[` literal. Un glob nunca provoca un `500`: si no se
+  pudiera compilar, la solicitud responde `422`.
 - `languages` (`list[str]`, hasta 20, cada uno de hasta 32 caracteres): etiquetas
   de lenguaje del índice (`typescript`, `javascript`, `python`, `java`,
   `kotlin`, `swift`, `go`, `markdown`, `yaml`, `json`, `toml`, `text`). Se
   normalizan a minúsculas y se combinan con OR; con `path_globs` se combinan
   con AND. Los resúmenes de módulo tienen lenguaje `module`. En la pata léxica
   el lenguaje se deriva de la extensión del archivo (`LANG_MAP`); en la vectorial
-  se filtra por la metadata `language` de Chroma.
+  se filtra por la metadata `language` de Chroma. En las citas y los registros
+  de grafo el lenguaje se deriva solo de la extensión del archivo, por lo que
+  `languages=["module"]` puede conservar un chunk de resumen de módulo cuya
+  cita se descarta.
 - Sin ninguno de los dos (o con listas vacías) no se filtra y la respuesta es
   la misma que antes. `POST /query` no acepta estos campos.
 - Garantía: ningún chunk ni cita devueltos incumple el filtro; se reaplica tras

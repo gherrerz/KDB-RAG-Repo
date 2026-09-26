@@ -17,6 +17,17 @@ Semántica de ``path_globs``:
 - ``*`` y ``?`` no cruzan ``/``; ``[abc]`` y ``[!abc]`` son clases de
   caracteres; ``**`` cruza directorios. ``**/`` equivale a "cero o más
   directorios", por lo que ``**/*.tsx`` acepta ``app.tsx`` y ``src/app.tsx``.
+- Clases de caracteres (misma semántica que ``fnmatch``, y la traducción es
+  total: nunca lanza ``re.error``): ``[!x]`` niega y ``[a-c]`` es un rango.
+  Un ``]`` justo tras ``[`` o ``[!`` es un miembro literal (``[]a]``). Dentro
+  de la clase ``^``, ``[``, ``&``, ``~`` y ``|`` son literales (y ``-`` lo
+  es al inicio o al final), por lo que ``[^x]`` acepta ``^`` y ``x`` y no
+  niega. Las ``\\`` del glob ya se normalizaron a ``/``, así que no llegan a
+  la clase. Una ``[`` sin ``]`` de cierre, o cuya clase trae un rango
+  invertido (``[z-a]``), no abre una clase: se toma como ``[`` literal y el
+  resto del glob se interpreta con normalidad. Este último caso difiere de
+  ``fnmatch``, que descarta el rango y deja una clase vacía que nunca
+  coincide.
 - No hay coincidencia implícita por nombre base: ``*.tsx`` solo acepta
   archivos en la raíz. Un glob terminado en ``/`` equivale a ``<glob>**``.
 - Varios globs se combinan con OR.
@@ -50,6 +61,48 @@ def normalize_repo_path(path: str) -> str:
     return normalized.lstrip("/")
 
 
+def _escape_class_char(char: str) -> str:
+    """Escapa un carácter para usarlo dentro de una clase de regex."""
+    return "\\" + char if char in "\\[]^-&~|" else char
+
+
+def _translate_bracket_class(
+    pattern: str,
+    start: int,
+) -> tuple[str, int] | None:
+    """Traduce la clase ``[...]`` que abre en ``start`` a regex.
+
+    Devuelve ``(regex, índice tras el cierre)`` o ``None`` cuando la ``[`` no
+    abre una clase válida (sin cierre o con un rango invertido) y debe
+    tratarse como literal. El resultado siempre compila.
+    """
+    index = start + 1
+    negated = pattern.startswith("!", index)
+    if negated:
+        index += 1
+    # Un `]` inicial es miembro literal, no el cierre de la clase.
+    closing = pattern.find("]", index + 1)
+    if closing == -1:
+        return None
+    body = pattern[index:closing]
+    members: list[str] = []
+    position = 0
+    while position < len(body):
+        if position + 2 < len(body) and body[position + 1] == "-":
+            low, high = body[position], body[position + 2]
+            if low > high:
+                return None
+            members.append(
+                f"{_escape_class_char(low)}-{_escape_class_char(high)}"
+            )
+            position += 3
+        else:
+            members.append(_escape_class_char(body[position]))
+            position += 1
+    prefix = "^" if negated else ""
+    return "[" + prefix + "".join(members) + "]", closing + 1
+
+
 @lru_cache(maxsize=256)
 def _compile_glob(glob: str) -> re.Pattern[str]:
     """Traduce un glob con soporte ``**`` a una expresión regular anclada."""
@@ -74,20 +127,30 @@ def _compile_glob(glob: str) -> re.Pattern[str]:
             parts.append("[^/]")
             index += 1
         elif char == "[":
-            closing = pattern.find("]", index + 2)
-            if closing == -1:
+            translated = _translate_bracket_class(pattern, index)
+            if translated is None:
                 parts.append(re.escape(char))
                 index += 1
             else:
-                body = pattern[index + 1:closing]
-                if body.startswith("!"):
-                    body = "^" + body[1:]
-                parts.append("[" + body.replace("\\", "\\\\") + "]")
-                index = closing + 1
+                class_regex, index = translated
+                parts.append(class_regex)
         else:
             parts.append(re.escape(char))
             index += 1
     return re.compile("".join(parts))
+
+
+def validate_path_glob(glob: str) -> None:
+    """Verifica que el glob se pueda traducir y compilar.
+
+    La traducción es total, así que esta guarda es defensiva: convierte un
+    ``re.error`` inesperado en ``ValueError`` para que la validación de la
+    solicitud responda 422 en vez de fallar con 500 al filtrar.
+    """
+    try:
+        _compile_glob(glob)
+    except re.error as exc:
+        raise ValueError(f"Glob de path_globs inválido: {exc}") from exc
 
 
 def path_matches_glob(path: str, glob: str) -> bool:
