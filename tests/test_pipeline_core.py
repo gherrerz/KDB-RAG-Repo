@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from coderag.core.models import RetrievalChunk, ScannedFile
 from coderag.ingestion.chunker import extract_symbol_chunks
 from coderag.retrieval.context_assembler import assemble_context
@@ -660,6 +662,131 @@ def test_hybrid_search_refreshes_stale_chroma_results_once(
     assert _FakeChroma.reset_calls == 1
     assert ranked
     assert ranked[0].metadata["path"] == "src/providers/AuthProvider.tsx"
+
+
+def _run_weighted_hybrid_search(
+    monkeypatch,
+    settings: SimpleNamespace,
+) -> list:
+    """Ejecuta hybrid_search con un chunk solo vectorial y otro solo léxico."""
+
+    class _FakeEmbedder:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            del texts
+            return [[0.1, 0.2]]
+
+    class _FakeChroma:
+        def query(
+            self,
+            collection_name: str,
+            query_embedding: list[float],
+            top_n: int,
+            where: dict | None = None,
+        ) -> dict:
+            del query_embedding, top_n, where
+            if collection_name != "code_symbols":
+                return {
+                    "ids": [[]],
+                    "documents": [[]],
+                    "metadatas": [[]],
+                    "distances": [[]],
+                }
+            return {
+                "ids": [["vector-only"]],
+                "documents": [["export function Login() {}"]],
+                "metadatas": [[{
+                    "path": "src/vector_only.ts",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "symbol_name": "Login",
+                    "symbol_type": "function",
+                }]],
+                "distances": [[0.0]],
+            }
+
+    lexical_results = [
+        {
+            "id": "lexical-only",
+            "text": "export function Session() {}",
+            "score": 4.0,
+            "metadata": {
+                "path": "src/lexical_only.ts",
+                "start_line": 1,
+                "end_line": 1,
+                "symbol_name": "Session",
+                "symbol_type": "function",
+            },
+        }
+    ]
+    monkeypatch.setattr(hybrid_search_module, "EmbeddingClient", _FakeEmbedder)
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "build_managed_vector_index",
+        lambda: _FakeChroma(),
+    )
+    monkeypatch.setattr(hybrid_search_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "build_repository_lexical_index",
+        lambda settings: _FakeLexicalIndex(lexical_results),
+    )
+    monkeypatch.setattr(
+        hybrid_search_module,
+        "ensure_repository_lexical_index_loaded",
+        lambda index, repo_id: None,
+    )
+    return hybrid_search_module.hybrid_search(
+        repo_id="repo-weights",
+        query="donde se inicia la sesion",
+        top_n=5,
+    )
+
+
+def test_hybrid_search_uses_default_weights_when_settings_omit_them(
+    monkeypatch,
+) -> None:
+    """Sin pesos en Settings se conservan los defaults 0.55 / 0.45."""
+    ranked = _run_weighted_hybrid_search(
+        monkeypatch,
+        SimpleNamespace(postgres_host=""),
+    )
+
+    by_id = {chunk.id: chunk for chunk in ranked}
+    assert ranked[0].id == "vector-only"
+    assert by_id["vector-only"].score - by_id["lexical-only"].score == (
+        pytest.approx(0.55 - 0.45)
+    )
+
+
+def test_hybrid_search_reads_weights_from_settings_at_call_time(
+    monkeypatch,
+) -> None:
+    """Pesos personalizados de Settings cambian el orden de la fusión."""
+    lexical_heavy = _run_weighted_hybrid_search(
+        monkeypatch,
+        SimpleNamespace(
+            postgres_host="",
+            hybrid_vector_weight=0.1,
+            hybrid_lexical_weight=0.9,
+        ),
+    )
+    vector_heavy = _run_weighted_hybrid_search(
+        monkeypatch,
+        SimpleNamespace(
+            postgres_host="",
+            hybrid_vector_weight=1.0,
+            hybrid_lexical_weight=0.0,
+        ),
+    )
+
+    assert lexical_heavy[0].id == "lexical-only"
+    assert vector_heavy[0].id == "vector-only"
+    assert vector_heavy[1].score == pytest.approx(
+        vector_heavy[0].score - 1.0
+    )
 
 
 def test_assemble_context_applies_token_limit() -> None:

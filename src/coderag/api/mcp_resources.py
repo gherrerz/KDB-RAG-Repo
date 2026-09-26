@@ -131,8 +131,10 @@ _CAPABILITIES = """\
 `end_line`, `kind` (`code_chunk` / `file_full` / `module_summary`).
 
 ## Búsqueda híbrida
-Fusión: vector Chroma (peso 0.55) + léxico Postgres FTS (peso 0.45) + ajuste por
-identificadores exactos, luego rerank por intención y expansión de grafo Neo4j
+Fusión: vector Chroma (peso por defecto 0.55) + léxico Postgres FTS (peso por
+defecto 0.45; configurables en el servidor con `HYBRID_VECTOR_WEIGHT` y
+`HYBRID_LEXICAL_WEIGHT`) + ajuste por identificadores exactos, luego rerank
+por intención y expansión de grafo Neo4j
 (CALLS / IMPORTS / EXTENDS / IMPLEMENTS).
 
 No asumas capacidades fuera de esta lista.

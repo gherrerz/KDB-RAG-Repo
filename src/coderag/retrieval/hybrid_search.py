@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 import re
 from typing import Any
-import unicodedata
 
 from coderag.core.lexical_index import (
     build_repository_lexical_index,
@@ -13,7 +12,12 @@ from coderag.core.lexical_index import (
     repository_has_query_ready_lexical_data,
 )
 from coderag.core.models import RetrievalChunk
-from coderag.core.settings import get_settings
+from coderag.core.settings import (
+    DEFAULT_HYBRID_LEXICAL_WEIGHT,
+    DEFAULT_HYBRID_VECTOR_WEIGHT,
+    get_settings,
+)
+from coderag.core.text_folding import normalize_search_text
 from coderag.core.vector_index import build_managed_vector_index
 from coderag.ingestion.embedding import EmbeddingClient
 from coderag.ingestion.index_chroma import ChromaIndex
@@ -21,19 +25,16 @@ from coderag.ingestion.index_chroma import ChromaIndex
 
 VECTOR_COLLECTIONS = ["code_symbols", "code_files", "code_modules"]
 LOGGER = logging.getLogger(__name__)
-VECTOR_WEIGHT = 0.55
-LEXICAL_WEIGHT = 0.45
+# Pesos por defecto de la fusión; los efectivos se leen de Settings
+# (HYBRID_VECTOR_WEIGHT / HYBRID_LEXICAL_WEIGHT) en cada consulta.
+VECTOR_WEIGHT = DEFAULT_HYBRID_VECTOR_WEIGHT
+LEXICAL_WEIGHT = DEFAULT_HYBRID_LEXICAL_WEIGHT
 _EXACT_IDENTIFIER_QUERY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
 
 
 def _normalize_query(query: str) -> str:
     """Normaliza consultas para reducir ruido ortográfico y de espacios."""
-    lowered = query.strip().lower()
-    decomposed = unicodedata.normalize("NFD", lowered)
-    without_marks = "".join(
-        char for char in decomposed if unicodedata.category(char) != "Mn"
-    )
-    return " ".join(without_marks.split())
+    return normalize_search_text(query)
 
 
 def _empty_result() -> dict:
@@ -278,6 +279,12 @@ def hybrid_search(
     )
     normalized_query = _normalize_query(query)
     settings = get_settings()
+    vector_weight = float(
+        getattr(settings, "hybrid_vector_weight", VECTOR_WEIGHT)
+    )
+    lexical_weight = float(
+        getattr(settings, "hybrid_lexical_weight", LEXICAL_WEIGHT)
+    )
     lexical_index = build_repository_lexical_index(settings)
     vector_results: list[dict] = []
     query_embedding: list[float] | None = None
@@ -329,7 +336,7 @@ def hybrid_search(
 
         for item_id, doc, meta, distance in zip(ids, docs, metas, distances):
             score = 1.0 / (1.0 + float(distance))
-            weighted_score = score * VECTOR_WEIGHT
+            weighted_score = score * vector_weight
             scores[item_id] += weighted_score
             fused[item_id] = RetrievalChunk(
                 id=item_id,
@@ -354,7 +361,7 @@ def hybrid_search(
         normalized_lexical = 0.0
         if max_lexical_score > 0:
             normalized_lexical = lexical_score / max_lexical_score
-        weighted_lexical = normalized_lexical * LEXICAL_WEIGHT
+        weighted_lexical = normalized_lexical * lexical_weight
         scores[item_id] += weighted_lexical
         fused[item_id] = RetrievalChunk(
             id=item_id,
