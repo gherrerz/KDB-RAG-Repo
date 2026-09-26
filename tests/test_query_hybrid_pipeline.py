@@ -99,3 +99,100 @@ class _GraphEnrichmentHooks:
     @staticmethod
     def citation_priority(citation):
         return (0, -citation.score)
+
+
+def _seed_hooks(received: list[dict]):
+    """Hooks mínimos: hybrid_search registra kwargs y devuelve un extra."""
+    from coderag.api.query_hybrid_pipeline import HybridSeedPreparationHooks
+
+    def _chunk(chunk_id: str, path: str) -> RetrievalChunk:
+        return RetrievalChunk(
+            id=chunk_id,
+            text="x",
+            score=0.5,
+            metadata={"path": path, "start_line": 1, "end_line": 2},
+        )
+
+    def hybrid_search(**kwargs):
+        received.append(kwargs)
+        return [_chunk("in", "src/a.ts"), _chunk("out", "docs/a.md")]
+
+    return HybridSeedPreparationHooks(
+        hybrid_search=hybrid_search,
+        elapsed_milliseconds=lambda started_at: 0.0,
+        apply_internal_file_importer_seed_boost=(
+            lambda repo_id, query, chunks: (chunks, 0, {}, [])
+        ),
+        apply_external_import_seed_boost=(
+            lambda repo_id, query, chunks: (chunks, 0, {})
+        ),
+        rerank=lambda query, chunks, top_k: chunks,
+        build_internal_file_importer_seed_chunks=(
+            lambda repo_id, matched_paths, chunks: (
+                [_chunk("seed-rev-out", "docs/b.md")],
+                1,
+            )
+        ),
+        build_external_import_seed_chunks=(
+            lambda repo_id, matched_paths, chunks: (
+                [_chunk("seed-ext-in", "src/c.ts")],
+                1,
+            )
+        ),
+    )
+
+
+def test_prepare_hybrid_graph_seed_input_applies_filter_to_seeds() -> None:
+    """Con filtro, ni los chunks ni los seeds de grafo lo incumplen."""
+    from coderag.api.query_hybrid_pipeline import (
+        prepare_hybrid_graph_seed_input,
+    )
+    from coderag.retrieval.retrieval_filter import RetrievalFilter
+
+    received: list[dict] = []
+    retrieval_filter = RetrievalFilter.from_request(["src/**"], None)
+
+    result = prepare_hybrid_graph_seed_input(
+        "repo1",
+        "consulta",
+        10,
+        5,
+        None,
+        None,
+        hooks=_seed_hooks(received),
+        retrieval_filter=retrieval_filter,
+    )
+
+    assert received[0]["retrieval_filter"] is retrieval_filter
+    assert [chunk.id for chunk in result.reranked] == ["in"]
+    assert [chunk.id for chunk in result.graph_seed_input] == [
+        "in",
+        "seed-ext-in",
+    ]
+
+
+def test_prepare_hybrid_graph_seed_input_without_filter_is_unchanged() -> None:
+    """Sin filtro no se envía el kwarg y no se descarta ningún chunk."""
+    from coderag.api.query_hybrid_pipeline import (
+        prepare_hybrid_graph_seed_input,
+    )
+
+    received: list[dict] = []
+
+    result = prepare_hybrid_graph_seed_input(
+        "repo1",
+        "consulta",
+        10,
+        5,
+        None,
+        None,
+        hooks=_seed_hooks(received),
+    )
+
+    assert "retrieval_filter" not in received[0]
+    assert [chunk.id for chunk in result.graph_seed_input] == [
+        "in",
+        "out",
+        "seed-rev-out",
+        "seed-ext-in",
+    ]
