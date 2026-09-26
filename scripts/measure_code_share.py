@@ -248,8 +248,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Fragmentos finales por consulta (por defecto 20).",
     )
     parser.add_argument(
-        "--top-n", type=int, default=60,
-        help="Candidatos antes del reranking (por defecto 60).",
+        "--top-n", type=int, default=100,
+        help=(
+            "Candidatos antes del reranking (por defecto 100, el valor que "
+            "envía hexa-st-be desde STORY-156)."
+        ),
     )
     parser.add_argument(
         "--queries-file",

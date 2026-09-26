@@ -1,9 +1,15 @@
 """Pruebas del reranker heurístico basado en intención de consulta."""
 
+from types import SimpleNamespace
+
+import pytest
+
 from coderag.core.models import RetrievalChunk
+from coderag.retrieval import reranker
 from coderag.retrieval.reranker import (
     _build_query_profile,
     _is_docs_path,
+    _is_documentation_document,
     rerank,
 )
 
@@ -973,3 +979,217 @@ def test_rerank_penalizes_openspec_markdown_like_docs_under_code_intent() -> Non
     assert ranked[0].metadata["path"] == "src/registro/valor.ts"
 
 
+def _chunk(chunk_id: str, path: str, score: float) -> RetrievalChunk:
+    """Crea un chunk mínimo con el score y la ruta indicados."""
+    return RetrievalChunk(
+        id=chunk_id,
+        text="Registro de nuevos usuarios con verificacion.",
+        score=score,
+        metadata={
+            "path": path,
+            "symbol_name": "",
+            "symbol_type": "file",
+            "start_line": 1,
+            "end_line": 5,
+        },
+    )
+
+
+_NEUTRAL_QUERY = "registro de nuevos usuarios con verificacion"
+
+
+def test_rerank_default_docs_penalty_puts_code_before_equal_docs() -> None:
+    """Sin intención documental, código gana a docs con el mismo score."""
+    chunks = [
+        _chunk("spec", "openspec/specs/registro/spec.md", 0.60),
+        _chunk("guide", "docs/registro.md", 0.60),
+        _chunk("notes", "notas/registro.md", 0.60),
+        _chunk("view", "src/routes/Registro.tsx", 0.60),
+        _chunk("logic", "src/registro/verificar.ts", 0.60),
+    ]
+    profile = _build_query_profile(_NEUTRAL_QUERY)
+
+    assert profile.prefers_docs is False
+    assert profile.code_intent is False
+
+    ranked = rerank(
+        query=_NEUTRAL_QUERY,
+        chunks=chunks,
+        top_k=5,
+        default_docs_penalty=0.40,
+    )
+
+    top_two = {item.metadata["path"] for item in ranked[:2]}
+    assert top_two == {"src/routes/Registro.tsx", "src/registro/verificar.ts"}
+
+
+def test_rerank_default_docs_penalty_keeps_docs_first_for_docs_query() -> None:
+    """Con intención documental la penalización no se aplica."""
+    chunks = [
+        _chunk("view", "src/routes/Registro.tsx", 0.62),
+        _chunk("guide", "docs/registro.md", 0.60),
+    ]
+    query = "documentacion del registro de nuevos usuarios"
+
+    assert _build_query_profile(query).prefers_docs is True
+
+    ranked = rerank(
+        query=query,
+        chunks=chunks,
+        top_k=2,
+        default_docs_penalty=0.40,
+    )
+
+    assert ranked[0].metadata["path"] == "docs/registro.md"
+
+
+def test_rerank_zero_default_docs_penalty_restores_previous_order() -> None:
+    """Con penalización 0 el orden es el previo y con 0.40 cambia."""
+    chunks = [
+        _chunk("spec", "openspec/specs/registro/spec.md", 0.66),
+        _chunk("view", "src/routes/Registro.tsx", 0.60),
+    ]
+
+    disabled = rerank(
+        query=_NEUTRAL_QUERY,
+        chunks=[chunk.model_copy() for chunk in chunks],
+        top_k=2,
+        default_docs_penalty=0.0,
+    )
+    enabled = rerank(
+        query=_NEUTRAL_QUERY,
+        chunks=[chunk.model_copy() for chunk in chunks],
+        top_k=2,
+        default_docs_penalty=0.40,
+    )
+
+    assert disabled[0].metadata["path"] == "openspec/specs/registro/spec.md"
+    assert enabled[0].metadata["path"] == "src/routes/Registro.tsx"
+
+
+def test_rerank_reads_default_docs_penalty_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sin argumento, el reranker usa RERANK_DEFAULT_DOCS_PENALTY."""
+    chunks = [
+        _chunk("spec", "openspec/specs/registro/spec.md", 0.66),
+        _chunk("view", "src/routes/Registro.tsx", 0.60),
+    ]
+
+    monkeypatch.setattr(
+        reranker,
+        "get_settings",
+        lambda: SimpleNamespace(rerank_default_docs_penalty=0.0),
+    )
+    disabled = rerank(
+        query=_NEUTRAL_QUERY,
+        chunks=[chunk.model_copy() for chunk in chunks],
+        top_k=2,
+    )
+
+    monkeypatch.setattr(
+        reranker,
+        "get_settings",
+        lambda: SimpleNamespace(rerank_default_docs_penalty=0.40),
+    )
+    enabled = rerank(
+        query=_NEUTRAL_QUERY,
+        chunks=[chunk.model_copy() for chunk in chunks],
+        top_k=2,
+    )
+
+    assert disabled[0].metadata["path"] == "openspec/specs/registro/spec.md"
+    assert enabled[0].metadata["path"] == "src/routes/Registro.tsx"
+
+
+def test_is_documentation_document_covers_folders_and_prose_files() -> None:
+    """Carpetas de docs y extensiones de prosa cuentan como documentos."""
+    assert _is_documentation_document("docs/guia.md") is True
+    assert _is_documentation_document("openspec/specs/x/spec.md") is True
+    assert _is_documentation_document("odd/tasks/plan.md") is True
+    assert _is_documentation_document("notas.rst") is True
+    assert _is_documentation_document("src/routes/Registro.tsx") is False
+    assert _is_documentation_document("requirements.txt") is False
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "guia de instalacion del proyecto",
+        "how do I deploy this project",
+        "tutorial de despliegue",
+    ],
+)
+def test_rerank_documentation_genre_query_skips_default_docs_penalty(
+    query: str,
+) -> None:
+    """Las consultas de género documental no penalizan docs por defecto."""
+    chunks = [
+        _chunk("guide", "notas/instalacion.md", 0.66),
+        _chunk("view", "src/routes/Registro.tsx", 0.60),
+    ]
+    profile = _build_query_profile(query)
+
+    assert profile.documentation_genre_intent is True
+    assert profile.prefers_docs is False
+
+    ranked = rerank(
+        query=query,
+        chunks=chunks,
+        top_k=2,
+        default_docs_penalty=0.40,
+    )
+
+    assert ranked[0].metadata["path"] == "notas/instalacion.md"
+
+
+def test_rerank_non_genre_query_still_gets_default_docs_penalty() -> None:
+    """Una consulta funcional sin género documental sigue penalizando docs."""
+    chunks = [
+        _chunk("guide", "notas/instalacion.md", 0.66),
+        _chunk("view", "src/routes/Registro.tsx", 0.60),
+    ]
+
+    profile = _build_query_profile(_NEUTRAL_QUERY)
+
+    assert profile.documentation_genre_intent is False
+
+    ranked = rerank(
+        query=_NEUTRAL_QUERY,
+        chunks=chunks,
+        top_k=2,
+        default_docs_penalty=0.40,
+    )
+
+    assert ranked[0].metadata["path"] == "src/routes/Registro.tsx"
+
+
+def test_rerank_documentation_genre_does_not_change_other_rankings() -> None:
+    """El género documental solo omite la penalización: no suma bonus."""
+    chunks = [
+        _chunk("guide", "notas/instalacion.md", 0.60),
+        _chunk("view", "src/routes/Registro.tsx", 0.60),
+    ]
+    query = "setup del registro de nuevos usuarios"
+    profile = _build_query_profile(query)
+
+    assert profile.documentation_genre_intent is True
+    with_penalty = rerank(
+        query=query,
+        chunks=[chunk.model_copy() for chunk in chunks],
+        top_k=2,
+        default_docs_penalty=0.40,
+    )
+    without_penalty = rerank(
+        query=query,
+        chunks=[chunk.model_copy() for chunk in chunks],
+        top_k=2,
+        default_docs_penalty=0.0,
+    )
+
+    assert [item.id for item in with_penalty] == [
+        item.id for item in without_penalty
+    ]
+    assert [round(item.score, 6) for item in with_penalty] == [
+        round(item.score, 6) for item in without_penalty
+    ]

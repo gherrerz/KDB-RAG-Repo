@@ -7,6 +7,10 @@ import re
 import unicodedata
 
 from coderag.core.models import RetrievalChunk
+from coderag.core.settings import (
+    DEFAULT_RERANK_DEFAULT_DOCS_PENALTY,
+    get_settings,
+)
 
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
@@ -121,6 +125,31 @@ _DOCUMENTATION_TOKENS = {
     "readme",
     "reference",
 }
+# Vocabulario de "género documental": palabras que piden un documento (guía,
+# instalación, despliegue, manual, etc.) sin activar la intención documental
+# completa. Su ÚNICO efecto es omitir la penalización por defecto de docs; no
+# suma bonus de docs ni cambia ningún otro ranking. Se mantiene corto a
+# propósito: solo términos cuyo destino natural es un documento. Los tokens
+# de la consulta ya vienen sin tildes. "manual" puede ser adjetivo ("prueba
+# manual"); se acepta porque el costo es solo dejar de penalizar docs.
+_DOCUMENTATION_GENRE_TOKENS = {
+    "guia",
+    "guias",
+    "instalacion",
+    "install",
+    "installation",
+    "setup",
+    "deploy",
+    "deployment",
+    "despliegue",
+    "instrucciones",
+    "instructions",
+    "manual",
+    "tutorial",
+    "tutoriales",
+    "changelog",
+    "contributing",
+}
 _CONTEXT_OVERVIEW_TOKENS = {
     "context",
     "contexto",
@@ -156,6 +185,9 @@ _DOC_PATH_SEGMENTS = {
     # Las specs/propuestas de OpenSpec son documentación aunque sean .md.
     "openspec",
 }
+# Extensiones de prosa: un archivo así es documentación aunque viva fuera de
+# ``docs/`` (p. ej. notas de trabajo o planes en la raíz o en ``odd/``).
+_PROSE_FILE_SUFFIXES = (".md", ".mdx", ".rst", ".adoc")
 _EXAMPLE_PATH_SEGMENTS = {
     "demo",
     "examples",
@@ -244,6 +276,7 @@ class QueryProfile:
     prefers_symbol_definitions: bool
     prefers_docs: bool
     prefers_runtime_config: bool
+    documentation_genre_intent: bool = False
 
 
 def _normalize_text(value: str) -> str:
@@ -343,6 +376,7 @@ def _build_query_profile(query: str) -> QueryProfile:
     )
     prefers_docs = documentation_lookup_intent
     prefers_runtime_config = runtime_config_intent
+    documentation_genre_intent = bool(token_set & _DOCUMENTATION_GENRE_TOKENS)
     return QueryProfile(
         raw_query=query,
         normalized_query=normalized_query,
@@ -363,6 +397,7 @@ def _build_query_profile(query: str) -> QueryProfile:
         prefers_symbol_definitions=prefers_symbol_definitions,
         prefers_docs=prefers_docs,
         prefers_runtime_config=prefers_runtime_config,
+        documentation_genre_intent=documentation_genre_intent,
     )
 
 
@@ -395,6 +430,13 @@ def _is_docs_path(path: str) -> bool:
         return True
     segments = [segment for segment in normalized.split("/") if segment]
     return any(segment in _DOC_PATH_SEGMENTS for segment in segments)
+
+
+def _is_documentation_document(path: str) -> bool:
+    """Indica si la ruta es un documento (por carpeta o por extensión)."""
+    if _is_docs_path(path):
+        return True
+    return path.strip().lower().endswith(_PROSE_FILE_SUFFIXES)
 
 
 def _is_example_path(path: str) -> bool:
@@ -617,8 +659,17 @@ def _is_preferred_definition_candidate(
     )
 
 
-def _score_chunk(profile: QueryProfile, chunk: RetrievalChunk) -> float:
-    """Calcula un score heurístico ajustado por intención y tipo de chunk."""
+def _score_chunk(
+    profile: QueryProfile,
+    chunk: RetrievalChunk,
+    default_docs_penalty: float = 0.0,
+) -> float:
+    """Calcula un score heurístico ajustado por intención y tipo de chunk.
+
+    ``default_docs_penalty`` resta ese valor a los documentos cuando la
+    consulta no tiene intención documental (ver ``rerank``). Con ``0`` no
+    cambia nada.
+    """
     metadata = chunk.metadata
     path = str(metadata.get("path", ""))
     symbol_name = str(metadata.get("symbol_name", ""))
@@ -765,6 +816,21 @@ def _score_chunk(profile: QueryProfile, chunk: RetrievalChunk) -> float:
         if test_path and not profile.test_intent:
             score -= 0.55
 
+    if (
+        default_docs_penalty > 0
+        and not profile.prefers_docs
+        and not profile.prefers_symbol_definitions
+        and not profile.prefers_runtime_config
+        and not profile.documentation_genre_intent
+        and _is_documentation_document(path)
+    ):
+        # Comportamiento "código primero" por defecto: sin intención
+        # documental, un spec o README no debería ganarle a un archivo de
+        # código solo por tener más prosa parecida a la consulta. Las
+        # búsquedas de definiciones y de configuración ya demueven docs, y
+        # las de género documental (guía, instalación, etc.) piden docs.
+        score -= default_docs_penalty
+
     if profile.test_intent and test_path:
         score += 0.45
 
@@ -783,18 +849,42 @@ def _diversity_penalty(path_count: int) -> float:
     return 0.80
 
 
+def _resolve_default_docs_penalty() -> float:
+    """Lee la penalización por defecto de docs desde la configuración."""
+    settings = get_settings()
+    return float(
+        getattr(
+            settings,
+            "rerank_default_docs_penalty",
+            DEFAULT_RERANK_DEFAULT_DOCS_PENALTY,
+        )
+    )
+
+
 def rerank(
     query: str,
     chunks: list[RetrievalChunk],
     top_k: int = 10,
+    default_docs_penalty: float | None = None,
 ) -> list[RetrievalChunk]:
-    """Reordena candidatos con heurísticas de intención y diversidad por path."""
+    """Reordena candidatos con heurísticas de intención y diversidad por path.
+
+    Las consultas sin intención documental penalizan los documentos con
+    ``default_docs_penalty``; ``None`` toma ``RERANK_DEFAULT_DOCS_PENALTY``
+    de la configuración y ``0`` desactiva la penalización.
+    """
     if not chunks or top_k <= 0:
         return []
 
+    docs_penalty = (
+        _resolve_default_docs_penalty()
+        if default_docs_penalty is None
+        else default_docs_penalty
+    )
     profile = _build_query_profile(query)
     scored: list[tuple[float, RetrievalChunk]] = [
-        (_score_chunk(profile, chunk), chunk) for chunk in chunks
+        (_score_chunk(profile, chunk, docs_penalty), chunk)
+        for chunk in chunks
     ]
     scored.sort(key=lambda item: item[0], reverse=True)
 

@@ -17,7 +17,9 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
   PASS/FAIL contra `--threshold` (0,5 por defecto) y "ninguna consulta en 0".
   Admite `--languages`, `--path-globs` y `--json-out`; solo falla (código de
   salida distinto de cero) ante errores de transporte. Sirve para medir el AC-7
-  de STORY-156 / KAN-270.
+  de STORY-156 / KAN-270. `--top-n` vale 100 por defecto, el mismo valor que
+  hexa-st-be envía desde STORY-156 (con 60 el promedio medido fue 37,5 % y con
+  100, 57,5 %).
 - `POST /query/retrieval` (y la tool MCP `query_retrieval`) acepta los filtros
   opcionales `path_globs` (globs de ruta relativa; `**` cruza directorios,
   distingue mayúsculas, OR entre globs) y `languages` (lenguaje del archivo,
@@ -82,6 +84,29 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Changed
 
+- Las consultas de "género documental" (`guia`, `instalacion`/`install`,
+  `setup`, `deploy`/`despliegue`, `manual`, `tutorial`, `changelog`,
+  `contributing`, `instrucciones`/`instructions`) omiten la penalización por
+  defecto de documentos de `RERANK_DEFAULT_DOCS_PENALTY`, porque piden un
+  documento aunque no activen la intención documental completa. Es un
+  vocabulario corto y aparte de `_DOCUMENTATION_TOKENS`: su único efecto es
+  omitir esa penalización y no cambia ningún otro ranking. Corrige la
+  regresión detectada al medir consultas como "guía de instalación" o
+  "how do I deploy this project". Parte de STORY-156 / KAN-270.
+- El reranker penaliza por defecto los documentos cuando la consulta no tiene
+  intención documental: rutas `docs/`, `openspec/`, `guides/`, README y
+  archivos `.md`/`.mdx`/`.rst`/`.adoc` pierden `RERANK_DEFAULT_DOCS_PENALTY`
+  puntos de score (default `0.40`, misma escala que las demociones de docs ya
+  existentes de `0.15`/`0.30`/`0.45`). Así un índice se comporta "código
+  primero" en consultas funcionales, por ejemplo títulos de historias sin
+  términos de código, donde los specs ganaban por similitud vectorial. Las
+  consultas con intención documental (`documentación`, `readme`, `guide`,
+  `arquitectura`, etc.) no cambian, y las de definición o configuración no
+  acumulan la penalización porque ya demueven docs. **Cambia el ranking de las
+  consultas sin intención documental:** para volver al orden anterior basta
+  `RERANK_DEFAULT_DOCS_PENALTY=0`. Nueva variable (`>= 0`, se lee en cada
+  consulta; ver `docs/CONFIGURATION.md`), también en `.env.example` y en el
+  configmap base de k8s. Sin reingesta. Parte de STORY-156 / KAN-270.
 - **BREAKING (requiere reingesta):** `LEXICAL_FTS_LANGUAGE` pasa de `english` a
   `simple` por defecto, una configuración de texto neutra (sin stemming ni
   stop-words de un idioma) para que el índice léxico sirva a repositorios en
