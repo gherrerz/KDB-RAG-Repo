@@ -179,6 +179,17 @@ Este formato sigue Keep a Changelog y Semantic Versioning.
 
 ### Fixed
 
+- Readiness (`GET /repos/{id}/status` y el chequeo con que arrancan
+  `POST /query` y `POST /query/retrieval`): el conteo de documentos del
+  repositorio en Chroma paginaba con offset de 500 en 500, así que costaba
+  tiempo proporcional al tamaño del repo y se repetía en cada llamada
+  (`hexa-st-be`, 23.032 símbolos: 3,2 s por llamada; `hexa-st-login`: 0,05 s).
+  Con peticiones simultáneas pasaba de los 10 s que la plataforma da por
+  llamada y los clientes recibían `timeout` (corridas L y M del Run 20). Ahora
+  usa páginas de `READINESS_COUNT_PAGE_SIZE` (50.000) documentos: una sola
+  llamada, el mismo conteo exacto (medido sobre los dos repos y las tres
+  colecciones) y 0,22 s para `code_symbols` de `hexa-st-be`. Los campos de la
+  respuesta (`chroma_counts`, `query_ready`) no cambian ni la búsqueda.
 - `POST /query/retrieval`: los globs de `path_globs` con clases de caracteres
   malformadas (`[!]`, `[z-a]`) hacían fallar `re.compile` al filtrar y el
   cliente recibía `500`. La traducción de `src/coderag/retrieval/retrieval_filter.py`
