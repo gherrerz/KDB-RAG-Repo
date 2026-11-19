@@ -59,6 +59,11 @@ class StoragePreflightError(RuntimeError):
 _CACHE: dict[tuple[str, str | None], dict[str, Any]] = {}
 QUERY_COLLECTIONS = ["code_symbols", "code_files", "code_modules"]
 
+# El conteo de readiness pagina con offset creciente: con paginas de 500, un
+# repo de 23.000 documentos eran 47 llamadas (3,2 s); con una pagina grande es
+# una sola (0,2 s). El numero que devuelve es el mismo, solo cambia el costo.
+READINESS_COUNT_PAGE_SIZE = 50_000
+
 
 def _resolve_embedding_request(
     provider: str | None,
@@ -661,6 +666,7 @@ def _count_query_collections_for_repo(repo_id: str) -> dict[str, int | None]:
         collection_name: _count_chroma_documents_for_repo(
             repo_id=repo_id,
             collection_name=collection_name,
+            page_size=READINESS_COUNT_PAGE_SIZE,
         )
         for collection_name in QUERY_COLLECTIONS
     }
