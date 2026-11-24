@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from coderag.core.settings import resolve_postgres_dsn
+from coderag.core.settings import (
+    DEFAULT_LEXICAL_FTS_LANGUAGE,
+    resolve_postgres_dsn,
+)
 from coderag.storage.postgres_session import PostgresSessionFactory
 
 
@@ -40,7 +43,11 @@ def build_repository_lexical_index(settings: object) -> RepositoryLexicalIndex:
 
     return LexicalStore(
         postgres_dsn,
-        getattr(settings, "lexical_fts_language", "english"),
+        getattr(
+            settings,
+            "lexical_fts_language",
+            DEFAULT_LEXICAL_FTS_LANGUAGE,
+        ),
         session_factory=PostgresSessionFactory.from_settings(settings),
     )
 

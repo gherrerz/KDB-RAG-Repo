@@ -6,7 +6,11 @@ from typing import Any, TypedDict
 
 from sqlalchemy import inspect, text as sql_text
 
-from coderag.core.settings import resolve_postgres_dsn
+from coderag.core.settings import (
+    DEFAULT_LEXICAL_FTS_LANGUAGE,
+    resolve_postgres_dsn,
+)
+from coderag.core.text_folding import accent_translation_tables
 from coderag.storage.postgres_schema import (
     POSTGRES_JOBS_TABLE_NAME,
     POSTGRES_LEXICAL_CORPUS_TABLE_NAME,
@@ -131,6 +135,17 @@ _MIGRATE_LEGACY_REPOS = sql_text(
     """
 )
 
+def _folded_sql(column: str) -> str:
+    """Envuelve una columna en ``translate()`` para plegar tildes en SQL.
+
+    Replica ``fold_accents`` del indexador sin la extensión ``unaccent`` (que
+    exigiría un cambio de esquema). Las tablas de letras no contienen comillas
+    ni ``:``, por lo que son seguras como literales dentro de ``text()``.
+    """
+    source, target = accent_translation_tables()
+    return f"translate(COALESCE({column}, ''), '{source}', '{target}')"
+
+
 _MIGRATE_LEGACY_LEXICAL = sql_text(
     f"""
     INSERT INTO {POSTGRES_LEXICAL_CORPUS_TABLE_NAME} (
@@ -155,9 +170,9 @@ _MIGRATE_LEGACY_LEXICAL = sql_text(
             WHEN metadata IS NULL OR BTRIM(metadata) = '' THEN NULL
             ELSE metadata::jsonb
         END,
-        setweight(to_tsvector(:lang, COALESCE(symbol_name, '')), 'A')
-        || setweight(to_tsvector(:lang, COALESCE(path, '')), 'B')
-        || setweight(to_tsvector(:lang, COALESCE(doc, '')), 'C'),
+        setweight(to_tsvector(:lang, {_folded_sql('symbol_name')}), 'A')
+        || setweight(to_tsvector(:lang, {_folded_sql('path')}), 'B')
+        || setweight(to_tsvector(:lang, {_folded_sql('doc')}), 'C'),
         created_at::timestamptz
     FROM {LEGACY_LEXICAL_CORPUS_TABLE_NAME}
     ON CONFLICT (repo_id, id) DO UPDATE SET
@@ -320,7 +335,10 @@ def run_legacy_postgres_data_migration(settings: object) -> dict[str, Any]:
     migrated_jobs = 0
     migrated_repos = 0
     migrated_lexical_docs = 0
-    fts_language = str(getattr(settings, "lexical_fts_language", "english") or "english")
+    fts_language = str(
+        getattr(settings, "lexical_fts_language", DEFAULT_LEXICAL_FTS_LANGUAGE)
+        or DEFAULT_LEXICAL_FTS_LANGUAGE
+    )
 
     with factory.get_connection() as connection:
         target_counts_before = {

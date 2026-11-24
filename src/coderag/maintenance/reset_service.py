@@ -6,7 +6,11 @@ import stat
 import time
 from pathlib import Path
 
-from coderag.core.settings import get_settings, resolve_postgres_dsn
+from coderag.core.settings import (
+    DEFAULT_LEXICAL_FTS_LANGUAGE,
+    get_settings,
+    resolve_postgres_dsn,
+)
 from coderag.core.vector_index import (
     build_managed_vector_index,
     delete_repository_vector_documents,
@@ -62,7 +66,11 @@ def _reset_postgres_lexical_storage(settings: object) -> tuple[list[str], list[s
 
         LexicalStore(
             postgres_dsn,
-            getattr(settings, "lexical_fts_language", "english"),
+            getattr(
+                settings,
+                "lexical_fts_language",
+                DEFAULT_LEXICAL_FTS_LANGUAGE,
+            ),
             session_factory=PostgresSessionFactory.from_settings(settings),
         ).delete_all()
         cleared.append("LexicalStore Postgres")
@@ -90,7 +98,11 @@ def _delete_repo_postgres_lexical_storage(
 
         lex_deleted = LexicalStore(
             postgres_dsn,
-            getattr(settings, "lexical_fts_language", "english"),
+            getattr(
+                settings,
+                "lexical_fts_language",
+                DEFAULT_LEXICAL_FTS_LANGUAGE,
+            ),
             session_factory=PostgresSessionFactory.from_settings(settings),
         ).delete_repo(repo_id)
         deleted_counts["lexical_docs"] = int(

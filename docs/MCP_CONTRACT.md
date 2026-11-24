@@ -264,6 +264,8 @@ explícitamente en vez de completar con contenido no verificado.
 | `embedding_provider` | `str \| null` | `"vertex"` | Proveedor de embeddings para vectorizar la query. |
 | `embedding_model` | `str \| null` | `"text-embedding-005"` | Modelo de embeddings para vectorizar la query. |
 | `include_context` | `bool` | `false` | Incluye el contexto ensamblado completo del pipeline en la respuesta. |
+| `path_globs` | `list[str] \| null` | `null` | Filtro opcional por globs de ruta relativa al repositorio (hasta 20; `**` cruza directorios, distingue mayúsculas, OR entre globs; en una clase `[!x]` niega y `^` es literal, y una `[` malformada se toma literal). Ningún chunk devuelto lo incumple. |
+| `languages` | `list[str] \| null` | `null` | Filtro opcional por lenguaje (`typescript`, `python`, `markdown`, ...; hasta 20, minúsculas, OR entre valores y AND con `path_globs`). |
 
 **Respuesta** (`RetrievalQueryResponse`):
 

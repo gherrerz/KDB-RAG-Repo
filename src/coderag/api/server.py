@@ -620,7 +620,9 @@ def query_inventory(request: InventoryQueryRequest) -> InventoryQueryResponse:
     summary="Consulta retrieval-only sin LLM",
     description=(
         "Ejecuta retrieval híbrido y retorna evidencia estructurada sin síntesis "
-        "con LLM. Mantiene las validaciones de readiness del repositorio."
+        "con LLM. Mantiene las validaciones de readiness del repositorio. "
+        "Acepta filtros opcionales `path_globs` (globs de ruta) y `languages` "
+        "(lenguaje del archivo): ningún chunk devuelto los incumple."
     ),
     responses={
         422: {
@@ -666,6 +668,8 @@ def query_retrieval(request: RetrievalQueryRequest) -> RetrievalQueryResponse:
         embedding_provider=request.embedding_provider,
         embedding_model=request.embedding_model,
         include_context=request.include_context,
+        path_globs=request.path_globs,
+        languages=request.languages,
     )
 
 

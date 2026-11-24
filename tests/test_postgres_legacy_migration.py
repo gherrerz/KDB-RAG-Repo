@@ -241,3 +241,12 @@ def test_migrates_all_legacy_tables_and_uses_fts_language(monkeypatch) -> None:
         revision="head",
     )
     assert any(params == {"lang": "english"} for _, params in connection.calls)
+
+
+def test_legacy_lexical_migration_folds_accents_in_sql() -> None:
+    """La migración pliega tildes con translate() antes de to_tsvector."""
+    statement = str(postgres_legacy_migration._MIGRATE_LEGACY_LEXICAL)
+
+    assert statement.count("translate(COALESCE(") == 3
+    assert "to_tsvector(:lang, translate(COALESCE(doc, ''), " in statement
+    assert "áéí" in statement or "ÀÁÂ" in statement

@@ -9,6 +9,8 @@ from sqlalchemy import bindparam, delete, func, literal, literal_column
 from sqlalchemy import select, text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB, insert
 
+from coderag.core.settings import DEFAULT_LEXICAL_FTS_LANGUAGE
+from coderag.core.text_folding import fold_accents
 from coderag.storage.postgres_schema import (
     POSTGRES_LEXICAL_CORPUS_TABLE_NAME,
     lexical_corpus_table,
@@ -17,12 +19,17 @@ from coderag.storage.postgres_session import PostgresSessionFactory
 
 
 def _build_weighted_fts_vector() -> Any:
-    """Compone el tsvector pesado que prioriza símbolo, path y contenido."""
+    """Compone el tsvector pesado que prioriza símbolo, path y contenido.
+
+    Las entradas de ``to_tsvector`` son parámetros ``fts_*`` con el texto ya
+    plegado (sin tildes); las columnas visibles (``doc``, ``path``,
+    ``symbol_name``) conservan el texto original.
+    """
     return (
         func.setweight(
             func.to_tsvector(
                 bindparam("lang"),
-                func.coalesce(bindparam("symbol_name"), literal("")),
+                func.coalesce(bindparam("fts_symbol_name"), literal("")),
             ),
             literal_column("'A'"),
         )
@@ -30,7 +37,7 @@ def _build_weighted_fts_vector() -> Any:
             func.setweight(
                 func.to_tsvector(
                     bindparam("lang"),
-                    func.coalesce(bindparam("path"), literal("")),
+                    func.coalesce(bindparam("fts_path"), literal("")),
                 ),
                 literal_column("'B'"),
             )
@@ -39,7 +46,7 @@ def _build_weighted_fts_vector() -> Any:
             func.setweight(
                 func.to_tsvector(
                     bindparam("lang"),
-                    func.coalesce(bindparam("doc"), literal("")),
+                    func.coalesce(bindparam("fts_doc"), literal("")),
                 ),
                 literal_column("'C'"),
             )
@@ -144,7 +151,7 @@ class LexicalStore:
     def __init__(
         self,
         postgres_dsn: str,
-        fts_language: str = "english",
+        fts_language: str = DEFAULT_LEXICAL_FTS_LANGUAGE,
         *,
         session_factory: PostgresSessionFactory | None = None,
     ) -> None:
@@ -167,6 +174,11 @@ class LexicalStore:
         - 'A' (mayor peso): symbol_name
         - 'B': path
         - 'C': contenido del documento
+
+        El tsvector se calcula sobre el texto sin tildes; ``doc`` se persiste
+        y se devuelve sin modificar. El tsvector se guarda al indexar con la
+        configuración activa, así que cambiar ``LEXICAL_FTS_LANGUAGE`` o el
+        plegado exige reingerir los repositorios existentes.
         """
         if not docs:
             return
@@ -186,6 +198,9 @@ class LexicalStore:
                     "entity_type": entity_type,
                     "metadata": dict(meta),
                     "lang": self._lang,
+                    "fts_symbol_name": fold_accents(symbol_name),
+                    "fts_path": fold_accents(path),
+                    "fts_doc": fold_accents(doc),
                 }
             )
 
@@ -202,15 +217,19 @@ class LexicalStore:
 
         El shape de retorno es compatible con el contrato léxico legacy:
         [{"id": ..., "text": ..., "score": ..., "metadata": {...}}]
+
+        La consulta se pliega (sin tildes) de forma idempotente, para coincidir
+        con el texto plegado al indexar aunque el llamador no lo haya hecho.
         """
         if not text.strip():
             return []
+        folded_text = fold_accents(text)
         with self._session_factory.get_connection() as connection:
             rows = connection.execute(
                 _QUERY_LEXICAL_DOCUMENTS,
                 {
                     "lang": self._lang,
-                    "text": text,
+                    "text": folded_text,
                     "repo_id": repo_id,
                     "top_n": top_n,
                 },

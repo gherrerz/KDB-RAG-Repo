@@ -29,10 +29,10 @@ from mcp.types import (
 
 _QUERY_REPO_GUIDE = """\
 Vas a responder una pregunta sobre el repositorio **{repo_id}** usando la tool MCP \
-`query_repo`. Esta tool ejecuta Hybrid RAG (vector Chroma 0.55 + léxico Postgres \
-0.45 + expansión de grafo Neo4j), rerankea por intención y **sintetiza una \
-respuesta con un LLM**, devolviendo `answer` + `citations` (path, start_line, \
-end_line, score, reason) + `diagnostics`.
+`query_repo`. Esta tool ejecuta Hybrid RAG (vector Chroma + léxico Postgres, con \
+pesos configurables en el servidor, + expansión de grafo Neo4j), rerankea \
+por intención y **sintetiza una respuesta con un LLM**, devolviendo `answer` + \
+`citations` (path, start_line, end_line, score, reason) + `diagnostics`.
 
 Antes de llamar:
 1. Confirma que `{repo_id}` está `query_ready=true` leyendo el resource \
@@ -87,7 +87,9 @@ verificada.
 Parámetros: `top_n` (60) y `top_k` (20) igual que en `query_repo`. \
 `embedding_provider`/`embedding_model` deben coincidir con la ingesta. Pon \
 `include_context=true` solo si necesitas el contexto ensamblado completo en el \
-campo `context` (más tokens).
+campo `context` (más tokens). Para acotar la evidencia usa `path_globs` (por \
+ejemplo `src/**/*.tsx`) y/o `languages` (por ejemplo `typescript`): ningún \
+chunk devuelto los incumple.
 
 Requisitos y fraseo: idénticos a `query_repo` — verifica `query_ready` primero \
 (resource `rag://repos/{repo_id}/status`); un repo no listo devuelve 422. El mismo \

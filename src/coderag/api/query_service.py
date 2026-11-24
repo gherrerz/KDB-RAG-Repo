@@ -43,6 +43,7 @@ from coderag.retrieval.context_assembler import assemble_context
 from coderag.retrieval.graph_expand import expand_with_graph, expand_with_graph_with_diagnostics
 from coderag.retrieval.hybrid_search import hybrid_search
 from coderag.retrieval.reranker import rerank
+from coderag.retrieval.retrieval_filter import RetrievalFilter
 
 
 _fallback_header = citation_presentation_service.fallback_header
@@ -985,6 +986,7 @@ def _prepare_hybrid_graph_seed_input(
     top_k: int,
     embedding_provider: str | None,
     embedding_model: str | None,
+    retrieval_filter: RetrievalFilter | None = None,
 ) -> query_hybrid_pipeline_service.HybridGraphSeedInput:
     """Ejecuta la preparación híbrida común hasta el input de expansión."""
     return query_hybrid_pipeline_service.prepare_hybrid_graph_seed_input(
@@ -995,6 +997,7 @@ def _prepare_hybrid_graph_seed_input(
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,
         hooks=_hybrid_seed_preparation_hooks(),
+        retrieval_filter=retrieval_filter,
     )
 
 
@@ -1079,6 +1082,71 @@ def _resolve_graph_first_inventory_route(
     )
 
 
+def _enforce_retrieval_filter_on_response(
+    response: RetrievalQueryResponse,
+    retrieval_filter: RetrievalFilter,
+    query: str,
+    max_context_tokens: int,
+) -> RetrievalQueryResponse:
+    """Garantiza que una respuesta ya construida cumpla ruta y lenguaje.
+
+    Se usa en los atajos graph-first y de componente, que no pasan por
+    ``hybrid_search``. Si algún chunk o cita incumple el filtro se descartan y
+    ``answer``/``context`` se reconstruyen solo con la evidencia que queda, de
+    modo que el texto excluido por el filtro no se filtre por esos campos.
+    """
+    kept_chunks = [
+        chunk
+        for chunk in response.chunks
+        if retrieval_filter.matches_metadata(
+            {**chunk.metadata, "path": chunk.path}
+        )
+    ]
+    kept_citations = [
+        citation
+        for citation in response.citations
+        if retrieval_filter.matches_path_only_entry(citation.path)
+    ]
+    dropped = len(response.chunks) - len(kept_chunks)
+    diagnostics = dict(response.diagnostics)
+    diagnostics["retrieval_filter"] = {
+        **retrieval_filter.describe(),
+        "dropped_chunks": dropped,
+    }
+    if dropped == 0 and len(kept_citations) == len(response.citations):
+        return response.model_copy(update={"diagnostics": diagnostics})
+
+    context = response.context
+    if context is not None:
+        context = assemble_context(
+            chunks=[
+                RetrievalChunk(
+                    id=chunk.id,
+                    text=chunk.text,
+                    score=chunk.score,
+                    metadata=chunk.metadata,
+                )
+                for chunk in kept_chunks
+            ],
+            graph_records=[],
+            max_tokens=max_context_tokens,
+        )
+        diagnostics["context_chars"] = len(context)
+    diagnostics["returned_citations"] = len(kept_citations)
+    return response.model_copy(
+        update={
+            "answer": _build_retrieval_answer(kept_chunks, query),
+            "chunks": kept_chunks,
+            "citations": kept_citations,
+            "statistics": response.statistics.model_copy(
+                update={"total_after_rerank": len(kept_chunks)}
+            ),
+            "diagnostics": diagnostics,
+            "context": context,
+        }
+    )
+
+
 def run_retrieval_query(
     repo_id: str,
     query: str,
@@ -1087,9 +1155,19 @@ def run_retrieval_query(
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
     include_context: bool = False,
+    path_globs: list[str] | None = None,
+    languages: list[str] | None = None,
 ) -> RetrievalQueryResponse:
-    """Ejecuta retrieval híbrido sin síntesis LLM y retorna evidencia estructurada."""
+    """Ejecuta retrieval híbrido sin LLM y retorna evidencia estructurada.
+
+    ``path_globs`` y ``languages`` restringen la evidencia devuelta (ver
+    ``coderag.retrieval.retrieval_filter``); sin ellos el flujo no cambia.
+    Ningún chunk ni cita devueltos incumple el filtro: se reaplica tras la
+    expansión de grafo y tras los atajos graph-first y de componente.
+    """
     settings = get_settings()
+    retrieval_filter = RetrievalFilter.from_request(path_globs, languages)
+    max_context_tokens = int(getattr(settings, "max_context_tokens", 8000))
     inventory_page_size = int(getattr(settings, "inventory_page_size", 80))
     inventory_response, _, _, _ = _resolve_graph_first_inventory_route(
         repo_id=repo_id,
@@ -1097,16 +1175,26 @@ def run_retrieval_query(
         page_size=inventory_page_size,
     )
     if inventory_response is not None:
-        return _build_retrieval_inventory_response(
+        inventory_result = _build_retrieval_inventory_response(
             inventory_response=inventory_response,
             include_context=include_context,
         )
+        if retrieval_filter is None:
+            return inventory_result
+        return _enforce_retrieval_filter_on_response(
+            inventory_result, retrieval_filter, query, max_context_tokens
+        )
 
     if _is_component_code_query(query):
-        return _build_component_retrieval_response(
+        component_result = _build_component_retrieval_response(
             repo_id=repo_id,
             query=query,
             include_context=include_context,
+        )
+        if retrieval_filter is None:
+            return component_result
+        return _enforce_retrieval_filter_on_response(
+            component_result, retrieval_filter, query, max_context_tokens
         )
 
     budget_seconds = max(1.0, float(settings.query_max_seconds))
@@ -1124,6 +1212,7 @@ def run_retrieval_query(
         top_k=top_k,
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,
+        retrieval_filter=retrieval_filter,
     )
     stage_timings = dict(hybrid_pipeline.stage_timings)
 
@@ -1132,6 +1221,10 @@ def run_retrieval_query(
         chunks=hybrid_pipeline.graph_seed_input,
         query=query,
     )
+    if retrieval_filter is not None:
+        # La expansión puede traer archivos vecinos fuera del filtro: se
+        # descartan antes de derivar boosts, citas y contexto.
+        graph_context = retrieval_filter.filter_graph_records(graph_context)
     stage_timings["graph_expand_ms"] = _elapsed_milliseconds(graph_started_at)
     graph_enrichment = _finalize_graph_enrichment(
         reranked=hybrid_pipeline.reranked,
@@ -1157,6 +1250,28 @@ def run_retrieval_query(
         reranked=graph_enrichment.reranked,
     )
     semantic_expand_diagnostics = graph_enrichment.semantic_expand_diagnostics
+    raw_citations = graph_enrichment.raw_citations
+    filtered_citations = graph_enrichment.filtered_citations
+    citations = graph_enrichment.citations
+    if retrieval_filter is not None:
+        # Garantía final: el refinamiento de span y las citas de grafo no
+        # pueden reintroducir evidencia fuera de ruta/lenguaje.
+        reranked = retrieval_filter.filter_chunks(reranked)
+        raw_citations = [
+            item
+            for item in raw_citations
+            if retrieval_filter.matches_path_only_entry(item.path)
+        ]
+        filtered_citations = [
+            item
+            for item in filtered_citations
+            if retrieval_filter.matches_path_only_entry(item.path)
+        ]
+        citations = [
+            item
+            for item in citations
+            if retrieval_filter.matches_path_only_entry(item.path)
+        ]
 
     context: str | None = None
     context_chars = 0
@@ -1169,10 +1284,6 @@ def run_retrieval_query(
         )
         stage_timings["context_assembly_ms"] = _elapsed_milliseconds(context_started_at)
         context_chars = len(context)
-
-    raw_citations = graph_enrichment.raw_citations
-    filtered_citations = graph_enrichment.filtered_citations
-    citations = graph_enrichment.citations
 
     chunks: list[RetrievedChunk] = []
     for item in reranked:
@@ -1213,6 +1324,8 @@ def run_retrieval_query(
         **common_diagnostics_args,
         fallback_reason=None,
     )
+    if retrieval_filter is not None:
+        diagnostics["retrieval_filter"] = retrieval_filter.describe()
 
     return RetrievalQueryResponse(
         mode="retrieval_only",
